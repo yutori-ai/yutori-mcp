@@ -15,13 +15,7 @@ Get your API key from [yutori.com](https://yutori.com).
 ### Claude Code
 
 ```bash
-claude mcp add yutori -- uvx yutori-mcp
-```
-
-Then set your API key:
-
-```bash
-claude mcp add-env yutori YUTORI_API_KEY=sk-your-api-key
+claude mcp add yutori --env YUTORI_API_KEY=sk-your-api-key -- uvx yutori-mcp
 ```
 
 ### Claude Desktop
