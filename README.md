@@ -10,24 +10,18 @@ An MCP server for [Yutori](https://yutori.com) - web monitoring and browsing aut
 
 ## Installation
 
-### Using pip
+Get your API key from [yutori.com](https://yutori.com).
+
+### Claude Code
 
 ```bash
-pip install yutori-mcp
+claude mcp add yutori -- uvx yutori-mcp
 ```
 
-### Using uvx (recommended)
+Then set your API key:
 
 ```bash
-uvx yutori-mcp
-```
-
-## Configuration
-
-Set your API key as an environment variable:
-
-```bash
-export YUTORI_API_KEY=sk-your-api-key
+claude mcp add-env yutori YUTORI_API_KEY=sk-your-api-key
 ```
 
 ### Claude Desktop
@@ -46,6 +40,71 @@ Add to your `claude_desktop_config.json`:
     }
   }
 }
+```
+
+### Cursor
+
+Go to Cursor Settings → MCP → Add new MCP Server, then add:
+
+```json
+{
+  "mcpServers": {
+    "yutori": {
+      "command": "uvx",
+      "args": ["yutori-mcp"],
+      "env": {
+        "YUTORI_API_KEY": "sk-your-api-key"
+      }
+    }
+  }
+}
+```
+
+### VS Code
+
+```bash
+code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"],"envFile":"path/to/.env"}'
+```
+
+### Codex
+
+```bash
+codex mcp add yutori -- uvx yutori-mcp
+```
+
+Or add to `~/.codex/config.yaml`:
+
+```yaml
+mcp_servers:
+  yutori:
+    command: uvx
+    args: ["yutori-mcp"]
+    env:
+      YUTORI_API_KEY: "sk-your-api-key"
+```
+
+### Gemini CLI
+
+Add to `~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "yutori": {
+      "command": "uvx",
+      "args": ["yutori-mcp"],
+      "env": {
+        "YUTORI_API_KEY": "sk-your-api-key"
+      }
+    }
+  }
+}
+```
+
+### Using pip
+
+```bash
+pip install yutori-mcp
 ```
 
 ## Tools
