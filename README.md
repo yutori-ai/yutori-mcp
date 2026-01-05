@@ -107,10 +107,20 @@ pip install yutori-mcp
 
 #### list_scouts
 
-List all scouts for the authenticated user.
+List all scouts for the user (basic metadata only). 
 
 ```json
 {}
+```
+
+#### get_scout_detail
+
+Get detailed information for a specific scout.
+
+```json
+{
+  "scout_id": "abc123-..."
+}
 ```
 
 #### create_scout
@@ -250,7 +260,7 @@ Returns:
 
 ### Account Operations
 
-#### get_usage
+#### list_api_usage
 
 Get usage statistics.
 
@@ -264,7 +274,7 @@ Tools include hints for client behavior:
 
 | Tool | Annotation |
 |------|------------|
-| `list_scouts`, `get_scout_updates`, `get_usage`, `get_browsing_task_result` | `readOnlyHint: true` |
+| `list_scouts`, `get_scout_detail`, `get_scout_updates`, `list_api_usage`, `get_browsing_task_result` | `readOnlyHint: true` |
 | `pause_scout`, `resume_scout`, `complete_scout` | `idempotentHint: true` |
 | `delete_scout` | `destructiveHint: true` |
 
