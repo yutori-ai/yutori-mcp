@@ -63,6 +63,7 @@ code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"],"envFile"
 ### Codex
 
 ```bash
+export YUTORI_API_KEY=sk-your-api-key
 codex mcp add yutori -- uvx yutori-mcp
 ```
 
