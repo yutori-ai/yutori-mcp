@@ -63,19 +63,25 @@ code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"],"envFile"
 ### Codex
 
 ```bash
+codex mcp add yutori --env YUTORI_API_KEY=sk-your-api-key -- uvx yutori-mcp
+```
+
+Or set the environment first:
+
+```bash
 export YUTORI_API_KEY=sk-your-api-key
 codex mcp add yutori -- uvx yutori-mcp
 ```
 
-Or add to `~/.codex/config.yaml`:
+Or add to `~/.codex/config.toml`:
 
-```yaml
-mcp_servers:
-  yutori:
-    command: uvx
-    args: ["yutori-mcp"]
-    env:
-      YUTORI_API_KEY: "sk-your-api-key"
+```toml
+[mcp_servers.yutori]
+command = "uvx"
+args = ["yutori-mcp"]
+
+[mcp_servers.yutori.env]
+YUTORI_API_KEY = "sk-your-api-key"
 ```
 
 ### Gemini CLI
