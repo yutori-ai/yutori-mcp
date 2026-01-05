@@ -53,7 +53,7 @@ class YutoriClient:
     # -------------------------------------------------------------------------
 
     def list_scouts(self) -> dict[str, Any]:
-        """List all scouts for the authenticated user."""
+        """List all scouts for the authenticated user (basic metadata only)."""
         return self._request("GET", "/scouting/tasks")
 
     def create_scout(
@@ -123,6 +123,10 @@ class YutoriClient:
     def delete_scout(self, scout_id: str) -> dict[str, Any]:
         """Permanently delete a scout."""
         return self._request("DELETE", f"/scouting/tasks/{scout_id}")
+
+    def get_scout_detail(self, scout_id: str) -> dict[str, Any]:
+        """Get detailed information for a specific scout."""
+        return self._request("GET", f"/scouting/tasks/{scout_id}")
 
     def get_scout_updates(
         self,

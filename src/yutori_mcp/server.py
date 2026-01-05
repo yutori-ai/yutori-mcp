@@ -26,8 +26,17 @@ TOOLS = [
     # Read operations
     Tool(
         name="list_scouts",
-        description="List all scouts for the authenticated user. Returns scout IDs, queries, and status.",
+        description=(
+            "List all scouts for the authenticated user. "
+            "Returns basic metadata; use get_scout_detail for full fields."
+        ),
         inputSchema={"type": "object", "properties": {}, "required": []},
+        annotations={"readOnlyHint": True},
+    ),
+    Tool(
+        name="get_scout_detail",
+        description="Get detailed information about a specific scout.",
+        inputSchema=ScoutIdInput.model_json_schema(),
         annotations={"readOnlyHint": True},
     ),
     Tool(
@@ -37,8 +46,8 @@ TOOLS = [
         annotations={"readOnlyHint": True},
     ),
     Tool(
-        name="get_usage",
-        description="Get usage statistics for the authenticated API key, including number of active scouts.",
+        name="list_api_usage",
+        description="Get usage statistics for the authenticated API key.",
         inputSchema={"type": "object", "properties": {}, "required": []},
         annotations={"readOnlyHint": True},
     ),
@@ -127,6 +136,9 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> dict:
         # Read operations
         case "list_scouts":
             return client.list_scouts()
+        case "get_scout_detail":
+            params = ScoutIdInput(**arguments)
+            return client.get_scout_detail(params.scout_id)
         case "get_scout_updates":
             params = GetUpdatesInput(**arguments)
             return client.get_scout_updates(
@@ -134,7 +146,7 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> dict:
                 cursor=params.cursor,
                 limit=params.limit,
             )
-        case "get_usage":
+        case "list_api_usage":
             return client.get_usage()
 
         # Scout lifecycle
