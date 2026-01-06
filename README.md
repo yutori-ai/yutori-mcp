@@ -56,6 +56,8 @@ For setup details, see the [Claude Desktop MCP install guide](https://modelconte
 
 [<img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Install in Cursor">](https://cursor.com/en/install-mcp?name=Yutori&config=eyJjb21tYW5kIjoidXZ4IHl1dG9yaS1tY3AifQ%3D%3D)
 
+The Cursor install button does not support env vars, so you must set `YUTORI_API_KEY` manually after install.
+
 Set `YUTORI_API_KEY` in your environment before first use.
 
 #### Or install manually:
