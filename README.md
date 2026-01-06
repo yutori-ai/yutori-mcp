@@ -24,7 +24,7 @@ brew install uv
 
 Get your API key from [yutori.com/api](https://yutori.com/api).
 
-<details>
+<details open>
 <summary>Claude Code</summary>
 
 ```bash
@@ -104,7 +104,7 @@ code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"],"envFile"
 ```
 </details>
 
-<details>
+<details open>
 <summary>Codex</summary>
 
 ```bash
@@ -169,6 +169,34 @@ List all scouts for the user (basic metadata only).
 {}
 ```
 
+Example response:
+
+```json
+{
+  "scouts": [
+    {
+      "id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
+      "query": "latest news and product updates about Yutori",
+      "status": "active",
+      "output_interval": 86400,
+      "last_run_at": "2025-02-12T16:10:24Z",
+      "next_run_at": "2025-02-13T16:10:24Z",
+      "created_at": "2025-02-01T19:02:11Z"
+    },
+    {
+      "id": "8a1c9d02-7c0d-4d27-8a1e-3bf7d2ed9a3c",
+      "query": "H100 pricing per hour drops below $1.50",
+      "status": "paused",
+      "output_interval": 43200,
+      "last_run_at": "2025-02-10T05:34:10Z",
+      "next_run_at": null,
+      "created_at": "2025-01-17T03:41:55Z"
+    }
+  ],
+  "next_cursor": null
+}
+```
+
 #### get_scout_detail
 
 Get detailed information for a specific scout.
@@ -176,6 +204,42 @@ Get detailed information for a specific scout.
 ```json
 {
   "scout_id": "abc123-..."
+}
+```
+
+Example response:
+
+```json
+{
+  "id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
+  "query": "latest news and product updates about Yutori",
+  "status": "active",
+  "output_interval": 86400,
+  "webhook_url": "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
+  "webhook_format": "slack",
+  "task_spec": {
+    "type": "object",
+    "properties": {
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string" },
+            "url": { "type": "string" }
+          },
+          "required": ["title", "url"]
+        }
+      }
+    },
+    "required": ["items"]
+  },
+  "user_timezone": "America/Los_Angeles",
+  "skip_email": false,
+  "created_at": "2025-02-01T19:02:11Z",
+  "updated_at": "2025-02-12T16:10:24Z",
+  "last_run_at": "2025-02-12T16:10:24Z",
+  "next_run_at": "2025-02-13T16:10:24Z"
 }
 ```
 
@@ -189,6 +253,21 @@ Create a new monitoring scout for continuous web monitoring. Scouts track change
   "output_interval": 86400,
   "webhook_url": "https://hooks.slack.com/...",
   "webhook_format": "slack"
+}
+```
+
+Example response:
+
+```json
+{
+  "id": "c3b2e9a1-4e9b-4d87-9a5c-45e0f6f7a8c9",
+  "query": "Tell me about the latest news, product updates, or announcements about Yutori",
+  "status": "active",
+  "output_interval": 86400,
+  "webhook_url": "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
+  "webhook_format": "slack",
+  "created_at": "2025-02-12T18:01:07Z",
+  "next_run_at": "2025-02-13T18:01:07Z"
 }
 ```
 
@@ -218,6 +297,18 @@ Update an existing scout.
 }
 ```
 
+Example response:
+
+```json
+{
+  "id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
+  "query": "latest news and product updates about Yutori",
+  "status": "active",
+  "output_interval": 43200,
+  "updated_at": "2025-02-12T18:05:22Z"
+}
+```
+
 #### pause_scout
 
 Pause a running scout.
@@ -225,6 +316,16 @@ Pause a running scout.
 ```json
 {
   "scout_id": "abc123-..."
+}
+```
+
+Example response:
+
+```json
+{
+  "id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
+  "status": "paused",
+  "paused_at": "2025-02-12T18:06:10Z"
 }
 ```
 
@@ -238,6 +339,16 @@ Resume a paused scout.
 }
 ```
 
+Example response:
+
+```json
+{
+  "id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
+  "status": "active",
+  "resumed_at": "2025-02-12T18:07:02Z"
+}
+```
+
 #### complete_scout
 
 Mark a scout as complete (archive).
@@ -245,6 +356,16 @@ Mark a scout as complete (archive).
 ```json
 {
   "scout_id": "abc123-..."
+}
+```
+
+Example response:
+
+```json
+{
+  "id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
+  "status": "completed",
+  "completed_at": "2025-02-12T18:07:55Z"
 }
 ```
 
@@ -258,6 +379,15 @@ Permanently delete a scout. **This cannot be undone.**
 }
 ```
 
+Example response:
+
+```json
+{
+  "id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
+  "deleted": true
+}
+```
+
 #### get_scout_updates
 
 Get paginated updates from a scout.
@@ -266,6 +396,38 @@ Get paginated updates from a scout.
 {
   "scout_id": "abc123-...",
   "limit": 10
+}
+```
+
+Example response:
+
+```json
+{
+  "updates": [
+    {
+      "id": "upd_3b6a5f7c-0f2a-4f48-9b21-0b6f5e3c2d1a",
+      "scout_id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
+      "status": "succeeded",
+      "created_at": "2025-02-12T16:10:24Z",
+      "summary": "Found 2 new mentions of Yutori product updates.",
+      "result": "- Yutori launches new monitoring UI\\n- Yutori adds webhook retries",
+      "structured_result": {
+        "items": [
+          {
+            "title": "Yutori launches new monitoring UI",
+            "url": "https://yutori.com/blog/monitoring-ui",
+            "source": "yutori.com"
+          },
+          {
+            "title": "Yutori adds webhook retries",
+            "url": "https://yutori.com/blog/webhook-retries",
+            "source": "yutori.com"
+          }
+        ]
+      }
+    }
+  ],
+  "next_cursor": null
 }
 ```
 
@@ -299,6 +461,16 @@ Example tasks:
 
 Returns a `task_id` for polling status.
 
+Example response:
+
+```json
+{
+  "task_id": "browse_5a6c9d3e-8c2f-4e2f-9a2a-7c8f9e1d2c3b",
+  "status": "queued",
+  "created_at": "2025-02-12T18:02:31Z"
+}
+```
+
 #### get_browsing_task_result
 
 Poll for the status and result of a browsing task. Call this after `run_browsing_task` until status is `succeeded` or `failed`.
@@ -314,6 +486,22 @@ Returns:
 - `result`: Text result (when complete)
 - `structured_result`: JSON result (if `task_spec` was provided)
 
+Example response:
+
+```json
+{
+  "task_id": "browse_5a6c9d3e-8c2f-4e2f-9a2a-7c8f9e1d2c3b",
+  "status": "succeeded",
+  "result": "Found 2 employees on the team page.",
+  "structured_result": {
+    "employees": [
+      { "name": "Jane Doe", "title": "CEO" },
+      { "name": "Alex Kim", "title": "CTO" }
+    ]
+  }
+}
+```
+
 ### Account Operations
 
 #### list_api_usage
@@ -322,6 +510,19 @@ Get usage statistics.
 
 ```json
 {}
+```
+
+Example response:
+
+```json
+{
+  "period_start": "2025-02-01",
+  "period_end": "2025-02-29",
+  "requests": 128,
+  "scout_runs": 42,
+  "browsing_tasks": 7,
+  "credits_used": 93.5
+}
 ```
 
 ## Tool Annotations
