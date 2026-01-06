@@ -82,13 +82,6 @@ code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"],"envFile"
 codex mcp add yutori --env YUTORI_API_KEY=sk-your-api-key -- uvx yutori-mcp
 ```
 
-Or set the environment first:
-
-```bash
-export YUTORI_API_KEY=sk-your-api-key
-codex mcp add yutori -- uvx yutori-mcp
-```
-
 Or add to `~/.codex/config.toml`:
 
 ```toml
