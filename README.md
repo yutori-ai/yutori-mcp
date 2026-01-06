@@ -24,13 +24,16 @@ brew install uv
 
 Get your API key from [yutori.com/api](https://yutori.com/api).
 
-### Claude Code
+<details>
+<summary>Claude Code</summary>
 
 ```bash
 claude mcp add yutori --env YUTORI_API_KEY=sk-your-api-key -- uvx yutori-mcp
 ```
+</details>
 
-### Claude Desktop
+<details>
+<summary>Claude Desktop</summary>
 
 Add to your `claude_desktop_config.json`:
 
@@ -49,10 +52,12 @@ Add to your `claude_desktop_config.json`:
 ```
 
 For setup details, see the [Claude Desktop MCP install guide](https://modelcontextprotocol.io/docs/develop/connect-local-servers).
+</details>
 
-### Cursor
+<details>
+<summary>Cursor</summary>
 
-#### Click the button to install:
+**Click the button to install:**
 
 [<img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Install in Cursor">](https://cursor.com/en/install-mcp?name=Yutori&config=eyJjb21tYW5kIjoidXZ4IHl1dG9yaS1tY3AifQ%3D%3D)
 
@@ -62,7 +67,7 @@ Set `YUTORI_API_KEY` in the server env settings (Cursor Settings → MCP), then 
 
 ![Cursor MCP server env settings](images/cursor-mcp-settings.png)
 
-#### Or install manually:
+**Or install manually:**
 
 Go to Cursor Settings → MCP → Add new MCP Server, then add:
 
@@ -81,22 +86,26 @@ Go to Cursor Settings → MCP → Add new MCP Server, then add:
 ```
 
 See the [Cursor MCP guide](https://cursor.com/docs/context/mcp) for setup details.
+</details>
 
-### VS Code
+<details>
+<summary>VS Code</summary>
 
-#### Click the button to install:
+**Click the button to install:**
 
 [<img src="https://img.shields.io/badge/VS_Code-VS_Code?style=flat-square&label=Install%20Server&color=0098FF" alt="Install in VS Code">](https://insiders.vscode.dev/redirect?url=vscode%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522yutori%2522%252C%2522command%2522%253A%2522uvx%2522%252C%2522args%2522%253A%255B%2522yutori-mcp%2522%255D%257D) [<img alt="Install in VS Code Insiders" src="https://img.shields.io/badge/VS_Code_Insiders-VS_Code_Insiders?style=flat-square&label=Install%20Server&color=24bfa5">](https://insiders.vscode.dev/redirect?url=vscode-insiders%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522yutori%2522%252C%2522command%2522%253A%2522uvx%2522%252C%2522args%2522%253A%255B%2522yutori-mcp%2522%255D%257D)
 
 Set `YUTORI_API_KEY` in your environment before first use.
 
-#### Or install manually:
+**Or install manually:**
 
 ```bash
 code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"],"envFile":"path/to/.env"}'
 ```
+</details>
 
-### Codex
+<details>
+<summary>Codex</summary>
 
 ```bash
 codex mcp add yutori --env YUTORI_API_KEY=sk-your-api-key -- uvx yutori-mcp
@@ -112,8 +121,10 @@ args = ["yutori-mcp"]
 [mcp_servers.yutori.env]
 YUTORI_API_KEY = "sk-your-api-key"
 ```
+</details>
 
-### Gemini CLI
+<details>
+<summary>Gemini CLI</summary>
 
 Add to `~/.gemini/settings.json`:
 
@@ -136,12 +147,15 @@ Add to `~/.gemini/settings.json`:
 ```
 
 For more details, see the [Gemini CLI MCP settings guide](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md#configure-the-mcp-server-in-settingsjson).
+</details>
 
-### Using pip
+<details>
+<summary>Using pip</summary>
 
 ```bash
 pip install yutori-mcp
 ```
+</details>
 
 ## Tools
 
