@@ -48,6 +48,8 @@ Add to your `claude_desktop_config.json`:
 }
 ```
 
+For setup details, see the [Claude Desktop MCP install guide](https://modelcontextprotocol.io/docs/develop/connect-local-servers).
+
 ### Cursor
 
 #### Click the button to install:
