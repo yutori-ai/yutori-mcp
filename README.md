@@ -100,7 +100,7 @@ Add to `~/.gemini/settings.json`:
 ```json
 { ...file contains other config objects
   "mcp": {
-    "allowed": ["yutori"]
+    "allowed": ["yutori", "-> keep other MCPs you already allow"]
   },
   "mcpServers": {
     "yutori": {
