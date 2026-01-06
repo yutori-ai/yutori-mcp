@@ -22,7 +22,7 @@ Or with Homebrew:
 brew install uv
 ```
 
-Get your API key from [yutori.com](https://yutori.com).
+Get your API key from [yutori.com/api](https://yutori.com/api).
 
 ### Claude Code
 
