@@ -115,7 +115,7 @@ Add to `~/.gemini/settings.json`:
 }
 ```
 
-For more details, see https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md#configure-the-mcp-server-in-settingsjson.
+For more details, see the [Gemini CLI MCP settings guide](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md#configure-the-mcp-server-in-settingsjson).
 
 ### Using pip
 
