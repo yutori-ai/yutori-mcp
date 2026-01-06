@@ -98,7 +98,10 @@ YUTORI_API_KEY = "sk-your-api-key"
 Add to `~/.gemini/settings.json`:
 
 ```json
-{
+{ ...file contains other config objects
+  "mcp": {
+    "allowed": ["yutori"]
+  },
   "mcpServers": {
     "yutori": {
       "command": "uvx",
