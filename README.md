@@ -28,7 +28,7 @@ Get your API key from [yutori.com/api](https://yutori.com/api).
 <summary>Claude Code</summary>
 
 ```bash
-claude mcp add yutori --env YUTORI_API_KEY=sk-your-api-key -- uvx yutori-mcp
+claude mcp add yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
 ```
 </details>
 
@@ -44,7 +44,7 @@ Add to your `claude_desktop_config.json`:
       "command": "uvx",
       "args": ["yutori-mcp"],
       "env": {
-        "YUTORI_API_KEY": "sk-your-api-key"
+        "YUTORI_API_KEY": "yt-your-api-key"
       }
     }
   }
@@ -78,7 +78,7 @@ Go to Cursor Settings → MCP → Add new MCP Server, then add:
       "command": "uvx",
       "args": ["yutori-mcp"],
       "env": {
-        "YUTORI_API_KEY": "sk-your-api-key"
+        "YUTORI_API_KEY": "yt-your-api-key"
       }
     }
   }
@@ -116,7 +116,7 @@ Open ChatGPT Desktop and go to Settings -> Connectors -> MCP Servers -> Add serv
       "command": "uvx",
       "args": ["yutori-mcp"],
       "env": {
-        "YUTORI_API_KEY": "sk-your-api-key"
+        "YUTORI_API_KEY": "yt-your-api-key"
       }
     }
   }
@@ -130,7 +130,7 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
 <summary>Codex</summary>
 
 ```bash
-codex mcp add yutori --env YUTORI_API_KEY=sk-your-api-key -- uvx yutori-mcp
+codex mcp add yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
 ```
 
 Or add to `~/.codex/config.toml`:
@@ -141,7 +141,7 @@ command = "uvx"
 args = ["yutori-mcp"]
 
 [mcp_servers.yutori.env]
-YUTORI_API_KEY = "sk-your-api-key"
+YUTORI_API_KEY = "yt-your-api-key"
 ```
 </details>
 
@@ -161,7 +161,7 @@ Add to `~/.gemini/settings.json`:
       "command": "uvx",
       "args": ["yutori-mcp"],
       "env": {
-        "YUTORI_API_KEY": "sk-your-api-key"
+        "YUTORI_API_KEY": "yt-your-api-key"
       }
     }
   }
@@ -649,7 +649,7 @@ pytest
 ### Running locally
 
 ```bash
-export YUTORI_API_KEY=sk-your-api-key
+export YUTORI_API_KEY=yt-your-api-key
 python -m yutori_mcp.server
 ```
 
