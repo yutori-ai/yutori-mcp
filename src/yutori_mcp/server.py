@@ -15,6 +15,7 @@ from .schemas import (
     CreateScoutInput,
     EditScoutInput,
     GetUpdatesInput,
+    ResearchTaskInput,
     ScoutIdInput,
     TaskIdInput,
 )
@@ -101,6 +102,22 @@ TOOLS = [
     Tool(
         name="get_browsing_task_result",
         description="Poll for browsing task status and result. Call until status is 'succeeded' or 'failed'.",
+        inputSchema=TaskIdInput.model_json_schema(),
+        annotations={"readOnlyHint": True},
+    ),
+    # Research operations
+    Tool(
+        name="run_research_task",
+        description=(
+            "Execute a one-time deep web research task. The research agent searches, "
+            "reads, and synthesizes information from across the web. Returns a task_id for polling. "
+            "Example: 'latest AI startup funding announcements'."
+        ),
+        inputSchema=ResearchTaskInput.model_json_schema(),
+    ),
+    Tool(
+        name="get_research_task_result",
+        description="Poll for research task status and result. Call until status is 'succeeded' or 'failed'.",
         inputSchema=TaskIdInput.model_json_schema(),
         annotations={"readOnlyHint": True},
     ),
@@ -199,6 +216,21 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> dict:
         case "get_browsing_task_result":
             params = TaskIdInput(**arguments)
             return client.get_browsing_task(params.task_id)
+
+        # Research operations
+        case "run_research_task":
+            params = ResearchTaskInput(**arguments)
+            return client.run_research_task(
+                query=params.query,
+                user_timezone=params.user_timezone,
+                user_location=params.user_location,
+                task_spec=params.task_spec,
+                webhook_url=params.webhook_url,
+                webhook_format=params.webhook_format,
+            )
+        case "get_research_task_result":
+            params = TaskIdInput(**arguments)
+            return client.get_research_task(params.task_id)
 
         case _:
             raise ValueError(f"Unknown tool: {name}")

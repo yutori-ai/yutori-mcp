@@ -8,6 +8,7 @@ from yutori_mcp.schemas import (
     CreateScoutInput,
     EditScoutInput,
     GetUpdatesInput,
+    ResearchTaskInput,
     ScoutIdInput,
     TaskIdInput,
 )
@@ -113,3 +114,31 @@ class TestGetUpdatesInput:
         )
         assert data.cursor == "next_page"
         assert data.limit == 50
+
+
+class TestResearchTaskInput:
+    def test_minimal_input(self):
+        """Query is the only required field."""
+        data = ResearchTaskInput(query="Research quantum computing developments")
+        assert data.query == "Research quantum computing developments"
+        assert data.user_timezone is None
+        assert data.user_location is None
+
+    def test_full_input(self):
+        """All fields can be provided."""
+        data = ResearchTaskInput(
+            query="Research quantum computing developments",
+            user_timezone="America/New_York",
+            user_location="New York, NY, US",
+            task_spec={"output_schema": {"type": "json", "json_schema": {"type": "object"}}},
+            webhook_url="https://example.com/webhook",
+            webhook_format="slack",
+        )
+        assert data.user_timezone == "America/New_York"
+        assert data.user_location == "New York, NY, US"
+        assert data.webhook_format == "slack"
+
+    def test_query_required(self):
+        """query is required."""
+        with pytest.raises(ValidationError):
+            ResearchTaskInput()

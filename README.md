@@ -104,6 +104,28 @@ code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"],"envFile"
 ```
 </details>
 
+<details>
+<summary>ChatGPT</summary>
+
+Open ChatGPT Desktop and go to Settings -> Connectors -> MCP Servers -> Add server.
+
+```json
+{
+  "mcpServers": {
+    "yutori": {
+      "command": "uvx",
+      "args": ["yutori-mcp"],
+      "env": {
+        "YUTORI_API_KEY": "sk-your-api-key"
+      }
+    }
+  }
+}
+```
+
+For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/mcp).
+</details>
+
 <details open>
 <summary>Codex</summary>
 
@@ -175,25 +197,24 @@ Example response:
 {
   "scouts": [
     {
-      "id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
-      "query": "latest news and product updates about Yutori",
+      "id": "9b1f2b2c-7ed5-4c4c-9c2a-2a8f0c7fd312",
+      "query": "Monitor Yutori product updates",
+      "display_name": "Monitor Yutori product updates",
       "status": "active",
       "output_interval": 86400,
-      "last_run_at": "2025-02-12T16:10:24Z",
-      "next_run_at": "2025-02-13T16:10:24Z",
-      "created_at": "2025-02-01T19:02:11Z"
+      "created_at": "2026-01-05T18:32:10Z",
+      "next_output_timestamp": "2026-01-06T18:32:00Z"
     },
     {
-      "id": "8a1c9d02-7c0d-4d27-8a1e-3bf7d2ed9a3c",
+      "id": "1c2a3d4e-5f60-4f7a-9c2d-3e4f5a6b7c8d",
       "query": "H100 pricing per hour drops below $1.50",
+      "display_name": "H100 pricing per hour drops below $1.50",
       "status": "paused",
       "output_interval": 43200,
-      "last_run_at": "2025-02-10T05:34:10Z",
-      "next_run_at": null,
-      "created_at": "2025-01-17T03:41:55Z"
+      "created_at": "2026-01-02T08:14:22Z",
+      "next_output_timestamp": "2026-01-02T20:14:00Z"
     }
-  ],
-  "next_cursor": null
+  ]
 }
 ```
 
@@ -211,35 +232,27 @@ Example response:
 
 ```json
 {
-  "id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
-  "query": "latest news and product updates about Yutori",
+  "id": "9b1f2b2c-7ed5-4c4c-9c2a-2a8f0c7fd312",
+  "query": "Monitor Yutori product updates",
+  "display_name": "Monitor Yutori product updates",
   "status": "active",
+  "created_at": "2026-01-05T18:32:10Z",
+  "next_run_timestamp": "2026-01-06T18:32:00Z",
+  "next_output_timestamp": "2026-01-06T18:32:00Z",
+  "user_timezone": "UTC",
   "output_interval": 86400,
-  "webhook_url": "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
-  "webhook_format": "slack",
-  "task_spec": {
-    "type": "object",
-    "properties": {
-      "items": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "title": { "type": "string" },
-            "url": { "type": "string" }
-          },
-          "required": ["title", "url"]
-        }
-      }
-    },
-    "required": ["items"]
+  "completed_at": null,
+  "paused_at": null,
+  "last_update_timestamp": null,
+  "update_count": 0,
+  "query_object": {
+    "query": "Monitor Yutori product updates",
+    "llm_what": "Monitor Yutori product updates",
+    "llm_condition": "whenever there is an update",
+    "skip_email": true,
+    "source_api": "scout_creation"
   },
-  "user_timezone": "America/Los_Angeles",
-  "skip_email": false,
-  "created_at": "2025-02-01T19:02:11Z",
-  "updated_at": "2025-02-12T16:10:24Z",
-  "last_run_at": "2025-02-12T16:10:24Z",
-  "next_run_at": "2025-02-13T16:10:24Z"
+  "is_public": true
 }
 ```
 
@@ -260,14 +273,24 @@ Example response:
 
 ```json
 {
-  "id": "c3b2e9a1-4e9b-4d87-9a5c-45e0f6f7a8c9",
+  "id": "3d1d5e2a-5b6c-4a9c-8f8c-2f2e3b4a5c6d",
   "query": "Tell me about the latest news, product updates, or announcements about Yutori",
-  "status": "active",
-  "output_interval": 86400,
-  "webhook_url": "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
-  "webhook_format": "slack",
-  "created_at": "2025-02-12T18:01:07Z",
-  "next_run_at": "2025-02-13T18:01:07Z"
+  "query_object": {
+    "query": "Tell me about the latest news, product updates, or announcements about Yutori",
+    "llm_what": "Tell me about the latest news, product updates, or announcements about Yutori",
+    "llm_condition": "whenever there is an update",
+    "skip_email": true,
+    "source_api": "scout_creation"
+  },
+  "display_name": "Tell me about the latest news, product updates, or announcements about Yutori",
+  "next_run_timestamp": "1970-01-01T00:00:00Z",
+  "user_timezone": "UTC",
+  "next_output_timestamp": "1970-01-01T00:00:00Z",
+  "created_at": "2026-01-06T03:10:45Z",
+  "completed_at": null,
+  "paused_at": null,
+  "is_public": true,
+  "webhook_url": null
 }
 ```
 
@@ -301,11 +324,24 @@ Example response:
 
 ```json
 {
-  "id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
-  "query": "latest news and product updates about Yutori",
-  "status": "active",
-  "output_interval": 43200,
-  "updated_at": "2025-02-12T18:05:22Z"
+  "id": "3d1d5e2a-5b6c-4a9c-8f8c-2f2e3b4a5c6d",
+  "query": "Tell me about the latest news, product updates, or announcements about Yutori",
+  "query_object": {
+    "query": "Tell me about the latest news, product updates, or announcements about Yutori",
+    "llm_what": "Tell me about the latest news, product updates, or announcements about Yutori",
+    "llm_condition": "whenever there is an update",
+    "skip_email": true,
+    "source_api": "scout_creation"
+  },
+  "display_name": "Tell me about the latest news, product updates, or announcements about Yutori",
+  "next_run_timestamp": "1970-01-01T00:00:00Z",
+  "user_timezone": "UTC",
+  "next_output_timestamp": "1970-01-01T00:00:00Z",
+  "created_at": "2026-01-06T03:10:45Z",
+  "completed_at": null,
+  "paused_at": null,
+  "is_public": true,
+  "webhook_url": null
 }
 ```
 
@@ -322,11 +358,7 @@ Pause a running scout.
 Example response:
 
 ```json
-{
-  "id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
-  "status": "paused",
-  "paused_at": "2025-02-12T18:06:10Z"
-}
+{}
 ```
 
 #### resume_scout
@@ -342,11 +374,7 @@ Resume a paused scout.
 Example response:
 
 ```json
-{
-  "id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
-  "status": "active",
-  "resumed_at": "2025-02-12T18:07:02Z"
-}
+{}
 ```
 
 #### complete_scout
@@ -362,11 +390,7 @@ Mark a scout as complete (archive).
 Example response:
 
 ```json
-{
-  "id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
-  "status": "completed",
-  "completed_at": "2025-02-12T18:07:55Z"
-}
+{}
 ```
 
 #### delete_scout
@@ -382,10 +406,7 @@ Permanently delete a scout. **This cannot be undone.**
 Example response:
 
 ```json
-{
-  "id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
-  "deleted": true
-}
+{}
 ```
 
 #### get_scout_updates
@@ -405,28 +426,40 @@ Example response:
 {
   "updates": [
     {
-      "id": "upd_3b6a5f7c-0f2a-4f48-9b21-0b6f5e3c2d1a",
-      "scout_id": "2f6d7c34-9db8-4a1d-99c2-8b5f1c3b0e55",
-      "status": "succeeded",
-      "created_at": "2025-02-12T16:10:24Z",
-      "summary": "Found 2 new mentions of Yutori product updates.",
-      "result": "- Yutori launches new monitoring UI\\n- Yutori adds webhook retries",
+      "id": "upd_9e6f8aac-aa86-4936-b6c3-a25c88493f6c",
+      "timestamp": 1767578701819,
+      "content": "<h3>Yutori ships a new SDK update</h3><p>Release notes include webhook retries and new filters.</p>",
+      "citations": [
+        {
+          "id": "0",
+          "url": "https://example.com/releases/yutori-sdk",
+          "preview_data": {
+            "title": "Yutori SDK 1.2.3",
+            "description": "Release notes for the latest SDK update.",
+            "image": "https://example.com/images/sdk.png",
+            "url": "https://example.com/releases/yutori-sdk"
+          }
+        }
+      ],
+      "stats": {
+        "num_tool_calls": 12,
+        "num_mcp_tool_calls": 12,
+        "num_crawler_calls": 0,
+        "num_navigator_steps": 0,
+        "num_websites_visited": 0,
+        "sec_saved": 240
+      },
       "structured_result": {
-        "items": [
+        "stories": [
           {
-            "title": "Yutori launches new monitoring UI",
-            "url": "https://yutori.com/blog/monitoring-ui",
-            "source": "yutori.com"
-          },
-          {
-            "title": "Yutori adds webhook retries",
-            "url": "https://yutori.com/blog/webhook-retries",
-            "source": "yutori.com"
+            "news": "Yutori SDK 1.2.3 adds webhook retries and filters.",
+            "source": "https://example.com/releases/yutori-sdk"
           }
         ]
       }
     }
   ],
+  "prev_cursor": null,
   "next_cursor": null
 }
 ```
@@ -465,9 +498,9 @@ Example response:
 
 ```json
 {
-  "task_id": "browse_5a6c9d3e-8c2f-4e2f-9a2a-7c8f9e1d2c3b",
-  "status": "queued",
-  "created_at": "2025-02-12T18:02:31Z"
+  "task_id": "11111111-1111-1111-1111-111111111111-1700000000",
+  "view_url": "https://scouts.yutori.com/11111111-1111-1111-1111-111111111111",
+  "status": "queued"
 }
 ```
 
@@ -490,15 +523,78 @@ Example response:
 
 ```json
 {
-  "task_id": "browse_5a6c9d3e-8c2f-4e2f-9a2a-7c8f9e1d2c3b",
+  "task_id": "11111111-1111-1111-1111-111111111111-1700000000",
+  "view_url": "https://scouts.yutori.com/11111111-1111-1111-1111-111111111111",
   "status": "succeeded",
-  "result": "Found 2 employees on the team page.",
-  "structured_result": {
-    "employees": [
-      { "name": "Jane Doe", "title": "CEO" },
-      { "name": "Alex Kim", "title": "CTO" }
-    ]
-  }
+  "result": "<pre>H1 Text: Example Domain</pre>",
+  "paused": true
+}
+```
+
+### Research Operations
+
+#### run_research_task
+
+Execute a one-time deep web research task. The research agent searches, reads, and synthesizes information from across the web.
+
+```json
+{
+  "query": "What are the latest developments in quantum computing from the past week?",
+  "user_timezone": "America/New_York"
+}
+```
+
+Example queries:
+- Research competitive landscape for a product
+- Summarize recent news about a company
+- Find technical documentation or specifications
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `query` | Yes | Natural language description of what to research |
+| `user_timezone` | No | Timezone for context. Default: 'America/Los_Angeles' |
+| `user_location` | No | Location for context. Default: 'San Francisco, CA, US' |
+| `task_spec` | No | JSON Schema for structured output |
+| `webhook_url` | No | URL for completion notification |
+| `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
+
+Returns a `task_id` for polling status.
+
+Example response:
+
+```json
+{
+  "task_id": "22222222-2222-2222-2222-222222222222-1700000000",
+  "view_url": "https://scouts.yutori.com/22222222-2222-2222-2222-222222222222",
+  "status": "queued"
+}
+```
+
+#### get_research_task_result
+
+Poll for the status and result of a research task. Call this after `run_research_task` until status is `succeeded` or `failed`.
+
+```json
+{
+  "task_id": "abc123-456-..."
+}
+```
+
+Returns:
+- `status`: `queued`, `running`, `succeeded`, or `failed`
+- `result`: Text result (when complete)
+- `structured_result`: JSON result (if `task_spec` was provided)
+- `updates`: Array of update objects with timestamps and content
+
+Example response:
+
+```json
+{
+  "task_id": "22222222-2222-2222-2222-222222222222-1700000000",
+  "view_url": "https://scouts.yutori.com/22222222-2222-2222-2222-222222222222",
+  "status": "succeeded",
+  "result": "## Quantum Computing Developments\n\n### Key Findings...",
+  "structured_result": null
 }
 ```
 
@@ -516,12 +612,11 @@ Example response:
 
 ```json
 {
-  "period_start": "2025-02-01",
-  "period_end": "2025-02-29",
-  "requests": 128,
-  "scout_runs": 42,
-  "browsing_tasks": 7,
-  "credits_used": 93.5
+  "num_scouts": 3,
+  "active_scout_ids": [
+    "22222222-2222-2222-2222-222222222222",
+    "33333333-3333-3333-3333-333333333333"
+  ]
 }
 ```
 
@@ -531,7 +626,7 @@ Tools include hints for client behavior:
 
 | Tool | Annotation |
 |------|------------|
-| `list_scouts`, `get_scout_detail`, `get_scout_updates`, `list_api_usage`, `get_browsing_task_result` | `readOnlyHint: true` |
+| `list_scouts`, `get_scout_detail`, `get_scout_updates`, `list_api_usage`, `get_browsing_task_result`, `get_research_task_result` | `readOnlyHint: true` |
 | `pause_scout`, `resume_scout`, `complete_scout` | `idempotentHint: true` |
 | `delete_scout` | `destructiveHint: true` |
 

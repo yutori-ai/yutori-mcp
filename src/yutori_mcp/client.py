@@ -172,6 +172,37 @@ class YutoriClient:
         return self._request("GET", f"/browsing/tasks/{task_id}")
 
     # -------------------------------------------------------------------------
+    # Research operations
+    # -------------------------------------------------------------------------
+
+    def run_research_task(
+        self,
+        query: str,
+        user_timezone: str | None = None,
+        user_location: str | None = None,
+        task_spec: dict[str, Any] | None = None,
+        webhook_url: str | None = None,
+        webhook_format: str | None = None,
+    ) -> dict[str, Any]:
+        """Execute a one-time research task using the research agent."""
+        payload: dict[str, Any] = {"query": query}
+        if user_timezone is not None:
+            payload["user_timezone"] = user_timezone
+        if user_location is not None:
+            payload["user_location"] = user_location
+        if task_spec is not None:
+            payload["task_spec"] = task_spec
+        if webhook_url is not None:
+            payload["webhook_url"] = webhook_url
+        if webhook_format is not None:
+            payload["webhook_format"] = webhook_format
+        return self._request("POST", "/research/tasks", json=payload)
+
+    def get_research_task(self, task_id: str) -> dict[str, Any]:
+        """Get the status and result of a research task."""
+        return self._request("GET", f"/research/tasks/{task_id}")
+
+    # -------------------------------------------------------------------------
     # Account operations
     # -------------------------------------------------------------------------
 

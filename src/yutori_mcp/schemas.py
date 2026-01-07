@@ -151,6 +151,48 @@ class BrowsingTaskInput(BaseModel):
 
 
 class TaskIdInput(BaseModel):
-    """Input for retrieving a browsing task result."""
+    """Input for retrieving a browsing or research task result."""
 
-    task_id: str = Field(..., description="The browsing task's unique identifier")
+    task_id: str = Field(..., description="The task's unique identifier")
+
+
+class ResearchTaskInput(BaseModel):
+    """Input for running a one-time research task.
+
+    The Research API executes deep web research on any topic.
+    An AI agent searches, reads, and synthesizes information from across the web.
+    Examples:
+    - Research competitive landscape for a product
+    - Summarize recent news about a company
+    - Find technical documentation or specifications
+    """
+
+    query: str = Field(
+        ...,
+        description=(
+            "Natural language description of what to research. Examples: "
+            "'What are the latest developments in quantum computing from the past week?', "
+            "'Research the competitive landscape for AI code assistants', "
+            "'Find pricing information for cloud GPU providers'"
+        ),
+    )
+    user_timezone: str | None = Field(
+        default=None,
+        description="Timezone for contextual awareness. Example: 'America/New_York'. Default: 'America/Los_Angeles'",
+    )
+    user_location: str | None = Field(
+        default=None,
+        description="Location for contextual awareness. Format: 'city, region, country'. Default: 'San Francisco, CA, US'",
+    )
+    task_spec: dict[str, Any] | None = Field(
+        default=None,
+        description="JSON Schema for structured output format",
+    )
+    webhook_url: str | None = Field(
+        default=None,
+        description="URL to receive webhook notification when research completes",
+    )
+    webhook_format: str | None = Field(
+        default=None,
+        description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
+    )
