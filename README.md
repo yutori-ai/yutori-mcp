@@ -10,7 +10,7 @@ An MCP server for [Yutori](https://yutori.com) - web monitoring and browsing aut
 
 ## Installation
 
-Install `uvx` (via uv) first:
+If you don't already have `uv` installed, install it (it includes `uvx`):
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
