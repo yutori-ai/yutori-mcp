@@ -6,7 +6,6 @@ An MCP server for [Yutori](https://yutori.com) - web monitoring and browsing aut
 
 - **Scouts**: Create agents that that monitor the web for anything you care about at a desired frequency 
 - **Browsing**: Execute one-time web browsing tasks using an AI website navigator (or a browser-use AI agent)
-- **Structured Output**: Optionally enforce JSON schemas on results
 
 ## Installation
 
