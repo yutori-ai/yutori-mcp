@@ -196,22 +196,22 @@ Example response:
 {
   "scouts": [
     {
-      "id": "ac557b2d-d11f-45b5-917c-f2378d3f9d34",
-      "query": "let me anytime karpathy open sources a new github repository",
-      "display_name": "Karpathy new GitHub repo",
+      "id": "690bd26c-0ef8-42f4-99e4-8fca6ea20e6f",
+      "query": "Tell me about the latest news, product updates, or announcements about Yutori",
+      "display_name": "Yutori news and updates",
       "status": "active",
       "output_interval": 86400,
-      "created_at": "2026-01-16T05:23:11.621797Z",
-      "next_output_timestamp": "2026-01-18T05:23:00Z"
+      "created_at": "2026-01-15T18:32:10.621797Z",
+      "next_output_timestamp": "2026-01-16T18:32:00Z"
     },
     {
-      "id": "5dea724d-94f7-40ab-80d7-21c89c397f9b",
-      "query": "Let me know when Yutori launches a new feature",
-      "display_name": "Let me know when Yutori launches a new feature",
-      "status": "done",
-      "output_interval": 3600,
-      "created_at": "2026-01-16T02:32:26.385754Z",
-      "next_output_timestamp": "2026-01-16T08:02:00Z"
+      "id": "36d178a0-591f-4567-8019-32d24f9e55ba",
+      "query": "Monitor Yutori API changelog for breaking changes",
+      "display_name": "Yutori API changelog",
+      "status": "paused",
+      "output_interval": 43200,
+      "created_at": "2026-01-10T08:14:22.385754Z",
+      "next_output_timestamp": "2026-01-10T20:14:00Z"
     }
   ]
 }
@@ -223,7 +223,7 @@ Get detailed information for a specific scout.
 
 ```json
 {
-  "scout_id": "ac557b2d-d11f-45b5-917c-f2378d3f9d34"
+  "scout_id": "690bd26c-0ef8-42f4-99e4-8fca6ea20e6f"
 }
 ```
 
@@ -231,23 +231,23 @@ Example response:
 
 ```json
 {
-  "id": "ac557b2d-d11f-45b5-917c-f2378d3f9d34",
-  "query": "let me anytime karpathy open sources a new github repository",
-  "display_name": "Karpathy new GitHub repo",
+  "id": "690bd26c-0ef8-42f4-99e4-8fca6ea20e6f",
+  "query": "Tell me about the latest news, product updates, or announcements about Yutori",
+  "display_name": "Yutori news and updates",
   "status": "active",
-  "created_at": "2026-01-16T05:23:11.621797Z",
-  "next_run_timestamp": "1970-01-01T00:00:00Z",
-  "next_output_timestamp": "2026-01-18T05:23:00Z",
+  "created_at": "2026-01-15T18:32:10.621797Z",
+  "next_run_timestamp": "2026-01-16T18:32:00Z",
+  "next_output_timestamp": "2026-01-16T18:32:00Z",
   "user_timezone": "America/Los_Angeles",
   "output_interval": 86400,
   "completed_at": null,
   "paused_at": null,
-  "last_update_timestamp": "2026-01-16T05:24:57.379430Z",
+  "last_update_timestamp": "2026-01-15T18:45:23.379430Z",
   "update_count": 1,
   "query_object": {
-    "query": "let me anytime karpathy open sources a new github repository",
-    "llm_what": "new public GitHub repositories created by user karpathy",
-    "llm_condition": ""
+    "query": "Tell me about the latest news, product updates, or announcements about Yutori",
+    "llm_what": "latest news, product updates, or announcements about Yutori",
+    "llm_condition": "whenever there is an update"
   },
   "is_public": true
 }
@@ -347,13 +347,13 @@ Example response:
 ```json
 {
   "id": "7c8692c3-c637-4302-a982-b9f4f7b49407",
-  "query": "Test MCP integration - monitor Python package updates",
-  "display_name": "Test MCP integration - monitor Python package updates",
+  "query": "Monitor Yutori API changelog for breaking changes",
+  "display_name": "Yutori API changelog",
   "status": "paused",
   "created_at": "2026-01-17T18:20:35.574343Z",
   "next_run_timestamp": "1970-01-01T00:00:00Z",
   "next_output_timestamp": "1970-01-01T00:00:00Z",
-  "user_timezone": "America/Los_Angeles",
+  "user_timezone": "America/New_York",
   "output_interval": 43200,
   "completed_at": null,
   "paused_at": "2026-01-17T18:20:36.695288Z",
@@ -412,16 +412,16 @@ Example response:
     {
       "id": "a4e7bd83-4b84-4189-b679-6886fca381bb",
       "timestamp": 1768541097379,
-      "content": "<h3>Karpathy GitHub: Active Repo Baseline</h3><p>I am establishing a reference point...</p>",
+      "content": "<h3>Yutori Product Updates</h3><p>Yutori has released new MCP server tools for web monitoring and browsing automation...</p>",
       "citations": [
         {
           "id": "0",
-          "url": "https://github.com/karpathy/nanochat",
+          "url": "https://github.com/yutori-ai/yutori-mcp",
           "preview_data": {
-            "title": "GitHub - karpathy/nanochat: The best ChatGPT that $100 can buy.",
-            "description": "The best ChatGPT that $100 can buy.",
-            "image": "https://opengraph.githubassets.com/.../karpathy/nanochat",
-            "url": "https://github.com/karpathy/nanochat"
+            "title": "GitHub - yutori-ai/yutori-mcp: MCP server for Yutori web monitoring",
+            "description": "MCP server for Yutori - web monitoring and browsing automation.",
+            "image": "https://opengraph.githubassets.com/.../yutori-ai/yutori-mcp",
+            "url": "https://github.com/yutori-ai/yutori-mcp"
           }
         }
       ],
