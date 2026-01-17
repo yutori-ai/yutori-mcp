@@ -163,7 +163,8 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> dict:
             params = EditScoutInput(**arguments)
 
             # Apply config updates first (so they take effect before status change)
-            has_config_updates = any([
+            # Use `is not None` to correctly handle False values (e.g., is_public=False)
+            has_config_updates = any(f is not None for f in [
                 params.query,
                 params.output_interval,
                 params.webhook_url,
