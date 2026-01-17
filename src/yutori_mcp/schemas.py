@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class CreateScoutInput(BaseModel):
@@ -51,12 +51,31 @@ class CreateScoutInput(BaseModel):
         default=None,
         description="If true, skip email notifications (useful with webhooks)",
     )
+    start_timestamp: str | None = Field(
+        default=None,
+        description="ISO timestamp for when monitoring should start",
+    )
+    user_location: str | None = Field(
+        default=None,
+        description="User location for geo-relevant searches. Format: 'city, region, country'",
+    )
+    is_public: bool | None = Field(
+        default=None,
+        description="Whether scout results are publicly accessible",
+    )
 
 
 class EditScoutInput(BaseModel):
-    """Input for editing an existing scout."""
+    """Input for editing an existing scout or changing its status."""
 
     scout_id: str = Field(..., description="The scout's unique identifier (UUID)")
+    status: Literal["active", "paused", "done"] | None = Field(
+        default=None,
+        description=(
+            "Change scout status: 'active' (resume monitoring), "
+            "'paused' (stop temporarily), 'done' (archive permanently)"
+        ),
+    )
     query: str | None = Field(
         default=None,
         description="Updated monitoring query",
@@ -72,7 +91,7 @@ class EditScoutInput(BaseModel):
     )
     webhook_format: str | None = Field(
         default=None,
-        description="Updated webhook format",
+        description="Updated webhook format: 'scout', 'slack', or 'zapier'",
     )
     task_spec: dict[str, Any] | None = Field(
         default=None,
@@ -82,6 +101,37 @@ class EditScoutInput(BaseModel):
         default=None,
         description="Updated email notification preference",
     )
+    user_timezone: str | None = Field(
+        default=None,
+        description="Timezone for scheduling. Example: 'America/New_York'",
+    )
+    user_location: str | None = Field(
+        default=None,
+        description="User location for geo-relevant searches",
+    )
+    is_public: bool | None = Field(
+        default=None,
+        description="Whether scout results are publicly accessible",
+    )
+
+    @model_validator(mode="after")
+    def validate_has_changes(self) -> "EditScoutInput":
+        """Ensure at least one field besides scout_id is provided."""
+        fields = [
+            self.status,
+            self.query,
+            self.output_interval,
+            self.webhook_url,
+            self.webhook_format,
+            self.task_spec,
+            self.skip_email,
+            self.user_timezone,
+            self.user_location,
+            self.is_public,
+        ]
+        if not any(f is not None for f in fields):
+            raise ValueError("edit_scout requires at least one field to update")
+        return self
 
 
 class ScoutIdInput(BaseModel):

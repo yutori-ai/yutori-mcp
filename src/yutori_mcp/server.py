@@ -46,12 +46,6 @@ TOOLS = [
         inputSchema=GetUpdatesInput.model_json_schema(),
         annotations={"readOnlyHint": True},
     ),
-    Tool(
-        name="list_api_usage",
-        description="Get usage statistics for the authenticated API key.",
-        inputSchema={"type": "object", "properties": {}, "required": []},
-        annotations={"readOnlyHint": True},
-    ),
     # Scout lifecycle
     Tool(
         name="create_scout",
@@ -63,25 +57,11 @@ TOOLS = [
     ),
     Tool(
         name="edit_scout",
-        description="Update an existing scout's query, schedule, or webhook configuration.",
+        description=(
+            "Update an existing scout's query, schedule, webhook configuration, or status. "
+            "Use status='paused' to pause, 'active' to resume, or 'done' to archive."
+        ),
         inputSchema=EditScoutInput.model_json_schema(),
-    ),
-    Tool(
-        name="pause_scout",
-        description="Pause a running scout. The scout will stop executing until resumed.",
-        inputSchema=ScoutIdInput.model_json_schema(),
-        annotations={"idempotentHint": True},
-    ),
-    Tool(
-        name="resume_scout",
-        description="Resume a paused scout. The scout will continue executing on its schedule.",
-        inputSchema=ScoutIdInput.model_json_schema(),
-        annotations={"idempotentHint": True},
-    ),
-    Tool(
-        name="complete_scout",
-        description="Mark a scout as complete (archive). Use this when monitoring is no longer needed.",
-        inputSchema=ScoutIdInput.model_json_schema(),
         annotations={"idempotentHint": True},
     ),
     Tool(
@@ -163,8 +143,6 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> dict:
                 cursor=params.cursor,
                 limit=params.limit,
             )
-        case "list_api_usage":
-            return client.get_usage()
 
         # Scout lifecycle
         case "create_scout":
@@ -177,27 +155,50 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> dict:
                 task_spec=params.task_spec,
                 user_timezone=params.user_timezone,
                 skip_email=params.skip_email,
+                start_timestamp=params.start_timestamp,
+                user_location=params.user_location,
+                is_public=params.is_public,
             )
         case "edit_scout":
             params = EditScoutInput(**arguments)
-            return client.edit_scout(
-                scout_id=params.scout_id,
-                query=params.query,
-                output_interval=params.output_interval,
-                webhook_url=params.webhook_url,
-                webhook_format=params.webhook_format,
-                task_spec=params.task_spec,
-                skip_email=params.skip_email,
-            )
-        case "pause_scout":
-            params = ScoutIdInput(**arguments)
-            return client.pause_scout(params.scout_id)
-        case "resume_scout":
-            params = ScoutIdInput(**arguments)
-            return client.resume_scout(params.scout_id)
-        case "complete_scout":
-            params = ScoutIdInput(**arguments)
-            return client.complete_scout(params.scout_id)
+
+            # Apply config updates first (so they take effect before status change)
+            has_config_updates = any([
+                params.query,
+                params.output_interval,
+                params.webhook_url,
+                params.webhook_format,
+                params.task_spec,
+                params.skip_email,
+                params.user_timezone,
+                params.user_location,
+                params.is_public,
+            ])
+
+            if has_config_updates:
+                client.edit_scout(
+                    scout_id=params.scout_id,
+                    query=params.query,
+                    output_interval=params.output_interval,
+                    webhook_url=params.webhook_url,
+                    webhook_format=params.webhook_format,
+                    task_spec=params.task_spec,
+                    skip_email=params.skip_email,
+                    user_timezone=params.user_timezone,
+                    user_location=params.user_location,
+                    is_public=params.is_public,
+                )
+
+            # Apply status change after config updates
+            if params.status == "paused":
+                client.pause_scout(params.scout_id)
+            elif params.status == "active":
+                client.resume_scout(params.scout_id)
+            elif params.status == "done":
+                client.complete_scout(params.scout_id)
+
+            # Return updated scout details
+            return client.get_scout_detail(params.scout_id)
         case "delete_scout":
             params = ScoutIdInput(**arguments)
             return client.delete_scout(params.scout_id)

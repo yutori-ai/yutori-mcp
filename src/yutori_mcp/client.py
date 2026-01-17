@@ -65,6 +65,9 @@ class YutoriClient:
         task_spec: dict[str, Any] | None = None,
         user_timezone: str | None = None,
         skip_email: bool | None = None,
+        start_timestamp: str | None = None,
+        user_location: str | None = None,
+        is_public: bool | None = None,
     ) -> dict[str, Any]:
         """Create a new monitoring scout."""
         payload: dict[str, Any] = {"query": query}
@@ -80,6 +83,12 @@ class YutoriClient:
             payload["user_timezone"] = user_timezone
         if skip_email is not None:
             payload["skip_email"] = skip_email
+        if start_timestamp is not None:
+            payload["start_timestamp"] = start_timestamp
+        if user_location is not None:
+            payload["user_location"] = user_location
+        if is_public is not None:
+            payload["is_public"] = is_public
         return self._request("POST", "/scouting/tasks", json=payload)
 
     def edit_scout(
@@ -91,6 +100,9 @@ class YutoriClient:
         webhook_format: str | None = None,
         task_spec: dict[str, Any] | None = None,
         skip_email: bool | None = None,
+        user_timezone: str | None = None,
+        user_location: str | None = None,
+        is_public: bool | None = None,
     ) -> dict[str, Any]:
         """Update an existing scout."""
         payload: dict[str, Any] = {}
@@ -106,6 +118,12 @@ class YutoriClient:
             payload["task_spec"] = task_spec
         if skip_email is not None:
             payload["skip_email"] = skip_email
+        if user_timezone is not None:
+            payload["user_timezone"] = user_timezone
+        if user_location is not None:
+            payload["user_location"] = user_location
+        if is_public is not None:
+            payload["is_public"] = is_public
         return self._request("PATCH", f"/scouting/tasks/{scout_id}", json=payload)
 
     def pause_scout(self, scout_id: str) -> dict[str, Any]:
@@ -201,14 +219,6 @@ class YutoriClient:
     def get_research_task(self, task_id: str) -> dict[str, Any]:
         """Get the status and result of a research task."""
         return self._request("GET", f"/research/tasks/{task_id}")
-
-    # -------------------------------------------------------------------------
-    # Account operations
-    # -------------------------------------------------------------------------
-
-    def get_usage(self) -> dict[str, Any]:
-        """Get usage statistics for the authenticated API key."""
-        return self._request("GET", "/usage")
 
     # -------------------------------------------------------------------------
     # Internal helpers

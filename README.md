@@ -196,22 +196,22 @@ Example response:
 {
   "scouts": [
     {
-      "id": "9b1f2b2c-7ed5-4c4c-9c2a-2a8f0c7fd312",
-      "query": "Monitor Yutori product updates",
-      "display_name": "Monitor Yutori product updates",
+      "id": "ac557b2d-d11f-45b5-917c-f2378d3f9d34",
+      "query": "let me anytime karpathy open sources a new github repository",
+      "display_name": "Karpathy new GitHub repo",
       "status": "active",
       "output_interval": 86400,
-      "created_at": "2026-01-05T18:32:10Z",
-      "next_output_timestamp": "2026-01-06T18:32:00Z"
+      "created_at": "2026-01-16T05:23:11.621797Z",
+      "next_output_timestamp": "2026-01-18T05:23:00Z"
     },
     {
-      "id": "1c2a3d4e-5f60-4f7a-9c2d-3e4f5a6b7c8d",
-      "query": "H100 pricing per hour drops below $1.50",
-      "display_name": "H100 pricing per hour drops below $1.50",
-      "status": "paused",
-      "output_interval": 43200,
-      "created_at": "2026-01-02T08:14:22Z",
-      "next_output_timestamp": "2026-01-02T20:14:00Z"
+      "id": "5dea724d-94f7-40ab-80d7-21c89c397f9b",
+      "query": "Let me know when Yutori launches a new feature",
+      "display_name": "Let me know when Yutori launches a new feature",
+      "status": "done",
+      "output_interval": 3600,
+      "created_at": "2026-01-16T02:32:26.385754Z",
+      "next_output_timestamp": "2026-01-16T08:02:00Z"
     }
   ]
 }
@@ -223,7 +223,7 @@ Get detailed information for a specific scout.
 
 ```json
 {
-  "scout_id": "abc123-..."
+  "scout_id": "ac557b2d-d11f-45b5-917c-f2378d3f9d34"
 }
 ```
 
@@ -231,25 +231,23 @@ Example response:
 
 ```json
 {
-  "id": "9b1f2b2c-7ed5-4c4c-9c2a-2a8f0c7fd312",
-  "query": "Monitor Yutori product updates",
-  "display_name": "Monitor Yutori product updates",
+  "id": "ac557b2d-d11f-45b5-917c-f2378d3f9d34",
+  "query": "let me anytime karpathy open sources a new github repository",
+  "display_name": "Karpathy new GitHub repo",
   "status": "active",
-  "created_at": "2026-01-05T18:32:10Z",
-  "next_run_timestamp": "2026-01-06T18:32:00Z",
-  "next_output_timestamp": "2026-01-06T18:32:00Z",
-  "user_timezone": "UTC",
+  "created_at": "2026-01-16T05:23:11.621797Z",
+  "next_run_timestamp": "1970-01-01T00:00:00Z",
+  "next_output_timestamp": "2026-01-18T05:23:00Z",
+  "user_timezone": "America/Los_Angeles",
   "output_interval": 86400,
   "completed_at": null,
   "paused_at": null,
-  "last_update_timestamp": null,
-  "update_count": 0,
+  "last_update_timestamp": "2026-01-16T05:24:57.379430Z",
+  "update_count": 1,
   "query_object": {
-    "query": "Monitor Yutori product updates",
-    "llm_what": "Monitor Yutori product updates",
-    "llm_condition": "whenever there is an update",
-    "skip_email": true,
-    "source_api": "scout_creation"
+    "query": "let me anytime karpathy open sources a new github repository",
+    "llm_what": "new public GitHub repositories created by user karpathy",
+    "llm_condition": ""
   },
   "is_public": true
 }
@@ -303,19 +301,44 @@ Example queries:
 | `query` | Yes | Natural language description of what to monitor |
 | `output_interval` | No | Seconds between runs (min: 1800). Default: 86400 |
 | `webhook_url` | No | URL for webhook notifications |
-| `webhook_format` | No | `scout` (default) or `slack` |
+| `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
 | `task_spec` | No | JSON Schema for structured output |
 | `user_timezone` | No | Timezone for scheduling |
 | `skip_email` | No | Skip email notifications |
+| `start_timestamp` | No | ISO timestamp for when monitoring should start |
+| `user_location` | No | Location for geo-relevant searches |
+| `is_public` | No | Whether scout results are publicly accessible |
 
 #### edit_scout
 
-Update an existing scout.
+Update an existing scout's query, schedule, webhook configuration, or status.
+
+**Change status only (pause a scout):**
 
 ```json
 {
   "scout_id": "abc123-...",
-  "output_interval": 43200
+  "status": "paused"
+}
+```
+
+**Update configuration:**
+
+```json
+{
+  "scout_id": "abc123-...",
+  "output_interval": 43200,
+  "user_timezone": "America/New_York"
+}
+```
+
+**Update configuration and resume:**
+
+```json
+{
+  "scout_id": "abc123-...",
+  "query": "updated monitoring query",
+  "status": "active"
 }
 ```
 
@@ -323,74 +346,36 @@ Example response:
 
 ```json
 {
-  "id": "3d1d5e2a-5b6c-4a9c-8f8c-2f2e3b4a5c6d",
-  "query": "Tell me about the latest news, product updates, or announcements about Yutori",
-  "query_object": {
-    "query": "Tell me about the latest news, product updates, or announcements about Yutori",
-    "llm_what": "Tell me about the latest news, product updates, or announcements about Yutori",
-    "llm_condition": "whenever there is an update",
-    "skip_email": true,
-    "source_api": "scout_creation"
-  },
-  "display_name": "Tell me about the latest news, product updates, or announcements about Yutori",
+  "id": "7c8692c3-c637-4302-a982-b9f4f7b49407",
+  "query": "Test MCP integration - monitor Python package updates",
+  "display_name": "Test MCP integration - monitor Python package updates",
+  "status": "paused",
+  "created_at": "2026-01-17T18:20:35.574343Z",
   "next_run_timestamp": "1970-01-01T00:00:00Z",
-  "user_timezone": "UTC",
   "next_output_timestamp": "1970-01-01T00:00:00Z",
-  "created_at": "2026-01-06T03:10:45Z",
+  "user_timezone": "America/Los_Angeles",
+  "output_interval": 43200,
   "completed_at": null,
-  "paused_at": null,
-  "is_public": true,
-  "webhook_url": null
+  "paused_at": "2026-01-17T18:20:36.695288Z",
+  "last_update_timestamp": null,
+  "update_count": 0,
+  "is_public": true
 }
 ```
 
-#### pause_scout
-
-Pause a running scout.
-
-```json
-{
-  "scout_id": "abc123-..."
-}
-```
-
-Example response:
-
-```json
-{}
-```
-
-#### resume_scout
-
-Resume a paused scout.
-
-```json
-{
-  "scout_id": "abc123-..."
-}
-```
-
-Example response:
-
-```json
-{}
-```
-
-#### complete_scout
-
-Mark a scout as complete (archive).
-
-```json
-{
-  "scout_id": "abc123-..."
-}
-```
-
-Example response:
-
-```json
-{}
-```
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `scout_id` | Yes | Scout UUID |
+| `status` | No | `active` (resume), `paused` (pause), or `done` (archive) |
+| `query` | No | Updated monitoring query |
+| `output_interval` | No | Seconds between runs (min 1800) |
+| `webhook_url` | No | Webhook notification URL |
+| `webhook_format` | No | `scout`, `slack`, or `zapier` |
+| `user_timezone` | No | Timezone for scheduling |
+| `user_location` | No | Location for geo-relevant searches |
+| `is_public` | No | Whether results are public |
+| `skip_email` | No | Skip email notifications |
+| `task_spec` | No | JSON Schema for structured output |
 
 #### delete_scout
 
@@ -414,8 +399,8 @@ Get paginated updates from a scout.
 
 ```json
 {
-  "scout_id": "abc123-...",
-  "limit": 10
+  "scout_id": "ac557b2d-d11f-45b5-917c-f2378d3f9d34",
+  "limit": 1
 }
 ```
 
@@ -425,18 +410,18 @@ Example response:
 {
   "updates": [
     {
-      "id": "upd_9e6f8aac-aa86-4936-b6c3-a25c88493f6c",
-      "timestamp": 1767578701819,
-      "content": "<h3>Yutori ships a new SDK update</h3><p>Release notes include webhook retries and new filters.</p>",
+      "id": "a4e7bd83-4b84-4189-b679-6886fca381bb",
+      "timestamp": 1768541097379,
+      "content": "<h3>Karpathy GitHub: Active Repo Baseline</h3><p>I am establishing a reference point...</p>",
       "citations": [
         {
           "id": "0",
-          "url": "https://example.com/releases/yutori-sdk",
+          "url": "https://github.com/karpathy/nanochat",
           "preview_data": {
-            "title": "Yutori SDK 1.2.3",
-            "description": "Release notes for the latest SDK update.",
-            "image": "https://example.com/images/sdk.png",
-            "url": "https://example.com/releases/yutori-sdk"
+            "title": "GitHub - karpathy/nanochat: The best ChatGPT that $100 can buy.",
+            "description": "The best ChatGPT that $100 can buy.",
+            "image": "https://opengraph.githubassets.com/.../karpathy/nanochat",
+            "url": "https://github.com/karpathy/nanochat"
           }
         }
       ],
@@ -448,14 +433,7 @@ Example response:
         "num_websites_visited": 0,
         "sec_saved": 240
       },
-      "structured_result": {
-        "stories": [
-          {
-            "news": "Yutori SDK 1.2.3 adds webhook retries and filters.",
-            "source": "https://example.com/releases/yutori-sdk"
-          }
-        ]
-      }
+      "structured_result": null
     }
   ],
   "prev_cursor": null,
@@ -597,36 +575,14 @@ Example response:
 }
 ```
 
-### Account Operations
-
-#### list_api_usage
-
-Get usage statistics.
-
-```json
-{}
-```
-
-Example response:
-
-```json
-{
-  "num_scouts": 3,
-  "active_scout_ids": [
-    "22222222-2222-2222-2222-222222222222",
-    "33333333-3333-3333-3333-333333333333"
-  ]
-}
-```
-
 ## Tool Annotations
 
 Tools include hints for client behavior:
 
 | Tool | Annotation |
 |------|------------|
-| `list_scouts`, `get_scout_detail`, `get_scout_updates`, `list_api_usage`, `get_browsing_task_result`, `get_research_task_result` | `readOnlyHint: true` |
-| `pause_scout`, `resume_scout`, `complete_scout` | `idempotentHint: true` |
+| `list_scouts`, `get_scout_detail`, `get_scout_updates`, `get_browsing_task_result`, `get_research_task_result` | `readOnlyHint: true` |
+| `edit_scout` | `idempotentHint: true` |
 | `delete_scout` | `destructiveHint: true` |
 
 ## Development
