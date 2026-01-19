@@ -39,6 +39,18 @@ class TestCreateScoutInput:
         with pytest.raises(ValidationError):
             CreateScoutInput(query="Test", output_interval=1000)
 
+    def test_new_fields(self):
+        """New fields (start_timestamp, user_location, is_public) work."""
+        data = CreateScoutInput(
+            query="Track NVIDIA stock price",
+            start_timestamp="2026-01-20T00:00:00Z",
+            user_location="New York, NY, US",
+            is_public=False,
+        )
+        assert data.start_timestamp == "2026-01-20T00:00:00Z"
+        assert data.user_location == "New York, NY, US"
+        assert data.is_public is False
+
 
 class TestEditScoutInput:
     def test_scout_id_required(self):
@@ -46,11 +58,55 @@ class TestEditScoutInput:
         with pytest.raises(ValidationError):
             EditScoutInput()
 
+    def test_requires_at_least_one_change(self):
+        """At least one field besides scout_id must be provided."""
+        with pytest.raises(ValidationError) as exc_info:
+            EditScoutInput(scout_id="abc-123")
+        assert "at least one field" in str(exc_info.value).lower()
+
     def test_partial_update(self):
         """Only scout_id and changed fields needed."""
         data = EditScoutInput(scout_id="abc-123", output_interval=43200)
         assert data.scout_id == "abc-123"
         assert data.query is None
+
+    def test_status_paused(self):
+        """Status can be set to paused."""
+        data = EditScoutInput(scout_id="abc-123", status="paused")
+        assert data.status == "paused"
+
+    def test_status_active(self):
+        """Status can be set to active."""
+        data = EditScoutInput(scout_id="abc-123", status="active")
+        assert data.status == "active"
+
+    def test_status_done(self):
+        """Status can be set to done."""
+        data = EditScoutInput(scout_id="abc-123", status="done")
+        assert data.status == "done"
+
+    def test_status_invalid(self):
+        """Invalid status values are rejected."""
+        with pytest.raises(ValidationError):
+            EditScoutInput(scout_id="abc-123", status="completed")
+
+    def test_status_with_config(self):
+        """Status and config fields can be combined."""
+        data = EditScoutInput(scout_id="abc-123", status="paused", query="new query")
+        assert data.status == "paused"
+        assert data.query == "new query"
+
+    def test_new_fields(self):
+        """New fields (user_timezone, user_location, is_public) work."""
+        data = EditScoutInput(
+            scout_id="abc-123",
+            user_timezone="America/New_York",
+            user_location="San Francisco, CA",
+            is_public=True,
+        )
+        assert data.user_timezone == "America/New_York"
+        assert data.user_location == "San Francisco, CA"
+        assert data.is_public is True
 
 
 class TestBrowsingTaskInput:
