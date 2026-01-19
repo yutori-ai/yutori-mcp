@@ -37,7 +37,7 @@ class CreateScoutInput(BaseModel):
     )
     webhook_format: str | None = Field(
         default=None,
-        description="Webhook payload format: 'scout' (default) or 'slack'",
+        description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
     )
     task_spec: dict[str, Any] | None = Field(
         default=None,
