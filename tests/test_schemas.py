@@ -52,6 +52,19 @@ class TestCreateScoutInput:
         assert data.user_location == "New York, NY, US"
         assert data.is_public is False
 
+    def test_output_fields(self):
+        """output_fields accepts a list of field names."""
+        data = CreateScoutInput(
+            query="Track AI news",
+            output_fields=["headline", "summary", "url"],
+        )
+        assert data.output_fields == ["headline", "summary", "url"]
+
+    def test_output_fields_optional(self):
+        """output_fields is optional and defaults to None."""
+        data = CreateScoutInput(query="Track AI news")
+        assert data.output_fields is None
+
 
 class TestEditScoutInput:
     def test_scout_id_required(self):
@@ -109,6 +122,14 @@ class TestEditScoutInput:
         assert data.user_location == "San Francisco, CA"
         assert data.is_public is True
 
+    def test_output_fields(self):
+        """output_fields can be updated."""
+        data = EditScoutInput(
+            scout_id="abc-123",
+            output_fields=["title", "description"],
+        )
+        assert data.output_fields == ["title", "description"]
+
 
 class TestBrowsingTaskInput:
     def test_required_fields(self):
@@ -140,6 +161,20 @@ class TestBrowsingTaskInput:
                 start_url="https://example.com",
                 max_steps=150,
             )
+
+    def test_output_fields(self):
+        """output_fields accepts a list of field names."""
+        data = BrowsingTaskInput(
+            task="Extract employee data",
+            start_url="https://example.com/team",
+            output_fields=["name", "title", "email"],
+        )
+        assert data.output_fields == ["name", "title", "email"]
+
+    def test_output_fields_optional(self):
+        """output_fields is optional."""
+        data = BrowsingTaskInput(task="Test", start_url="https://example.com")
+        assert data.output_fields is None
 
 
 class TestScoutIdInput:
@@ -236,15 +271,21 @@ class TestResearchTaskInput:
             query="Research quantum computing developments",
             user_timezone="America/New_York",
             user_location="New York, NY, US",
-            task_spec={"output_schema": {"type": "json", "json_schema": {"type": "object"}}},
+            output_fields=["title", "summary", "source_url"],
             webhook_url="https://example.com/webhook",
             webhook_format="slack",
         )
         assert data.user_timezone == "America/New_York"
         assert data.user_location == "New York, NY, US"
         assert data.webhook_format == "slack"
+        assert data.output_fields == ["title", "summary", "source_url"]
 
     def test_query_required(self):
         """query is required."""
         with pytest.raises(ValidationError):
             ResearchTaskInput()
+
+    def test_output_fields_optional(self):
+        """output_fields is optional."""
+        data = ResearchTaskInput(query="Research AI")
+        assert data.output_fields is None
