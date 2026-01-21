@@ -140,6 +140,21 @@ class ScoutIdInput(BaseModel):
     scout_id: str = Field(..., description="The scout's unique identifier (UUID)")
 
 
+class ListScoutsInput(BaseModel):
+    """Input for listing scouts with optional limit and filtering."""
+
+    limit: int | None = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Maximum number of scouts to return (1-100). Default: 10",
+    )
+    status: Literal["active", "paused", "done"] | None = Field(
+        default=None,
+        description="Filter by status: 'active', 'paused', or 'done'",
+    )
+
+
 class GetUpdatesInput(BaseModel):
     """Input for retrieving scout updates."""
 

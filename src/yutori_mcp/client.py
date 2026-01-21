@@ -52,9 +52,18 @@ class YutoriClient:
     # Scout operations
     # -------------------------------------------------------------------------
 
-    def list_scouts(self) -> dict[str, Any]:
-        """List all scouts for the authenticated user (basic metadata only)."""
-        return self._request("GET", "/scouting/tasks")
+    def list_scouts(
+        self,
+        limit: int | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """List scouts for the authenticated user with optional limit and filtering."""
+        params: dict[str, Any] = {}
+        if limit is not None:
+            params["page_size"] = limit  # API uses page_size
+        if status is not None:
+            params["status"] = status
+        return self._request("GET", "/scouting/tasks", params=params)
 
     def create_scout(
         self,

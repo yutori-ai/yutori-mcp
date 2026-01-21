@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 
 from mcp.server import Server
@@ -10,11 +9,13 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from .client import YutoriAPIError, YutoriClient
+from .formatters import format_response
 from .schemas import (
     BrowsingTaskInput,
     CreateScoutInput,
     EditScoutInput,
     GetUpdatesInput,
+    ListScoutsInput,
     ResearchTaskInput,
     ScoutIdInput,
     TaskIdInput,
@@ -31,7 +32,7 @@ TOOLS = [
             "List all scouts for the authenticated user. "
             "Returns basic metadata; use get_scout_detail for full fields."
         ),
-        inputSchema={"type": "object", "properties": {}, "required": []},
+        inputSchema=ListScoutsInput.model_json_schema(),
         annotations={"readOnlyHint": True},
     ),
     Tool(
@@ -116,8 +117,9 @@ def create_server() -> Server:
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         try:
             with YutoriClient() as client:
-                result = _handle_tool(client, name, arguments)
-                return [TextContent(type="text", text=json.dumps(result, indent=2))]
+                result, context = _handle_tool(client, name, arguments)
+                formatted = format_response(name, result, **context)
+                return [TextContent(type="text", text=formatted)]
         except YutoriAPIError as e:
             return [TextContent(type="text", text=f"API Error ({e.status_code}): {e.message}")]
         except Exception as e:
@@ -127,27 +129,34 @@ def create_server() -> Server:
     return server
 
 
-def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> dict:
-    """Route tool calls to the appropriate client method."""
+def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> tuple[dict, dict]:
+    """Route tool calls to the appropriate client method.
+
+    Returns:
+        Tuple of (result, context) where context contains extra info for formatting.
+    """
     match name:
         # Read operations
         case "list_scouts":
-            return client.list_scouts()
+            params = ListScoutsInput(**arguments)
+            result = client.list_scouts(limit=params.limit, status=params.status)
+            return result, {}
         case "get_scout_detail":
             params = ScoutIdInput(**arguments)
-            return client.get_scout_detail(params.scout_id)
+            return client.get_scout_detail(params.scout_id), {}
         case "get_scout_updates":
             params = GetUpdatesInput(**arguments)
-            return client.get_scout_updates(
+            result = client.get_scout_updates(
                 scout_id=params.scout_id,
                 cursor=params.cursor,
                 limit=params.limit,
             )
+            return result, {}
 
         # Scout lifecycle
         case "create_scout":
             params = CreateScoutInput(**arguments)
-            return client.create_scout(
+            result = client.create_scout(
                 query=params.query,
                 output_interval=params.output_interval,
                 webhook_url=params.webhook_url,
@@ -159,11 +168,14 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> dict:
                 user_location=params.user_location,
                 is_public=params.is_public,
             )
+            return result, {}
         case "edit_scout":
             params = EditScoutInput(**arguments)
 
-            # Apply config updates first (so they take effect before status change)
-            # Use `is not None` to correctly handle False values (e.g., is_public=False)
+            # Fetch current state for diff (also validates scout exists)
+            old_scout = client.get_scout_detail(params.scout_id)
+
+            # Apply config updates (so they take effect before status change)
             has_config_updates = any(f is not None for f in [
                 params.query,
                 params.output_interval,
@@ -198,16 +210,18 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> dict:
             elif params.status == "done":
                 client.complete_scout(params.scout_id)
 
-            # Return updated scout details
-            return client.get_scout_detail(params.scout_id)
+            # Return old and new state for diff
+            new_scout = client.get_scout_detail(params.scout_id)
+            return {"old": old_scout, "new": new_scout}, {}
         case "delete_scout":
             params = ScoutIdInput(**arguments)
-            return client.delete_scout(params.scout_id)
+            result = client.delete_scout(params.scout_id)
+            return result, {"scout_id": params.scout_id}
 
         # Browsing operations
         case "run_browsing_task":
             params = BrowsingTaskInput(**arguments)
-            return client.run_browsing_task(
+            result = client.run_browsing_task(
                 task=params.task,
                 start_url=params.start_url,
                 max_steps=params.max_steps,
@@ -215,14 +229,15 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> dict:
                 webhook_url=params.webhook_url,
                 webhook_format=params.webhook_format,
             )
+            return result, {"task_type": "Browsing"}
         case "get_browsing_task_result":
             params = TaskIdInput(**arguments)
-            return client.get_browsing_task(params.task_id)
+            return client.get_browsing_task(params.task_id), {"task_type": "Browsing"}
 
         # Research operations
         case "run_research_task":
             params = ResearchTaskInput(**arguments)
-            return client.run_research_task(
+            result = client.run_research_task(
                 query=params.query,
                 user_timezone=params.user_timezone,
                 user_location=params.user_location,
@@ -230,9 +245,10 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> dict:
                 webhook_url=params.webhook_url,
                 webhook_format=params.webhook_format,
             )
+            return result, {"task_type": "Research"}
         case "get_research_task_result":
             params = TaskIdInput(**arguments)
-            return client.get_research_task(params.task_id)
+            return client.get_research_task(params.task_id), {"task_type": "Research"}
 
         case _:
             raise ValueError(f"Unknown tool: {name}")

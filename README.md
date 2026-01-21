@@ -181,41 +181,48 @@ pip install yutori-mcp
 
 ## Tools
 
+All tool outputs are formatted as human-readable text optimized for LLM consumption.
+
 ### Scout Tools
 
 #### list_scouts
 
-List all scouts for the user (basic metadata only).
-
-```json
-{}
-```
-
-Example response:
+List scouts for the user with optional filtering.
 
 ```json
 {
-  "scouts": [
-    {
-      "id": "690bd26c-0ef8-42f4-99e4-8fca6ea20e6f",
-      "query": "Tell me about the latest news, product updates, or announcements about Yutori",
-      "display_name": "Yutori news and updates",
-      "status": "active",
-      "output_interval": 86400,
-      "created_at": "2026-01-15T18:32:10.621797Z",
-      "next_output_timestamp": "2026-01-16T18:32:00Z"
-    },
-    {
-      "id": "36d178a0-591f-4567-8019-32d24f9e55ba",
-      "query": "Monitor Yutori API changelog for breaking changes",
-      "display_name": "Yutori API changelog",
-      "status": "paused",
-      "output_interval": 43200,
-      "created_at": "2026-01-10T08:14:22.385754Z",
-      "next_output_timestamp": "2026-01-10T20:14:00Z"
-    }
-  ]
+  "limit": 10,
+  "status": "active"
 }
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `limit` | No | Max scouts to return (1-100). Default: 10 |
+| `status` | No | Filter by `active`, `paused`, or `done` |
+
+Example response:
+
+```
+Found 87 scouts: 72 active, 12 paused, 3 done.
+
+Showing 10 of 87:
+
+1. Yutori news and updates (active)
+   Query: "Tell me about the latest news, product updates, or..."
+   ID: 690bd26c-0ef8-42f4-99e4-8fca6ea20e6f
+   Runs daily | Next: 2026-01-16
+
+2. Yutori API changelog (paused)
+   Query: "Monitor Yutori API changelog for breaking changes"
+   ID: 36d178a0-591f-4567-8019-32d24f9e55ba
+   Runs every 12 hours | Next: 2026-01-10
+
+... (8 more)
+
+Use list_scouts(status="active") to filter by status.
+Use list_scouts(limit=50) to see more.
+Use get_scout_detail(scout_id) for full details.
 ```
 
 #### get_scout_detail
@@ -230,23 +237,24 @@ Get detailed information for a specific scout.
 
 Example response:
 
-```json
-{
-  "id": "690bd26c-0ef8-42f4-99e4-8fca6ea20e6f",
-  "query": "Tell me about the latest news, product updates, or announcements about Yutori",
-  "display_name": "Yutori news and updates",
-  "status": "active",
-  "created_at": "2026-01-15T18:32:10.621797Z",
-  "next_run_timestamp": "2026-01-16T18:32:00Z",
-  "next_output_timestamp": "2026-01-16T18:32:00Z",
-  "user_timezone": "America/Los_Angeles",
-  "output_interval": 86400,
-  "completed_at": null,
-  "paused_at": null,
-  "last_update_timestamp": "2026-01-15T18:45:23.379430Z",
-  "update_count": 1,
-  "is_public": true
-}
+```
+Scout: Yutori news and updates
+ID: 690bd26c-0ef8-42f4-99e4-8fca6ea20e6f
+Status: active
+
+Query: "Tell me about the latest news, product updates, or announcements about Yutori"
+
+Schedule:
+  Interval: daily
+  Next run: 2026-01-16 18:32 UTC
+  Timezone: America/Los_Angeles
+
+Configuration:
+  Webhook: not configured
+  Email notifications: enabled
+  Public: yes
+
+Created: 2026-01-15
 ```
 
 #### create_scout
@@ -298,19 +306,16 @@ Create a new monitoring scout for continuous web monitoring. Scouts track change
 
 Example response:
 
-```json
-{
-  "id": "3d1d5e2a-5b6c-4a9c-8f8c-2f2e3b4a5c6d",
-  "query": "Tell me about the latest news, product updates, press releases, social media announcements, investments into, or other relevant information about Yutori",
-  "display_name": "Yutori news and updates",
-  "next_run_timestamp": "2026-01-07T03:10:00Z",
-  "user_timezone": "America/Los_Angeles",
-  "next_output_timestamp": "2026-01-07T03:10:00Z",
-  "created_at": "2026-01-06T03:10:45Z",
-  "completed_at": null,
-  "paused_at": null,
-  "is_public": true
-}
+```
+Scout created successfully.
+
+Name: Yutori news and updates
+ID: 3d1d5e2a-5b6c-4a9c-8f8c-2f2e3b4a5c6d
+Status: active
+
+Query: "Tell me about the latest news, product updates, press releases, social..."
+Schedule: runs daily
+First run: 2026-01-07 03:10 UTC
 ```
 
 | Parameter | Required | Description |
@@ -361,23 +366,15 @@ Update an existing scout's query, schedule, webhook configuration, or status.
 
 Example response:
 
-```json
-{
-  "id": "7c8692c3-c637-4302-a982-b9f4f7b49407",
-  "query": "Monitor Yutori API changelog for breaking changes",
-  "display_name": "Yutori API changelog",
-  "status": "paused",
-  "created_at": "2026-01-17T18:20:35.574343Z",
-  "next_run_timestamp": "1970-01-01T00:00:00Z",
-  "next_output_timestamp": "1970-01-01T00:00:00Z",
-  "user_timezone": "America/New_York",
-  "output_interval": 43200,
-  "completed_at": null,
-  "paused_at": "2026-01-17T18:20:36.695288Z",
-  "last_update_timestamp": null,
-  "update_count": 0,
-  "is_public": true
-}
+```
+Scout updated successfully.
+
+Name: Yutori API changelog
+ID: 7c8692c3-c637-4302-a982-b9f4f7b49407
+
+Changes applied:
+  • Status: paused → active
+  • Query: "Monitor Yutori API changelog..." → "updated monitoring query"
 ```
 
 | Parameter | Required | Description |
@@ -406,8 +403,12 @@ Permanently delete a scout. **This cannot be undone.**
 
 Example response:
 
-```json
-{}
+```
+Scout deleted.
+
+ID: abc123-...
+
+This action cannot be undone.
 ```
 
 #### get_scout_updates
@@ -417,45 +418,26 @@ Get paginated updates from a scout.
 ```json
 {
   "scout_id": "690bd26c-0ef8-42f4-99e4-8fca6ea20e6f",
-  "limit": 1
+  "limit": 2
 }
 ```
 
 Example response:
 
-```json
-{
-  "updates": [
-    {
-      "id": "a4e7bd83-4b84-4189-b679-6886fca381bb",
-      "timestamp": 1768541097379,
-      "content": "<h3>Yutori Product Updates</h3><p>Yutori has released new MCP server tools for web monitoring and browsing automation...</p>",
-      "citations": [
-        {
-          "id": "0",
-          "url": "https://github.com/yutori-ai/yutori-mcp",
-          "preview_data": {
-            "title": "GitHub - yutori-ai/yutori-mcp: MCP server for Yutori web monitoring",
-            "description": "MCP server for Yutori - web monitoring and browsing automation.",
-            "image": "https://opengraph.githubassets.com/.../yutori-ai/yutori-mcp",
-            "url": "https://github.com/yutori-ai/yutori-mcp"
-          }
-        }
-      ],
-      "stats": {
-        "num_tool_calls": 12,
-        "num_mcp_tool_calls": 12,
-        "num_crawler_calls": 0,
-        "num_navigator_steps": 0,
-        "num_websites_visited": 0,
-        "sec_saved": 240
-      },
-      "structured_result": null
-    }
-  ],
-  "prev_cursor": null,
-  "next_cursor": null
-}
+```
+Found 2 update(s):
+
+--- Update #1 —
+Date: 2026-01-16 05:45 UTC
+
+Yutori Product Updates
+
+Yutori has released new MCP server tools for web monitoring and browsing automation...
+
+--- Update #2 —
+Date: 2026-01-15 05:45 UTC
+
+No new findings since last update.
 ```
 
 ### Research Tools
@@ -508,12 +490,14 @@ Execute a one-time deep web research task. The research agent searches, reads, a
 
 Example response:
 
-```json
-{
-  "task_id": "ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395",
-  "view_url": "https://scouts.yutori.com/ae27a17c-a4ed-4c69-8b2a-4bec330fc935",
-  "status": "queued"
-}
+```
+Research task started.
+
+Task ID: ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395
+Status: queued
+View progress: https://scouts.yutori.com/ae27a17c-a4ed-4c69-8b2a-4bec330fc935
+
+Poll with get_research_task_result(task_id="ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395") to check status.
 ```
 
 | Parameter | Required | Description |
@@ -537,34 +521,33 @@ Poll for the status and result of a research task. Call this after `run_research
 
 Example response (running):
 
-```json
-{
-  "task_id": "ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395",
-  "view_url": "https://scouts.yutori.com/ae27a17c-a4ed-4c69-8b2a-4bec330fc935",
-  "status": "running",
-  "created_at": "2026-01-19T18:46:35.800932Z",
-  "updates": []
-}
+```
+Task in progress.
+
+Task ID: ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395
+Status: running
+
+Poll again in a few seconds.
 ```
 
 Example response (succeeded):
 
-```json
-{
-  "task_id": "ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395",
-  "view_url": "https://scouts.yutori.com/ae27a17c-a4ed-4c69-8b2a-4bec330fc935",
-  "status": "succeeded",
-  "result": "<h3>Hardware strides and strategic moves this week</h3>\n<p>I focused on notable hardware breakthroughs, leadership changes, applied research, and an industry appearance from January 12–19, 2026.</p>\n<ul>\n  <li>MIT demonstrated chip-based cooling for trapped-ion qubits, reaching approximately 10× below the standard laser cooling limit.</li>\n  <li>EeroQ unveiled a scalable quantum control chip transporting electron qubits on superfluid helium over long distances with high fidelity.</li>\n  <li>IonQ appointed Katie Arrington as Chief Information Officer to lead secure quantum innovation and enterprise adoption initiatives.</li>\n  <li>Researchers introduced QUPID, a quantum neural network that outperforms classical models in detecting smart grid anomalies.</li>\n</ul>",
-  "created_at": "2026-01-19T18:46:35.800932Z",
-  "updates": [
-    {
-      "id": "adfb8147-7122-4b5a-88ee-af2b4d53002f",
-      "timestamp": 1768848395000,
-      "content": "...",
-      "citations": []
-    }
-  ]
-}
+```
+Task completed.
+
+Task ID: ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395
+Status: succeeded
+
+Result:
+Hardware strides and strategic moves this week
+
+I focused on notable hardware breakthroughs, leadership changes, applied research,
+and an industry appearance from January 12–19, 2026.
+
+• MIT demonstrated chip-based cooling for trapped-ion qubits
+• EeroQ unveiled a scalable quantum control chip
+• IonQ appointed Katie Arrington as Chief Information Officer
+• Researchers introduced QUPID, a quantum neural network
 ```
 
 ### Browsing Tools
@@ -617,12 +600,14 @@ Execute a one-time web browsing task using the navigator agent. The agent runs a
 
 Example response:
 
-```json
-{
-  "task_id": "54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396",
-  "view_url": "https://scouts.yutori.com/54fb19fd-277e-4098-ab72-5a9f8a4347fc",
-  "status": "queued"
-}
+```
+Browsing task started.
+
+Task ID: 54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396
+Status: queued
+View progress: https://scouts.yutori.com/54fb19fd-277e-4098-ab72-5a9f8a4347fc
+
+Poll with get_browsing_task_result(task_id="54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396") to check status.
 ```
 
 | Parameter | Required | Description |
@@ -646,23 +631,42 @@ Poll for the status and result of a browsing task. Call this after `run_browsing
 
 Example response (running):
 
-```json
-{
-  "task_id": "54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396",
-  "view_url": "https://scouts.yutori.com/54fb19fd-277e-4098-ab72-5a9f8a4347fc",
-  "status": "running"
-}
+```
+Task in progress.
+
+Task ID: 54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396
+Status: running
+
+Poll again in a few seconds.
 ```
 
 Example response (succeeded):
 
-```json
-{
-  "task_id": "54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396",
-  "view_url": "https://scouts.yutori.com/54fb19fd-277e-4098-ab72-5a9f8a4347fc",
-  "status": "succeeded",
-  "result": "## Summary of All Yutori Employees\n\nI have successfully located all employees of Yutori on their company page. Here is the complete list of **17 employees** with their names and titles:\n\n### Founders & Leadership:\n1. **Abhishek Das** - Co-founder and Co-CEO\n2. **Devi Parikh** - Co-founder and Co-CEO\n3. **Dhruv Batra** - Co-founder and Chief Scientist\n\n### Executive:\n4. **Kristi Edleson** - Chief of Staff\n\n### Technical Staff:\n5. **Rui Wang** - Member of Technical Staff\n6. **Tong Xiao** - Member of Technical Staff\n7. **Yunfan Ye** - Member of Technical Staff\n... (17 employees total)\n\n**Source Page:** https://yutori.com/company#team"
-}
+```
+Task completed.
+
+Task ID: 54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396
+Status: succeeded
+
+Result:
+Summary of All Yutori Employees
+
+I have successfully located all employees of Yutori on their company page.
+Here is the complete list of 17 employees with their names and titles:
+
+Founders & Leadership:
+1. Abhishek Das - Co-founder and Co-CEO
+2. Devi Parikh - Co-founder and Co-CEO
+3. Dhruv Batra - Co-founder and Chief Scientist
+
+Executive:
+4. Kristi Edleson - Chief of Staff
+
+Technical Staff:
+5. Rui Wang - Member of Technical Staff
+... (17 employees total)
+
+Source Page: https://yutori.com/company#team
 ```
 
 ## Tool Annotations

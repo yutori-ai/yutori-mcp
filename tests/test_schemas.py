@@ -8,6 +8,7 @@ from yutori_mcp.schemas import (
     CreateScoutInput,
     EditScoutInput,
     GetUpdatesInput,
+    ListScoutsInput,
     ResearchTaskInput,
     ScoutIdInput,
     TaskIdInput,
@@ -146,6 +147,55 @@ class TestScoutIdInput:
         """scout_id is required."""
         data = ScoutIdInput(scout_id="abc-123")
         assert data.scout_id == "abc-123"
+
+
+class TestListScoutsInput:
+    def test_default_values(self):
+        """Default limit is 10, status is None."""
+        data = ListScoutsInput()
+        assert data.limit == 10
+        assert data.status is None
+
+    def test_custom_limit(self):
+        """Custom limit can be set."""
+        data = ListScoutsInput(limit=50)
+        assert data.limit == 50
+
+    def test_limit_range(self):
+        """Limit must be between 1 and 100."""
+        data = ListScoutsInput(limit=1)
+        assert data.limit == 1
+
+        data = ListScoutsInput(limit=100)
+        assert data.limit == 100
+
+        with pytest.raises(ValidationError):
+            ListScoutsInput(limit=0)
+
+        with pytest.raises(ValidationError):
+            ListScoutsInput(limit=101)
+
+    def test_status_filter(self):
+        """Status filter works with valid values."""
+        data = ListScoutsInput(status="active")
+        assert data.status == "active"
+
+        data = ListScoutsInput(status="paused")
+        assert data.status == "paused"
+
+        data = ListScoutsInput(status="done")
+        assert data.status == "done"
+
+    def test_status_invalid(self):
+        """Invalid status values are rejected."""
+        with pytest.raises(ValidationError):
+            ListScoutsInput(status="completed")
+
+    def test_combined_params(self):
+        """Limit and status can be combined."""
+        data = ListScoutsInput(limit=20, status="active")
+        assert data.limit == 20
+        assert data.status == "active"
 
 
 class TestTaskIdInput:
