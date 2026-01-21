@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -22,6 +23,34 @@ from .schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _output_fields_to_task_spec(output_fields: list[str] | None) -> dict[str, Any] | None:
+    """Convert simple output_fields list to full task_spec JSON Schema.
+
+    Args:
+        output_fields: List of field names, e.g. ['headline', 'summary', 'url']
+
+    Returns:
+        Full task_spec dict for API, or None if output_fields is None.
+    """
+    if output_fields is None:
+        return None
+
+    properties = {field: {"type": "string"} for field in output_fields}
+
+    return {
+        "output_schema": {
+            "type": "json",
+            "json_schema": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": properties,
+                },
+            },
+        },
+    }
 
 # Tool definitions with annotations
 TOOLS = [
@@ -161,7 +190,7 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> tuple[dict
                 output_interval=params.output_interval,
                 webhook_url=params.webhook_url,
                 webhook_format=params.webhook_format,
-                task_spec=params.task_spec,
+                task_spec=_output_fields_to_task_spec(params.output_fields),
                 user_timezone=params.user_timezone,
                 skip_email=params.skip_email,
                 start_timestamp=params.start_timestamp,
@@ -181,7 +210,7 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> tuple[dict
                 params.output_interval,
                 params.webhook_url,
                 params.webhook_format,
-                params.task_spec,
+                params.output_fields,
                 params.skip_email,
                 params.user_timezone,
                 params.user_location,
@@ -195,7 +224,7 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> tuple[dict
                     output_interval=params.output_interval,
                     webhook_url=params.webhook_url,
                     webhook_format=params.webhook_format,
-                    task_spec=params.task_spec,
+                    task_spec=_output_fields_to_task_spec(params.output_fields),
                     skip_email=params.skip_email,
                     user_timezone=params.user_timezone,
                     user_location=params.user_location,
@@ -225,7 +254,7 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> tuple[dict
                 task=params.task,
                 start_url=params.start_url,
                 max_steps=params.max_steps,
-                task_spec=params.task_spec,
+                task_spec=_output_fields_to_task_spec(params.output_fields),
                 webhook_url=params.webhook_url,
                 webhook_format=params.webhook_format,
             )
@@ -241,7 +270,7 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> tuple[dict
                 query=params.query,
                 user_timezone=params.user_timezone,
                 user_location=params.user_location,
-                task_spec=params.task_spec,
+                task_spec=_output_fields_to_task_spec(params.output_fields),
                 webhook_url=params.webhook_url,
                 webhook_format=params.webhook_format,
             )

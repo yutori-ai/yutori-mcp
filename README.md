@@ -278,29 +278,7 @@ Create a new monitoring scout for continuous web monitoring. Scouts track change
   "user_timezone": "America/Los_Angeles",
   "skip_email": true,
   "webhook_url": "https://example.com/webhook",
-  "task_spec": {
-    "output_schema": {
-      "type": "json",
-      "json_schema": {
-        "type": "object",
-        "properties": {
-          "stories": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "headline": { "type": "string" },
-                "summary": { "type": "string" },
-                "source_url": { "type": "string" }
-              },
-              "required": ["headline", "source_url"]
-            }
-          }
-        },
-        "required": ["stories"]
-      }
-    }
-  }
+  "output_fields": ["headline", "summary", "source_url"]
 }
 ```
 
@@ -324,7 +302,7 @@ First run: 2026-01-07 03:10 UTC
 | `output_interval` | No | Seconds between runs (min: 1800). Default: 86400 |
 | `webhook_url` | No | URL for webhook notifications |
 | `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
-| `task_spec` | No | JSON Schema for structured output |
+| `output_fields` | No | List of field names for structured output as array of objects |
 | `user_timezone` | No | Timezone for scheduling |
 | `skip_email` | No | Skip email notifications |
 | `start_timestamp` | No | ISO timestamp for when monitoring should start |
@@ -385,11 +363,11 @@ Changes applied:
 | `output_interval` | No | Seconds between runs (min 1800) |
 | `webhook_url` | No | Webhook notification URL |
 | `webhook_format` | No | `scout`, `slack`, or `zapier` |
+| `output_fields` | No | List of field names for structured output |
 | `user_timezone` | No | Timezone for scheduling |
 | `user_location` | No | Location for geo-relevant searches |
 | `is_public` | No | Whether results are public |
 | `skip_email` | No | Skip email notifications |
-| `task_spec` | No | JSON Schema for structured output |
 
 #### delete_scout
 
@@ -461,30 +439,7 @@ Execute a one-time deep web research task. The research agent searches, reads, a
   "query": "What are the latest developments in quantum computing from the past week? Include company announcements, research papers, and product releases.",
   "user_timezone": "America/Los_Angeles",
   "webhook_url": "https://example.com/webhook",
-  "task_spec": {
-    "output_schema": {
-      "type": "json",
-      "json_schema": {
-        "type": "object",
-        "properties": {
-          "developments": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "title": { "type": "string" },
-                "summary": { "type": "string" },
-                "source_url": { "type": "string" },
-                "category": { "type": "string", "enum": ["company", "research", "product"] }
-              },
-              "required": ["title", "summary", "source_url"]
-            }
-          }
-        },
-        "required": ["developments"]
-      }
-    }
-  }
+  "output_fields": ["title", "summary", "source_url", "category"]
 }
 ```
 
@@ -505,7 +460,7 @@ Poll with get_research_task_result(task_id="ae27a17c-a4ed-4c69-8b2a-4bec330fc935
 | `query` | Yes | Natural language description of what to research |
 | `user_timezone` | No | Timezone for context. Default: 'America/Los_Angeles' |
 | `user_location` | No | Location for context. Default: 'San Francisco, CA, US' |
-| `task_spec` | No | JSON Schema for structured output |
+| `output_fields` | No | List of field names for structured output as array of objects |
 | `webhook_url` | No | URL for completion notification |
 | `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
 
@@ -573,28 +528,7 @@ Execute a one-time web browsing task using the navigator agent. The agent runs a
   "start_url": "https://yutori.com",
   "max_steps": 75,
   "webhook_url": "https://example.com/webhook",
-  "task_spec": {
-    "output_schema": {
-      "type": "json",
-      "json_schema": {
-        "type": "object",
-        "properties": {
-          "employees": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "name": { "type": "string" },
-                "title": { "type": "string" }
-              },
-              "required": ["name", "title"]
-            }
-          }
-        },
-        "required": ["employees"]
-      }
-    }
-  }
+  "output_fields": ["name", "title"]
 }
 ```
 
@@ -615,7 +549,7 @@ Poll with get_browsing_task_result(task_id="54fb19fd-277e-4098-ab72-5a9f8a4347fc
 | `task` | Yes | Natural language instruction for the navigator |
 | `start_url` | Yes | URL where browsing begins |
 | `max_steps` | No | Max browser actions (1-100). Default: 25 |
-| `task_spec` | No | JSON Schema for structured output |
+| `output_fields` | No | List of field names for structured output as array of objects |
 | `webhook_url` | No | URL for completion notification |
 | `webhook_format` | No | `scout` (default) or `slack` |
 

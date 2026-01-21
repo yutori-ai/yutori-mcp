@@ -39,9 +39,15 @@ class CreateScoutInput(BaseModel):
         default=None,
         description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
     )
-    task_spec: dict[str, Any] | None = Field(
+    output_fields: list[str] | None = Field(
         default=None,
-        description="JSON Schema for structured output format",
+        description=(
+            "Optional: Extract structured data as an array of objects with these field names. "
+            "Example: ['headline', 'summary', 'url']. "
+            "If omitted, returns human-readable text. "
+            "For complex schemas, call the Yutori REST API directly (see example at: "
+            "https://docs.yutori.com/reference/scouts-create#using-scheduling-webhooks-and-a-structured-output-schema)."
+        ),
     )
     user_timezone: str | None = Field(
         default=None,
@@ -93,9 +99,14 @@ class EditScoutInput(BaseModel):
         default=None,
         description="Updated webhook format: 'scout', 'slack', or 'zapier'",
     )
-    task_spec: dict[str, Any] | None = Field(
+    output_fields: list[str] | None = Field(
         default=None,
-        description="Updated JSON Schema for structured output",
+        description=(
+            "Optional: Extract structured data as an array of objects with these field names. "
+            "Example: ['headline', 'summary', 'url']. "
+            "If omitted, returns human-readable text. "
+            "For complex schemas, call the Yutori REST API directly"
+        ),
     )
     skip_email: bool | None = Field(
         default=None,
@@ -123,7 +134,7 @@ class EditScoutInput(BaseModel):
             self.output_interval,
             self.webhook_url,
             self.webhook_format,
-            self.task_spec,
+            self.output_fields,
             self.skip_email,
             self.user_timezone,
             self.user_location,
@@ -201,9 +212,15 @@ class BrowsingTaskInput(BaseModel):
         le=100,
         description="Maximum number of browser actions (1-100). Default: 25",
     )
-    task_spec: dict[str, Any] | None = Field(
+    output_fields: list[str] | None = Field(
         default=None,
-        description="JSON Schema for structured output format",
+        description=(
+            "Optional: Extract structured data as an array of objects with these field names. "
+            "Example: ['name', 'title', 'email']. "
+            "If omitted, returns human-readable text. "
+            "For complex schemas, call the Yutori REST API directly (see example at: "
+            "https://docs.yutori.com/reference/browsing-create#using-webhooks-and-a-structured-output-schema)."
+        ),
     )
     webhook_url: str | None = Field(
         default=None,
@@ -249,9 +266,15 @@ class ResearchTaskInput(BaseModel):
         default=None,
         description="Location for contextual awareness. Format: 'city, region, country'. Default: 'San Francisco, CA, US'",
     )
-    task_spec: dict[str, Any] | None = Field(
+    output_fields: list[str] | None = Field(
         default=None,
-        description="JSON Schema for structured output format",
+        description=(
+            "Optional: Extract structured data as an array of objects with these field names. "
+            "Example: ['title', 'summary', 'source_url']. "
+            "If omitted, returns human-readable text. "
+            "For complex schemas, call the Yutori REST API directly (see example at: "
+            "https://docs.yutori.com/reference/research-create#using-webhooks-and-a-structured-output-schema)."
+        ),
     )
     webhook_url: str | None = Field(
         default=None,
