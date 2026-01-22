@@ -25,6 +25,46 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 
+def _simplify_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Simplify JSON Schema for MCP clients by flattening anyOf with null.
+
+    Pydantic generates `anyOf: [{type: X}, {type: null}]` for optional fields.
+    MCP clients don't always understand this, showing "unknown" for types.
+    This function converts such patterns to just `{type: X}` while preserving
+    other properties like default, description, minimum, maximum, enum, etc.
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    result = {}
+    for key, value in schema.items():
+        if key == "anyOf" and isinstance(value, list) and len(value) == 2:
+            # Check if this is the pattern: [{actual_type}, {type: null}]
+            non_null = [v for v in value if not (isinstance(v, dict) and v.get("type") == "null")]
+            null_types = [v for v in value if isinstance(v, dict) and v.get("type") == "null"]
+
+            if len(non_null) == 1 and len(null_types) == 1:
+                # Flatten: merge the non-null type's properties into result
+                for k, v in _simplify_schema(non_null[0]).items():
+                    result[k] = v
+                continue
+
+        # Recursively simplify nested structures
+        if isinstance(value, dict):
+            result[key] = _simplify_schema(value)
+        elif isinstance(value, list):
+            result[key] = [_simplify_schema(item) if isinstance(item, dict) else item for item in value]
+        else:
+            result[key] = value
+
+    return result
+
+
+def _get_simplified_schema(model: type) -> dict[str, Any]:
+    """Get a simplified JSON Schema from a Pydantic model."""
+    return _simplify_schema(model.model_json_schema())
+
+
 def _output_fields_to_task_spec(output_fields: list[str] | None) -> dict[str, Any] | None:
     """Convert simple output_fields list to full task_spec JSON Schema.
 
@@ -61,19 +101,19 @@ TOOLS = [
             "List all scouts for the authenticated user. "
             "Returns basic metadata; use get_scout_detail for full fields."
         ),
-        inputSchema=ListScoutsInput.model_json_schema(),
+        inputSchema=_get_simplified_schema(ListScoutsInput),
         annotations={"readOnlyHint": True},
     ),
     Tool(
         name="get_scout_detail",
         description="Get detailed information about a specific scout.",
-        inputSchema=ScoutIdInput.model_json_schema(),
+        inputSchema=_get_simplified_schema(ScoutIdInput),
         annotations={"readOnlyHint": True},
     ),
     Tool(
         name="get_scout_updates",
         description="Get paginated updates/reports for a scout. Each update contains findings from a run.",
-        inputSchema=GetUpdatesInput.model_json_schema(),
+        inputSchema=_get_simplified_schema(GetUpdatesInput),
         annotations={"readOnlyHint": True},
     ),
     # Scout lifecycle
@@ -83,7 +123,7 @@ TOOLS = [
             "Create a monitoring scout for continuous web monitoring. Scouts track changes relevant to "
             "a query and alert you. Examples: 'news about Yutori', 'H100 pricing below $1.50'."
         ),
-        inputSchema=CreateScoutInput.model_json_schema(),
+        inputSchema=_get_simplified_schema(CreateScoutInput),
     ),
     Tool(
         name="edit_scout",
@@ -91,13 +131,13 @@ TOOLS = [
             "Update an existing scout's query, schedule, webhook configuration, or status. "
             "Use status='paused' to pause, 'active' to resume, or 'done' to archive."
         ),
-        inputSchema=EditScoutInput.model_json_schema(),
+        inputSchema=_get_simplified_schema(EditScoutInput),
         annotations={"idempotentHint": True},
     ),
     Tool(
         name="delete_scout",
         description="Permanently delete a scout and all its data. This action cannot be undone.",
-        inputSchema=ScoutIdInput.model_json_schema(),
+        inputSchema=_get_simplified_schema(ScoutIdInput),
         annotations={"destructiveHint": True},
     ),
     # Browsing operations
@@ -107,12 +147,12 @@ TOOLS = [
             "Execute a one-time web browsing task. The navigator agent runs a cloud browser and "
             "operates it like a person. Returns a task_id for polling. Example: 'list employees'."
         ),
-        inputSchema=BrowsingTaskInput.model_json_schema(),
+        inputSchema=_get_simplified_schema(BrowsingTaskInput),
     ),
     Tool(
         name="get_browsing_task_result",
         description="Poll for browsing task status and result. Call until status is 'succeeded' or 'failed'.",
-        inputSchema=TaskIdInput.model_json_schema(),
+        inputSchema=_get_simplified_schema(TaskIdInput),
         annotations={"readOnlyHint": True},
     ),
     # Research operations
@@ -123,12 +163,12 @@ TOOLS = [
             "reads, and synthesizes information from across the web. Returns a task_id for polling. "
             "Example: 'latest AI startup funding announcements'."
         ),
-        inputSchema=ResearchTaskInput.model_json_schema(),
+        inputSchema=_get_simplified_schema(ResearchTaskInput),
     ),
     Tool(
         name="get_research_task_result",
         description="Poll for research task status and result. Call until status is 'succeeded' or 'failed'.",
-        inputSchema=TaskIdInput.model_json_schema(),
+        inputSchema=_get_simplified_schema(TaskIdInput),
         annotations={"readOnlyHint": True},
     ),
 ]
