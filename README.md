@@ -27,8 +27,14 @@ Get your API key from [yutori.com/api](https://yutori.com/api).
 <details open>
 <summary>Claude Code</summary>
 
+Claude Code supports `--scope` (default: `local`). Use `--scope user` for a per-user install.
+
 ```bash
+# local (default)
 claude mcp add yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
+
+# user-level
+claude mcp add --scope user yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
 ```
 </details>
 
@@ -56,6 +62,8 @@ For setup details, see the [Claude Desktop MCP install guide](https://modelconte
 
 <details>
 <summary>Cursor</summary>
+
+Cursor MCP servers are configured in app settings (user-level).
 
 **Click the button to install:**
 
@@ -91,6 +99,8 @@ See the [Cursor MCP guide](https://cursor.com/docs/context/mcp) for setup detail
 <details>
 <summary>VS Code</summary>
 
+VS Code MCP installs live in your settings (the install links and CLI do not take a scope flag).
+
 **Click the button to install:**
 
 [<img src="https://img.shields.io/badge/VS_Code-VS_Code?style=flat-square&label=Install%20Server&color=0098FF" alt="Install in VS Code">](https://insiders.vscode.dev/redirect?url=vscode%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522yutori%2522%252C%2522command%2522%253A%2522uvx%2522%252C%2522args%2522%253A%255B%2522yutori-mcp%2522%255D%257D) [<img alt="Install in VS Code Insiders" src="https://img.shields.io/badge/VS_Code_Insiders-VS_Code_Insiders?style=flat-square&label=Install%20Server&color=24bfa5">](https://insiders.vscode.dev/redirect?url=vscode-insiders%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522yutori%2522%252C%2522command%2522%253A%2522uvx%2522%252C%2522args%2522%253A%255B%2522yutori-mcp%2522%255D%257D)
@@ -106,6 +116,8 @@ code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"],"envFile"
 
 <details>
 <summary>ChatGPT</summary>
+
+ChatGPT Desktop stores MCP server configuration per user.
 
 Open ChatGPT Desktop and go to Settings -> Connectors -> MCP Servers -> Add server.
 
@@ -129,6 +141,8 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
 <details open>
 <summary>Codex</summary>
 
+Codex uses user-level config in `~/.codex/config.toml` (no scope flag in `codex mcp add`).
+
 ```bash
 codex mcp add yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
 ```
@@ -147,6 +161,8 @@ YUTORI_API_KEY = "yt-your-api-key"
 
 <details>
 <summary>Gemini CLI</summary>
+
+Gemini CLI MCP servers are configured in `~/.gemini/settings.json` (user-level).
 
 Add to `~/.gemini/settings.json`:
 
