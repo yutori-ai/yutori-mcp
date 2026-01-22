@@ -129,8 +129,6 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
 <details open>
 <summary>Codex</summary>
 
-Codex uses user-level config in `~/.codex/config.toml` (no scope flag in `codex mcp add`).
-
 ```bash
 codex mcp add yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
 ```
