@@ -90,14 +90,21 @@ def _format_date(iso_string: str | None) -> str:
     return iso_string[:10] if len(iso_string) >= 10 else iso_string
 
 
-def _format_datetime(iso_string: str | None) -> str:
-    """Format ISO datetime string to readable format."""
-    if not iso_string:
+def _format_datetime(timestamp: str | int | None) -> str:
+    """Format timestamp to readable format. Accepts ISO string or Unix timestamp (ms)."""
+    if not timestamp:
         return "not set"
-    # Format as "YYYY-MM-DD HH:MM UTC"
-    if len(iso_string) >= 16:
-        return f"{iso_string[:10]} {iso_string[11:16]} UTC"
-    return iso_string
+    # Handle Unix timestamp in milliseconds (integer)
+    if isinstance(timestamp, int):
+        from datetime import datetime, timezone
+
+        # Convert milliseconds to seconds
+        dt = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+        return dt.strftime("%Y-%m-%d %H:%M UTC")
+    # Handle ISO datetime string
+    if len(timestamp) >= 16:
+        return f"{timestamp[:10]} {timestamp[11:16]} UTC"
+    return timestamp
 
 
 def _truncate(text: str, max_len: int = 60) -> str:

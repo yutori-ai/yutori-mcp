@@ -181,6 +181,18 @@ class TestFormatScoutUpdates:
         assert "Update #1" in result
         assert "Update #2" in result
 
+    def test_with_unix_timestamp(self):
+        """Updates with Unix timestamp in milliseconds are formatted correctly."""
+        response = {
+            "updates": [
+                {"timestamp": 1769997854699, "content": "Update with Unix timestamp"},
+            ],
+            "has_more": False,
+        }
+        result = format_scout_updates(response)
+        assert "Found 1 update(s)" in result
+        assert "2026-02-02 02:04 UTC" in result
+
 
 class TestFormatTaskStarted:
     def test_research_task(self):
