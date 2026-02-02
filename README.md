@@ -161,7 +161,7 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
 <details open>
 <summary>Codex</summary>
 
-**Option 1: MCP Server** (tools only)
+**MCP Server:**
 
 ```bash
 codex mcp add yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
@@ -178,7 +178,7 @@ args = ["yutori-mcp"]
 YUTORI_API_KEY = "yt-your-api-key"
 ```
 
-**Option 2: Skills** (workflow guidance)
+**Skills** (optional, for workflow guidance):
 
 Install the skills using `$skill-installer` inside Codex:
 
