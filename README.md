@@ -27,41 +27,41 @@ Get your API key from [yutori.com/api](https://yutori.com/api).
 <details open>
 <summary>Claude Code</summary>
 
-**Option 1: Plugin (Recommended)** - Includes MCP tools + workflow skills
+1. **Plugin (Recommended)** - Includes MCP tools + workflow skills
 
-First, add your API key to your shell profile (only needed once):
-```bash
-echo 'export YUTORI_API_KEY=yt-your-api-key' >> ~/.zshrc
-source ~/.zshrc
-```
+   First, add your API key to your shell profile (only needed once):
+   ```bash
+   echo 'export YUTORI_API_KEY=yt-your-api-key' >> ~/.zshrc
+   source ~/.zshrc
+   ```
 
-Then run these commands inside Claude Code:
-```
-/plugin marketplace add yutori-ai/yutori-mcp
-/plugin install yutori@yutori-plugins
-```
+   Then run these commands inside Claude Code:
+   ```
+   /plugin marketplace add yutori-ai/yutori-mcp
+   /plugin install yutori@yutori-plugins
+   ```
 
-This installs both the MCP tools and workflow skills:
+   This installs both the MCP tools and workflow skills:
 
-| Skill | Description |
-|-------|-------------|
-| `/yutori:scout` | Set up continuous web monitoring with comprehensive queries |
-| `/yutori:research` | Deep web research workflow (async, 5-10 min) |
-| `/yutori:browse` | Browser automation tasks |
-| `/yutori:competitor-watch` | Quick competitor monitoring template |
-| `/yutori:api-monitor` | API/changelog monitoring template |
+   | Skill | Description |
+   |-------|-------------|
+   | `/yutori:scout` | Set up continuous web monitoring with comprehensive queries |
+   | `/yutori:research` | Deep web research workflow (async, 5-10 min) |
+   | `/yutori:browse` | Browser automation tasks |
+   | `/yutori:competitor-watch` | Quick competitor monitoring template |
+   | `/yutori:api-monitor` | API/changelog monitoring template |
 
-> **Already have the MCP server installed?** Remove it first to avoid duplicate configurations:
-> ```bash
-> claude mcp remove yutori -s user   # if installed at user scope
-> claude mcp remove yutori -s local  # if installed at local/project scope
-> ```
+   > **Already have the MCP server installed?** Remove it first to avoid duplicate configurations:
+   > ```bash
+   > claude mcp remove yutori -s user   # if installed at user scope
+   > claude mcp remove yutori -s local  # if installed at local/project scope
+   > ```
 
-**Option 2: MCP Only**
+2. **MCP Only**
 
-```bash
-claude mcp add --scope user yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
-```
+   ```bash
+   claude mcp add --scope user yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
+   ```
 </details>
 
 <details>
