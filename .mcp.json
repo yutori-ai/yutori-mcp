@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "yutori": {
+      "command": "uvx",
+      "args": ["yutori-mcp"],
+      "env": {
+        "YUTORI_API_KEY": "${YUTORI_API_KEY}"
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "yutori-plugins",
+  "owner": {
+    "name": "Yutori",
+    "email": "support@yutori.com"
+  },
+  "metadata": {
+    "description": "Official Yutori plugin marketplace for Claude Code",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "yutori",
+      "source": "./",
+      "description": "Web monitoring (Scouts), deep research, and browser automation with workflow skills"
+    }
+  ]
+}

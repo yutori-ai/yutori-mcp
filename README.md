@@ -27,6 +27,31 @@ Get your API key from [yutori.com/api](https://yutori.com/api).
 <details open>
 <summary>Claude Code</summary>
 
+**Option 1: Plugin (Recommended)** - Includes MCP tools + workflow skills
+
+```bash
+# Add the Yutori marketplace
+/plugin marketplace add yutori-ai/yutori-mcp
+
+# Install the plugin
+/plugin install yutori@yutori-plugins
+
+# Set your API key
+export YUTORI_API_KEY=yt-your-api-key
+```
+
+This installs both the MCP tools and workflow skills:
+
+| Skill | Description |
+|-------|-------------|
+| `/yutori:scout` | Set up continuous web monitoring with comprehensive queries |
+| `/yutori:research` | Deep web research workflow (async, 5-10 min) |
+| `/yutori:browse` | Browser automation tasks |
+| `/yutori:competitor-watch` | Quick competitor monitoring template |
+| `/yutori:api-monitor` | API/changelog monitoring template |
+
+**Option 2: MCP Only**
+
 ```bash
 claude mcp add --scope user yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
 ```
