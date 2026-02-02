@@ -161,6 +161,8 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
 <details open>
 <summary>Codex</summary>
 
+**MCP Server** (tools only):
+
 ```bash
 codex mcp add yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
 ```
@@ -175,6 +177,27 @@ args = ["yutori-mcp"]
 [mcp_servers.yutori.env]
 YUTORI_API_KEY = "yt-your-api-key"
 ```
+
+**Skills** (workflow guidance):
+
+Install the skills using `$skill-installer` inside Codex:
+
+```
+$skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/skills/01-scout
+$skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/skills/02-research
+$skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/skills/03-browse
+```
+
+Or manually copy skills to your user directory:
+
+```bash
+git clone https://github.com/yutori-ai/yutori-mcp /tmp/yutori-mcp
+cp -r /tmp/yutori-mcp/skills/* ~/.codex/skills/
+```
+
+Restart Codex after installing skills. Invoke skills with `$scout`, `$research`, or `$browse`.
+
+See the [Codex Skills docs](https://developers.openai.com/codex/skills/) for more on skills.
 </details>
 
 <details>
