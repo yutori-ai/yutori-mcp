@@ -1,6 +1,6 @@
-# Yutori MCP Server
+# Yutori MCP Server & Plugin
 
-An MCP server for [Yutori](https://yutori.com) - web monitoring and browsing automation.
+An MCP server and Claude Code plugin for [Yutori](https://yutori.com) - web monitoring and browsing automation.
 
 ## Features
 
