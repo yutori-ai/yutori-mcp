@@ -71,7 +71,7 @@ class YutoriClient:
         output_interval: int | None = None,
         webhook_url: str | None = None,
         webhook_format: str | None = None,
-        task_spec: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
         user_timezone: str | None = None,
         skip_email: bool | None = None,
         start_timestamp: str | None = None,
@@ -86,8 +86,8 @@ class YutoriClient:
             payload["webhook_url"] = webhook_url
         if webhook_format is not None:
             payload["webhook_format"] = webhook_format
-        if task_spec is not None:
-            payload["task_spec"] = task_spec
+        if output_schema is not None:
+            payload["output_schema"] = output_schema
         if user_timezone is not None:
             payload["user_timezone"] = user_timezone
         if skip_email is not None:
@@ -107,7 +107,7 @@ class YutoriClient:
         output_interval: int | None = None,
         webhook_url: str | None = None,
         webhook_format: str | None = None,
-        task_spec: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
         skip_email: bool | None = None,
         user_timezone: str | None = None,
         user_location: str | None = None,
@@ -123,8 +123,8 @@ class YutoriClient:
             payload["webhook_url"] = webhook_url
         if webhook_format is not None:
             payload["webhook_format"] = webhook_format
-        if task_spec is not None:
-            payload["task_spec"] = task_spec
+        if output_schema is not None:
+            payload["output_schema"] = output_schema
         if skip_email is not None:
             payload["skip_email"] = skip_email
         if user_timezone is not None:
@@ -178,7 +178,7 @@ class YutoriClient:
         task: str,
         start_url: str,
         max_steps: int | None = None,
-        task_spec: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
         webhook_url: str | None = None,
         webhook_format: str | None = None,
     ) -> dict[str, Any]:
@@ -186,8 +186,8 @@ class YutoriClient:
         payload: dict[str, Any] = {"task": task, "start_url": start_url}
         if max_steps is not None:
             payload["max_steps"] = max_steps
-        if task_spec is not None:
-            payload["task_spec"] = task_spec
+        if output_schema is not None:
+            payload["output_schema"] = output_schema
         if webhook_url is not None:
             payload["webhook_url"] = webhook_url
         if webhook_format is not None:
@@ -207,7 +207,7 @@ class YutoriClient:
         query: str,
         user_timezone: str | None = None,
         user_location: str | None = None,
-        task_spec: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
         webhook_url: str | None = None,
         webhook_format: str | None = None,
     ) -> dict[str, Any]:
@@ -217,8 +217,8 @@ class YutoriClient:
             payload["user_timezone"] = user_timezone
         if user_location is not None:
             payload["user_location"] = user_location
-        if task_spec is not None:
-            payload["task_spec"] = task_spec
+        if output_schema is not None:
+            payload["output_schema"] = output_schema
         if webhook_url is not None:
             payload["webhook_url"] = webhook_url
         if webhook_format is not None:
