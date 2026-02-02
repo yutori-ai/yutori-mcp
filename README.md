@@ -29,9 +29,10 @@ Get your API key from [yutori.com/api](https://yutori.com/api).
 
 **Option 1: Plugin (Recommended)** - Includes MCP tools + workflow skills
 
-First, set your API key in your terminal:
+First, add your API key to your shell profile (only needed once):
 ```bash
-export YUTORI_API_KEY=yt-your-api-key
+echo 'export YUTORI_API_KEY=yt-your-api-key' >> ~/.zshrc
+source ~/.zshrc
 ```
 
 Then run these commands inside Claude Code:
