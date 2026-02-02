@@ -50,6 +50,11 @@ This installs both the MCP tools and workflow skills:
 | `/yutori:competitor-watch` | Quick competitor monitoring template |
 | `/yutori:api-monitor` | API/changelog monitoring template |
 
+> **Already have the MCP server installed?** Remove it first to avoid duplicate configurations:
+> ```
+> claude mcp remove yutori
+> ```
+
 **Option 2: MCP Only**
 
 ```bash
