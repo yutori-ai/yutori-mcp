@@ -51,8 +51,9 @@ This installs both the MCP tools and workflow skills:
 | `/yutori:api-monitor` | API/changelog monitoring template |
 
 > **Already have the MCP server installed?** Remove it first to avoid duplicate configurations:
-> ```
-> claude mcp remove yutori
+> ```bash
+> claude mcp remove yutori -s user   # if installed at user scope
+> claude mcp remove yutori -s local  # if installed at local/project scope
 > ```
 
 **Option 2: MCP Only**
