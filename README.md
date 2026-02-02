@@ -29,15 +29,15 @@ Get your API key from [yutori.com/api](https://yutori.com/api).
 
 **Option 1: Plugin (Recommended)** - Includes MCP tools + workflow skills
 
+First, set your API key in your terminal:
 ```bash
-# Add the Yutori marketplace
-/plugin marketplace add yutori-ai/yutori-mcp
-
-# Install the plugin
-/plugin install yutori@yutori-plugins
-
-# Set your API key
 export YUTORI_API_KEY=yt-your-api-key
+```
+
+Then run these commands inside Claude Code:
+```
+/plugin marketplace add yutori-ai/yutori-mcp
+/plugin install yutori@yutori-plugins
 ```
 
 This installs both the MCP tools and workflow skills:
