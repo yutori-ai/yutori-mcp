@@ -57,7 +57,7 @@ Get your API key from [yutori.com/api](https://yutori.com/api).
    > claude mcp remove yutori -s local  # if installed at local/project scope
    > ```
 
-2. **MCP Only**
+2. **MCP Only** (if you prefer not to use the plugin)
 
    ```bash
    claude mcp add --scope user yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
