@@ -1,6 +1,6 @@
 """Tests for server helper functions."""
 
-from yutori_mcp.server import _output_fields_to_task_spec, _simplify_schema, _get_simplified_schema
+from yutori_mcp.server import _output_fields_to_output_schema, _simplify_schema, _get_simplified_schema
 from yutori_mcp.schemas import ListScoutsInput, CreateScoutInput
 
 
@@ -134,61 +134,51 @@ class TestGetSimplifiedSchema:
         assert "anyOf" not in interval_schema
 
 
-class TestOutputFieldsToTaskSpec:
+class TestOutputFieldsToOutputSchema:
     def test_none_returns_none(self):
         """None input returns None."""
-        assert _output_fields_to_task_spec(None) is None
+        assert _output_fields_to_output_schema(None) is None
 
     def test_empty_list(self):
         """Empty list produces empty properties."""
-        result = _output_fields_to_task_spec([])
+        result = _output_fields_to_output_schema([])
         assert result == {
-            "output_schema": {
-                "type": "json",
-                "json_schema": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {},
-                    },
-                },
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {},
             },
         }
 
     def test_single_field(self):
         """Single field is converted correctly."""
-        result = _output_fields_to_task_spec(["headline"])
+        result = _output_fields_to_output_schema(["headline"])
         assert result == {
-            "output_schema": {
-                "type": "json",
-                "json_schema": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "headline": {"type": "string"},
-                        },
-                    },
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "headline": {"type": "string"},
                 },
             },
         }
 
     def test_multiple_fields(self):
         """Multiple fields are all converted to string properties."""
-        result = _output_fields_to_task_spec(["headline", "summary", "url"])
+        result = _output_fields_to_output_schema(["headline", "summary", "url"])
         expected_properties = {
             "headline": {"type": "string"},
             "summary": {"type": "string"},
             "url": {"type": "string"},
         }
-        assert result["output_schema"]["json_schema"]["items"]["properties"] == expected_properties
+        assert result["items"]["properties"] == expected_properties
 
     def test_output_is_array_type(self):
         """Output schema is always array type."""
-        result = _output_fields_to_task_spec(["field1"])
-        assert result["output_schema"]["json_schema"]["type"] == "array"
+        result = _output_fields_to_output_schema(["field1"])
+        assert result["type"] == "array"
 
     def test_items_are_objects(self):
         """Array items are always objects."""
-        result = _output_fields_to_task_spec(["field1"])
-        assert result["output_schema"]["json_schema"]["items"]["type"] == "object"
+        result = _output_fields_to_output_schema(["field1"])
+        assert result["items"]["type"] == "object"
