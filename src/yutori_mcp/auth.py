@@ -105,12 +105,18 @@ def wait_for_callback(timeout: int = AUTH_TIMEOUT_SECONDS) -> AuthResult:
     class ReusableServer(socketserver.TCPServer):
         allow_reuse_address = True
 
-    with ReusableServer(("127.0.0.1", REDIRECT_PORT), CallbackHandler) as server:
-        server.timeout = timeout
-        thread = threading.Thread(target=server.handle_request)
-        thread.start()
-        auth_result.received.wait(timeout=timeout)
-        thread.join(timeout=1)
+    try:
+        with ReusableServer(("127.0.0.1", REDIRECT_PORT), CallbackHandler) as server:
+            server.timeout = timeout
+            thread = threading.Thread(target=server.handle_request)
+            thread.start()
+            auth_result.received.wait(timeout=timeout)
+            thread.join(timeout=1)
+    except OSError as e:
+        if "Address already in use" in str(e):
+            auth_result.error = f"Port {REDIRECT_PORT} is already in use. Close other applications and try again."
+        else:
+            auth_result.error = str(e)
 
     return auth_result
 

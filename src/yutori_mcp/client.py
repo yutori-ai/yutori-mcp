@@ -7,7 +7,8 @@ from typing import Any
 
 import httpx
 
-DEFAULT_BASE_URL = "https://api.yutori.com/v1"
+from .constants import API_BASE_URL
+
 DEFAULT_TIMEOUT_SECONDS = 60.0
 
 
@@ -43,7 +44,7 @@ class YutoriClient:
 
             raise ValueError(ERROR_NO_API_KEY)
 
-        self.base_url = DEFAULT_BASE_URL
+        self.base_url = API_BASE_URL
         self._client = httpx.Client(timeout=timeout)
 
     def close(self) -> None:
