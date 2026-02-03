@@ -33,7 +33,15 @@ class YutoriClient:
     ) -> None:
         self.api_key = api_key or os.environ.get("YUTORI_API_KEY", "")
         if not self.api_key:
-            raise ValueError("API key is required. Set YUTORI_API_KEY environment variable or pass api_key parameter.")
+            from .auth import load_config
+
+            config = load_config()
+            if config:
+                self.api_key = config.get("api_key", "")
+        if not self.api_key:
+            from .constants import ERROR_NO_API_KEY
+
+            raise ValueError(ERROR_NO_API_KEY)
 
         self.base_url = DEFAULT_BASE_URL
         self._client = httpx.Client(timeout=timeout)
@@ -167,7 +175,9 @@ class YutoriClient:
             params["cursor"] = cursor
         if limit is not None:
             params["limit"] = limit
-        return self._request("GET", f"/scouting/tasks/{scout_id}/updates", params=params)
+        return self._request(
+            "GET", f"/scouting/tasks/{scout_id}/updates", params=params
+        )
 
     # -------------------------------------------------------------------------
     # Browsing operations

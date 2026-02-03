@@ -41,6 +41,7 @@ Repository = "https://github.com/yutori-ai/yutori-mcp"
 
 [project.scripts]
 yutori-mcp = "yutori_mcp.server:main"
+yutori = "yutori_mcp.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/yutori_mcp"]
