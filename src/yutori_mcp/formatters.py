@@ -154,7 +154,7 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
         next_run = _format_date(scout.get("next_output_timestamp"))
 
         lines.append(f"\n{i}. {name} ({status})")
-        lines.append(f"   Query: \"{_truncate(query)}\"")
+        lines.append(f'   Query: "{_truncate(query)}"')
         lines.append(f"   ID: {scout_id}")
         lines.append(f"   Runs {interval} | Next: {next_run}")
 
@@ -162,7 +162,7 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
     lines.append("")
     if has_more:
         lines.append("Use list_scouts(limit=50) to see more.")
-    lines.append("Use list_scouts(status=\"active\") to filter by status.")
+    lines.append('Use list_scouts(status="active") to filter by status.')
     lines.append("Use get_scout_detail(scout_id) for full details.")
 
     return "\n".join(lines)
@@ -181,7 +181,7 @@ def format_scout_detail(response: dict[str, Any], **context: Any) -> str:
         f"ID: {scout_id}",
         f"Status: {status}",
         "",
-        f"Query: \"{query}\"",
+        f'Query: "{query}"',
         "",
         "Schedule:",
         f"  Interval: {_format_interval(response.get('output_interval'))}",
@@ -227,11 +227,17 @@ def format_scout_updates(response: dict[str, Any], **context: Any) -> str:
         lines.append("")
         lines.append(f"--- Update #{i} —")
 
-        timestamp = _format_datetime(update.get("created_at") or update.get("timestamp"))
+        timestamp = _format_datetime(
+            update.get("created_at") or update.get("timestamp")
+        )
         lines.append(f"Date: {timestamp}")
 
         # Handle different update formats
-        content = update.get("content") or update.get("formatted_output") or update.get("report")
+        content = (
+            update.get("content")
+            or update.get("formatted_output")
+            or update.get("report")
+        )
         if content:
             if isinstance(content, str):
                 # Indent content
@@ -256,7 +262,9 @@ def format_scout_updates(response: dict[str, Any], **context: Any) -> str:
 
     if has_more and next_cursor:
         lines.append("")
-        lines.append(f"More updates available. Use get_scout_updates(scout_id, cursor=\"{next_cursor}\") to load more.")
+        lines.append(
+            f'More updates available. Use get_scout_updates(scout_id, cursor="{next_cursor}") to load more.'
+        )
 
     return "\n".join(lines)
 
@@ -277,7 +285,7 @@ def format_scout_created(response: dict[str, Any], **context: Any) -> str:
         f"ID: {scout_id}",
         f"Status: {status}",
         "",
-        f"Query: \"{_truncate(query, 80)}\"",
+        f'Query: "{_truncate(query, 80)}"',
         f"Schedule: runs {interval}",
         f"First run: {next_run}",
     ]
@@ -296,15 +304,17 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
         scout_id = new.get("id", "")
         status = new.get("status", "unknown")
 
-        return "\n".join([
-            "Scout updated successfully.",
-            "",
-            f"Name: {name}",
-            f"ID: {scout_id}",
-            f"Status: {status}",
-            "",
-            "Use get_scout_detail(scout_id) for full details.",
-        ])
+        return "\n".join(
+            [
+                "Scout updated successfully.",
+                "",
+                f"Name: {name}",
+                f"ID: {scout_id}",
+                f"Status: {status}",
+                "",
+                "Use get_scout_detail(scout_id) for full details.",
+            ]
+        )
 
     # Show diff
     name = new.get("display_name") or new.get("query", "")[:40]
@@ -344,8 +354,8 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
                 old_display = "yes" if old_val else "no"
                 new_display = "yes" if new_val else "no"
             elif field == "query":
-                old_display = f"\"{_truncate(old_val or '', 40)}\""
-                new_display = f"\"{_truncate(new_val or '', 40)}\""
+                old_display = f'"{_truncate(old_val or "", 40)}"'
+                new_display = f'"{_truncate(new_val or "", 40)}"'
             else:
                 old_display = old_val or "(not set)"
                 new_display = new_val or "(not set)"
@@ -413,7 +423,7 @@ def format_task_started(response: dict[str, Any], **context: Any) -> str:
     else:
         poll_fn = "get_task_result"
 
-    lines.append(f"Poll with {poll_fn}(task_id=\"{task_id}\") to check status.")
+    lines.append(f'Poll with {poll_fn}(task_id="{task_id}") to check status.')
 
     return "\n".join(lines)
 
@@ -426,7 +436,7 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
     # Handle in-progress states
     if status in ("queued", "running", "pending"):
         lines = [
-            f"Task in progress.",
+            "Task in progress.",
             "",
             f"Task ID: {task_id}",
             f"Status: {status}",
@@ -443,12 +453,14 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
     # Handle failed state
     if status == "failed":
         error = response.get("error") or response.get("message") or "Unknown error"
-        return "\n".join([
-            "Task failed.",
-            "",
-            f"Task ID: {task_id}",
-            f"Error: {error}",
-        ])
+        return "\n".join(
+            [
+                "Task failed.",
+                "",
+                f"Task ID: {task_id}",
+                f"Error: {error}",
+            ]
+        )
 
     # Handle completed state
     lines = [
