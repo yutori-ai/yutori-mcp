@@ -1,7 +1,9 @@
 """Constants for Yutori authentication and configuration."""
 
+import os
+
 CLERK_INSTANCE_URL = "https://clerk.yutori.com"
-CLERK_CLIENT_ID = "yutori_cli"
+CLERK_CLIENT_ID = os.environ.get("CLERK_CLIENT_ID", "TGiyfoPbG01Sakpe")
 REDIRECT_PORT = 54320
 REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}/callback"
 AUTH_TIMEOUT_SECONDS = 300
