@@ -98,29 +98,6 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
         self.auth_result.received.set()
 
 
-def wait_for_callback(timeout: int = AUTH_TIMEOUT_SECONDS) -> AuthResult:
-    auth_result = AuthResult()
-    CallbackHandler.auth_result = auth_result
-
-    class ReusableServer(socketserver.TCPServer):
-        allow_reuse_address = True
-
-    try:
-        with ReusableServer(("127.0.0.1", REDIRECT_PORT), CallbackHandler) as server:
-            server.timeout = timeout
-            thread = threading.Thread(target=server.handle_request)
-            thread.start()
-            auth_result.received.wait(timeout=timeout)
-            thread.join(timeout=1)
-    except OSError as e:
-        if "Address already in use" in str(e):
-            auth_result.error = f"Port {REDIRECT_PORT} is already in use. Close other applications and try again."
-        else:
-            auth_result.error = str(e)
-
-    return auth_result
-
-
 def exchange_code_for_token(code: str, code_verifier: str) -> str:
     with httpx.Client(timeout=30.0) as client:
         response = client.post(
@@ -189,7 +166,10 @@ def run_login_flow() -> bool:
         server = ReusableServer(("127.0.0.1", REDIRECT_PORT), CallbackHandler)
     except OSError as e:
         if "Address already in use" in str(e):
-            print(f"Error: Port {REDIRECT_PORT} is already in use. Close other applications and try again.", file=sys.stderr)
+            print(
+                f"Error: Port {REDIRECT_PORT} is already in use. Close other applications and try again.",
+                file=sys.stderr,
+            )
         else:
             print(f"Error: {e}", file=sys.stderr)
         return False
@@ -234,7 +214,6 @@ def run_login_flow() -> bool:
 
     except httpx.HTTPStatusError as e:
         print(f"Error: {ERROR_AUTH_FAILED} ({e.response.status_code})", file=sys.stderr)
-        print(f"Response: {e.response.text}", file=sys.stderr)
         return False
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)

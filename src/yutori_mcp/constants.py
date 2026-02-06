@@ -9,7 +9,7 @@ REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}/callback"
 AUTH_TIMEOUT_SECONDS = 300
 CONFIG_DIR = ".yutori"
 CONFIG_FILE = "config.json"
-API_BASE_URL = "https://api.yutori.com/v1"
+API_BASE_URL = os.environ.get("YUTORI_API_BASE_URL", "https://api.yutori.com/v1")
 
 ERROR_NO_API_KEY = "API key required. Run 'yutori login' or set YUTORI_API_KEY."
 ERROR_AUTH_TIMEOUT = "Login timed out. Please try again."
