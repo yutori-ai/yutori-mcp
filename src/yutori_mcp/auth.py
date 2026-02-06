@@ -140,7 +140,7 @@ def exchange_code_for_token(code: str, code_verifier: str) -> str:
 def generate_api_key(jwt: str) -> str:
     with httpx.Client(timeout=30.0) as client:
         response = client.post(
-            f"{API_BASE_URL}/generate_key",
+            f"{API_BASE_URL}/client/generate_key",
             headers={"Authorization": f"Bearer {jwt}"},
         )
         response.raise_for_status()
@@ -179,10 +179,31 @@ def run_login_flow() -> bool:
     print("Opening browser for login...")
     print(f"If the browser doesn't open, visit:\n{auth_url}\n")
 
+    auth_result = AuthResult()
+    CallbackHandler.auth_result = auth_result
+
+    class ReusableServer(socketserver.TCPServer):
+        allow_reuse_address = True
+
+    try:
+        server = ReusableServer(("127.0.0.1", REDIRECT_PORT), CallbackHandler)
+    except OSError as e:
+        if "Address already in use" in str(e):
+            print(f"Error: Port {REDIRECT_PORT} is already in use. Close other applications and try again.", file=sys.stderr)
+        else:
+            print(f"Error: {e}", file=sys.stderr)
+        return False
+
+    server.timeout = AUTH_TIMEOUT_SECONDS
+    server_thread = threading.Thread(target=server.handle_request)
+    server_thread.start()
+
     webbrowser.open(auth_url)
 
     print("Waiting for authentication...")
-    auth_result = wait_for_callback()
+    auth_result.received.wait(timeout=AUTH_TIMEOUT_SECONDS)
+    server_thread.join(timeout=1)
+    server.server_close()
 
     if not auth_result.received.is_set():
         print(f"Error: {ERROR_AUTH_TIMEOUT}", file=sys.stderr)
@@ -213,6 +234,7 @@ def run_login_flow() -> bool:
 
     except httpx.HTTPStatusError as e:
         print(f"Error: {ERROR_AUTH_FAILED} ({e.response.status_code})", file=sys.stderr)
+        print(f"Response: {e.response.text}", file=sys.stderr)
         return False
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
