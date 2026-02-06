@@ -22,29 +22,27 @@ Or with Homebrew:
 brew install uv
 ```
 
-Get your API key from [yutori.com/api](https://yutori.com/api).
-
 <details open>
 <summary>Claude Code</summary>
 
 1. **Plugin (Recommended)** - Includes MCP tools + workflow skills
 
-   First, add your API key to your shell profile (only needed once):
-   ```bash
-   echo 'export YUTORI_API_KEY=yt-your-api-key' >> ~/.zshrc
-   source ~/.zshrc
-   ```
-
-   Then run these commands inside Claude Code:
+   Run these commands inside Claude Code:
    ```
    /plugin marketplace add yutori-ai/yutori-mcp
    /plugin install yutori@yutori-plugins
    ```
 
-   This installs both the MCP tools and workflow skills:
+   Then log in to connect your Yutori account:
+   ```
+   /yutori:login
+   ```
+
+   This opens your browser to authenticate with Yutori and saves an API key locally (`~/.yutori/config.json`). After login, all `/yutori:*` commands work automatically.
 
    | Skill | Description |
    |-------|-------------|
+   | `/yutori:login` | Log in to Yutori and save API key |
    | `/yutori:scout` | Set up continuous web monitoring with comprehensive queries |
    | `/yutori:research` | Deep web research workflow (async, 5-10 min) |
    | `/yutori:browse` | Browser automation tasks |
@@ -60,6 +58,16 @@ Get your API key from [yutori.com/api](https://yutori.com/api).
 2. **MCP Only** (if you prefer not to use the plugin)
 
    ```bash
+   claude mcp add --scope user yutori -- uvx yutori-mcp
+   ```
+
+   Then authenticate:
+   ```bash
+   uvx yutori-mcp login
+   ```
+
+   Or set your API key manually:
+   ```bash
    claude mcp add --scope user yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
    ```
 </details>
@@ -67,7 +75,25 @@ Get your API key from [yutori.com/api](https://yutori.com/api).
 <details>
 <summary>Claude Desktop</summary>
 
-Add to your `claude_desktop_config.json`:
+First authenticate (one-time):
+```bash
+uvx yutori-mcp login
+```
+
+Then add to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "yutori": {
+      "command": "uvx",
+      "args": ["yutori-mcp"]
+    }
+  }
+}
+```
+
+Or pass your API key explicitly via env var:
 
 ```json
 {
@@ -89,15 +115,14 @@ For setup details, see the [Claude Desktop MCP install guide](https://modelconte
 <details>
 <summary>Cursor</summary>
 
+First authenticate (one-time):
+```bash
+uvx yutori-mcp login
+```
+
 **Click the button to install:**
 
 [<img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Install in Cursor">](https://cursor.com/en/install-mcp?name=Yutori&config=eyJjb21tYW5kIjoidXZ4IHl1dG9yaS1tY3AifQ%3D%3D)
-
-The Cursor install button does not support env vars, so you must set `YUTORI_API_KEY` manually after install.
-
-Set `YUTORI_API_KEY` in the server env settings (Cursor Settings → MCP), then restart the server.
-
-![Cursor MCP server env settings](images/cursor-mcp-settings.png)
 
 **Or install manually:**
 
@@ -108,10 +133,7 @@ Go to Cursor Settings → MCP → Add new MCP Server, then add:
   "mcpServers": {
     "yutori": {
       "command": "uvx",
-      "args": ["yutori-mcp"],
-      "env": {
-        "YUTORI_API_KEY": "yt-your-api-key"
-      }
+      "args": ["yutori-mcp"]
     }
   }
 }
@@ -123,21 +145,29 @@ See the [Cursor MCP guide](https://cursor.com/docs/context/mcp) for setup detail
 <details>
 <summary>VS Code</summary>
 
+First authenticate (one-time):
+```bash
+uvx yutori-mcp login
+```
+
 **Click the button to install:**
 
 [<img src="https://img.shields.io/badge/VS_Code-VS_Code?style=flat-square&label=Install%20Server&color=0098FF" alt="Install in VS Code">](https://insiders.vscode.dev/redirect?url=vscode%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522yutori%2522%252C%2522command%2522%253A%2522uvx%2522%252C%2522args%2522%253A%255B%2522yutori-mcp%2522%255D%257D) [<img alt="Install in VS Code Insiders" src="https://img.shields.io/badge/VS_Code_Insiders-VS_Code_Insiders?style=flat-square&label=Install%20Server&color=24bfa5">](https://insiders.vscode.dev/redirect?url=vscode-insiders%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522yutori%2522%252C%2522command%2522%253A%2522uvx%2522%252C%2522args%2522%253A%255B%2522yutori-mcp%2522%255D%257D)
 
-Set `YUTORI_API_KEY` in your environment before first use.
-
 **Or install manually:**
 
 ```bash
-code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"],"envFile":"path/to/.env"}'
+code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"]}'
 ```
 </details>
 
 <details>
 <summary>ChatGPT</summary>
+
+First authenticate (one-time):
+```bash
+uvx yutori-mcp login
+```
 
 Open ChatGPT Desktop and go to Settings -> Connectors -> MCP Servers -> Add server.
 
@@ -146,10 +176,7 @@ Open ChatGPT Desktop and go to Settings -> Connectors -> MCP Servers -> Add serv
   "mcpServers": {
     "yutori": {
       "command": "uvx",
-      "args": ["yutori-mcp"],
-      "env": {
-        "YUTORI_API_KEY": "yt-your-api-key"
-      }
+      "args": ["yutori-mcp"]
     }
   }
 }
@@ -161,10 +188,15 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
 <details open>
 <summary>Codex</summary>
 
+First authenticate (one-time):
+```bash
+uvx yutori-mcp login
+```
+
 1. **MCP Server:**
 
    ```bash
-   codex mcp add yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
+   codex mcp add yutori -- uvx yutori-mcp
    ```
 
    Or add to `~/.codex/config.toml`:
@@ -173,9 +205,6 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
    [mcp_servers.yutori]
    command = "uvx"
    args = ["yutori-mcp"]
-
-   [mcp_servers.yutori.env]
-   YUTORI_API_KEY = "yt-your-api-key"
    ```
 
 2. **Skills** (optional, for workflow guidance):
@@ -203,6 +232,11 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
 <details>
 <summary>Gemini CLI</summary>
 
+First authenticate (one-time):
+```bash
+uvx yutori-mcp login
+```
+
 Add to `~/.gemini/settings.json`:
 
 ```json
@@ -214,10 +248,7 @@ Add to `~/.gemini/settings.json`:
   "mcpServers": {
     "yutori": {
       "command": "uvx",
-      "args": ["yutori-mcp"],
-      "env": {
-        "YUTORI_API_KEY": "yt-your-api-key"
-      }
+      "args": ["yutori-mcp"]
     }
   }
 }
@@ -687,7 +718,7 @@ pytest
 ### Running locally
 
 ```bash
-export YUTORI_API_KEY=yt-your-api-key
+yutori-mcp login    # authenticate (one-time)
 python -m yutori_mcp.server
 ```
 

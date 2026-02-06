@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from .constants import API_BASE_URL
+from .constants import build_api_url
 
 DEFAULT_TIMEOUT_SECONDS = 60.0
 
@@ -44,7 +44,6 @@ class YutoriClient:
 
             raise ValueError(ERROR_NO_API_KEY)
 
-        self.base_url = API_BASE_URL
         self._client = httpx.Client(timeout=timeout)
 
     def close(self) -> None:
@@ -251,7 +250,7 @@ class YutoriClient:
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        url = f"{self.base_url}{path}"
+        url = build_api_url(path)
         headers = {
             "Content-Type": "application/json",
             "x-api-key": self.api_key,

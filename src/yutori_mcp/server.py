@@ -348,7 +348,31 @@ async def run_server() -> None:
 
 def main() -> None:
     """Entry point for the yutori-mcp command."""
+    import argparse
     import asyncio
+
+    parser = argparse.ArgumentParser(prog="yutori-mcp")
+    subparsers = parser.add_subparsers(dest="command")
+
+    subparsers.add_parser("login", help="Log in and save API key")
+    subparsers.add_parser("logout", help="Remove saved API key")
+    subparsers.add_parser("status", help="Show authentication status")
+
+    args = parser.parse_args()
+
+    if args.command in {"login", "logout", "status"}:
+        from .auth import clear_config, run_login_flow, show_status
+
+        if args.command == "login":
+            success = run_login_flow()
+            raise SystemExit(0 if success else 1)
+        if args.command == "logout":
+            clear_config()
+            print("Logged out successfully.")
+            raise SystemExit(0)
+        if args.command == "status":
+            show_status()
+            raise SystemExit(0)
 
     asyncio.run(run_server())
 

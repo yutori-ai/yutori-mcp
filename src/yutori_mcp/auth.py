@@ -19,8 +19,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import httpx
 
 from .constants import (
-    API_BASE_URL,
     AUTH_TIMEOUT_SECONDS,
+    build_api_url,
     CLERK_CLIENT_ID,
     CLERK_INSTANCE_URL,
     CONFIG_DIR,
@@ -73,6 +73,10 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
+            return
         if parsed.path != "/callback":
             self.send_error(404)
             return
@@ -117,7 +121,7 @@ def exchange_code_for_token(code: str, code_verifier: str) -> str:
 def generate_api_key(jwt: str) -> str:
     with httpx.Client(timeout=30.0) as client:
         response = client.post(
-            f"{API_BASE_URL}/client/generate_key",
+            build_api_url("/client/generate_key"),
             headers={"Authorization": f"Bearer {jwt}"},
         )
         response.raise_for_status()
@@ -153,9 +157,6 @@ def run_login_flow() -> bool:
 
     auth_url = build_auth_url(code_challenge, state)
 
-    print("Opening browser for login...")
-    print(f"If the browser doesn't open, visit:\n{auth_url}\n")
-
     auth_result = AuthResult()
     CallbackHandler.auth_result = auth_result
 
@@ -175,13 +176,16 @@ def run_login_flow() -> bool:
         return False
 
     server.timeout = AUTH_TIMEOUT_SECONDS
-    server_thread = threading.Thread(target=server.handle_request)
+    server_thread = threading.Thread(target=server.serve_forever)
     server_thread.start()
 
+    print("Opening browser for login...")
+    print(f"If the browser doesn't open, visit:\n  {auth_url}\n")
     webbrowser.open(auth_url)
 
     print("Waiting for authentication...")
     auth_result.received.wait(timeout=AUTH_TIMEOUT_SECONDS)
+    server.shutdown()
     server_thread.join(timeout=1)
     server.server_close()
 
@@ -233,4 +237,4 @@ def show_status() -> None:
             masked = env_key[:6] + "..." + env_key[-4:] if len(env_key) > 10 else "***"
             print(f"Using YUTORI_API_KEY environment variable ({masked})")
         else:
-            print("Not logged in. Run 'yutori login' to authenticate.")
+            print("Not logged in. Run 'yutori-mcp login' to authenticate.")
