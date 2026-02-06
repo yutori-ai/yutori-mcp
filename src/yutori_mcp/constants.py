@@ -2,7 +2,7 @@
 
 import os
 
-CLERK_INSTANCE_URL = "https://clerk.yutori.com"
+CLERK_INSTANCE_URL = os.environ.get("CLERK_INSTANCE_URL", "https://clerk.yutori.com")
 CLERK_CLIENT_ID = os.environ.get("CLERK_CLIENT_ID", "TGiyfoPbG01Sakpe")
 REDIRECT_PORT = 54320
 REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}/callback"
