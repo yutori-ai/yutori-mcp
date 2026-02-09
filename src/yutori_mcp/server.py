@@ -249,6 +249,7 @@ def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict) -> tuple[
                 is_public=params.is_public,
             )
             return result, {}
+
         case "edit_scout":
             params = EditScoutInput(**arguments)
 
@@ -256,42 +257,30 @@ def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict) -> tuple[
             old_scout = client.get_scout_detail(params.scout_id)
 
             # Apply config updates (so they take effect before status change)
-            has_config_updates = any(
-                f is not None
-                for f in [
-                    params.query,
-                    params.output_interval,
-                    params.webhook_url,
-                    params.webhook_format,
-                    params.output_fields,
-                    params.skip_email,
-                    params.user_timezone,
-                    params.user_location,
-                    params.is_public,
-                ]
-            )
+            config_kwargs: dict[str, Any] = {}
+            if params.query is not None:
+                config_kwargs["query"] = params.query
+            if params.output_interval is not None:
+                config_kwargs["output_interval"] = params.output_interval
+            if params.webhook_url is not None:
+                config_kwargs["webhook_url"] = params.webhook_url
+            if params.webhook_format is not None:
+                config_kwargs["webhook_format"] = params.webhook_format
+            if params.output_fields is not None:
+                config_kwargs["output_schema"] = _output_fields_to_output_schema(params.output_fields)
+            if params.skip_email is not None:
+                config_kwargs["skip_email"] = params.skip_email
+            if params.user_timezone is not None:
+                config_kwargs["user_timezone"] = params.user_timezone
+            if params.user_location is not None:
+                config_kwargs["user_location"] = params.user_location
 
-            if has_config_updates:
-                client.edit_scout(
-                    scout_id=params.scout_id,
-                    query=params.query,
-                    output_interval=params.output_interval,
-                    webhook_url=params.webhook_url,
-                    webhook_format=params.webhook_format,
-                    output_schema=_output_fields_to_output_schema(params.output_fields),
-                    skip_email=params.skip_email,
-                    user_timezone=params.user_timezone,
-                    user_location=params.user_location,
-                    is_public=params.is_public,
-                )
+            if config_kwargs:
+                client.edit_scout(scout_id=params.scout_id, **config_kwargs)
 
             # Apply status change after config updates
-            if params.status == "paused":
-                client.pause_scout(params.scout_id)
-            elif params.status == "active":
-                client.resume_scout(params.scout_id)
-            elif params.status == "done":
-                client.complete_scout(params.scout_id)
+            if params.status is not None:
+                client.edit_scout(scout_id=params.scout_id, status=params.status)
 
             # Return old and new state for diff
             new_scout = client.get_scout_detail(params.scout_id)

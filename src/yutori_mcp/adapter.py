@@ -13,7 +13,7 @@ from yutori.auth.credentials import resolve_api_key
 from yutori.client import YutoriClient
 from yutori.exceptions import APIError, AuthenticationError
 
-from .constants import ERROR_NO_API_KEY
+ERROR_NO_API_KEY = "API key required. Run 'uvx yutori-mcp login' or set YUTORI_API_KEY."
 
 
 class YutoriAPIError(Exception):
@@ -26,7 +26,11 @@ class YutoriAPIError(Exception):
 
 
 class MCPClientAdapter:
-    """Adapter that delegates MCP tool calls to SDK client namespaces."""
+    """Adapter that delegates MCP tool calls to SDK client namespaces.
+
+    All methods filter out None-valued kwargs before forwarding to the SDK,
+    so callers can pass optional fields unconditionally.
+    """
 
     def __init__(self) -> None:
         api_key = resolve_api_key()
@@ -54,19 +58,10 @@ class MCPClientAdapter:
         return self._call(self._client.scouts.get, scout_id)
 
     def create_scout(self, query: str, **kwargs: Any) -> dict[str, Any]:
-        return self._call(self._client.scouts.create, query, **kwargs)
+        return self._call(self._client.scouts.create, query, **_strip_none(kwargs))
 
     def edit_scout(self, scout_id: str, **kwargs: Any) -> dict[str, Any]:
-        return self._call(self._client.scouts.update, scout_id, **kwargs)
-
-    def pause_scout(self, scout_id: str) -> dict[str, Any]:
-        return self._call(self._client.scouts.update, scout_id, status="paused")
-
-    def resume_scout(self, scout_id: str) -> dict[str, Any]:
-        return self._call(self._client.scouts.update, scout_id, status="active")
-
-    def complete_scout(self, scout_id: str) -> dict[str, Any]:
-        return self._call(self._client.scouts.update, scout_id, status="done")
+        return self._call(self._client.scouts.update, scout_id, **_strip_none(kwargs))
 
     def delete_scout(self, scout_id: str) -> dict[str, Any]:
         return self._call(self._client.scouts.delete, scout_id)
@@ -81,7 +76,7 @@ class MCPClientAdapter:
     # -------------------------------------------------------------------------
 
     def run_browsing_task(self, task: str, start_url: str, **kwargs: Any) -> dict[str, Any]:
-        return self._call(self._client.browsing.create, task, start_url, **kwargs)
+        return self._call(self._client.browsing.create, task, start_url, **_strip_none(kwargs))
 
     def get_browsing_task(self, task_id: str) -> dict[str, Any]:
         return self._call(self._client.browsing.get, task_id)
@@ -91,7 +86,7 @@ class MCPClientAdapter:
     # -------------------------------------------------------------------------
 
     def run_research_task(self, query: str, **kwargs: Any) -> dict[str, Any]:
-        return self._call(self._client.research.create, query, **kwargs)
+        return self._call(self._client.research.create, query, **_strip_none(kwargs))
 
     def get_research_task(self, task_id: str) -> dict[str, Any]:
         return self._call(self._client.research.get, task_id)
@@ -109,3 +104,8 @@ class MCPClientAdapter:
             raise YutoriAPIError(message=e.message, status_code=e.status_code) from e
         except AuthenticationError as e:
             raise YutoriAPIError(message=str(e), status_code=401) from e
+
+
+def _strip_none(d: dict[str, Any]) -> dict[str, Any]:
+    """Remove None-valued entries so SDK defaults aren't overridden."""
+    return {k: v for k, v in d.items() if v is not None}
