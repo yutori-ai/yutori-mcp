@@ -195,7 +195,7 @@ class TestMainStatusExitCode:
     def test_status_unauthenticated_exits_1(self):
         status = AuthStatus(authenticated=False, config_path="/tmp/.yutori/config.json")
         with patch("sys.argv", ["yutori-mcp", "status"]), \
-             patch("yutori.auth.flow.get_auth_status", return_value=status):
+             patch("yutori.auth.get_auth_status", return_value=status):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
@@ -203,7 +203,7 @@ class TestMainStatusExitCode:
     def test_status_authenticated_exits_0(self):
         status = AuthStatus(authenticated=True, masked_key="yt-abc...xyz", source="config_file", config_path="/tmp")
         with patch("sys.argv", ["yutori-mcp", "status"]), \
-             patch("yutori.auth.flow.get_auth_status", return_value=status):
+             patch("yutori.auth.get_auth_status", return_value=status):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 0
@@ -215,7 +215,7 @@ class TestMainLoginAuthUrl:
     def test_login_failure_prints_auth_url(self, capsys):
         result = LoginResult(success=False, error="timed out", auth_url="https://clerk.example.com/oauth/authorize?x=1")
         with patch("sys.argv", ["yutori-mcp", "login"]), \
-             patch("yutori.auth.flow.run_login_flow", return_value=result):
+             patch("yutori.auth.run_login_flow", return_value=result):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
@@ -225,7 +225,7 @@ class TestMainLoginAuthUrl:
     def test_login_failure_without_auth_url(self, capsys):
         result = LoginResult(success=False, error="port in use")
         with patch("sys.argv", ["yutori-mcp", "login"]), \
-             patch("yutori.auth.flow.run_login_flow", return_value=result):
+             patch("yutori.auth.run_login_flow", return_value=result):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
