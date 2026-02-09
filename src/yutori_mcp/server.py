@@ -9,7 +9,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from .client import YutoriAPIError, YutoriClient
+from .adapter import MCPClientAdapter, YutoriAPIError
 from .formatters import format_response
 from .schemas import (
     BrowsingTaskInput,
@@ -40,8 +40,14 @@ def _simplify_schema(schema: dict[str, Any]) -> dict[str, Any]:
     for key, value in schema.items():
         if key == "anyOf" and isinstance(value, list) and len(value) == 2:
             # Check if this is the pattern: [{actual_type}, {type: null}]
-            non_null = [v for v in value if not (isinstance(v, dict) and v.get("type") == "null")]
-            null_types = [v for v in value if isinstance(v, dict) and v.get("type") == "null"]
+            non_null = [
+                v
+                for v in value
+                if not (isinstance(v, dict) and v.get("type") == "null")
+            ]
+            null_types = [
+                v for v in value if isinstance(v, dict) and v.get("type") == "null"
+            ]
 
             if len(non_null) == 1 and len(null_types) == 1:
                 # Flatten: merge the non-null type's properties into result
@@ -53,7 +59,10 @@ def _simplify_schema(schema: dict[str, Any]) -> dict[str, Any]:
         if isinstance(value, dict):
             result[key] = _simplify_schema(value)
         elif isinstance(value, list):
-            result[key] = [_simplify_schema(item) if isinstance(item, dict) else item for item in value]
+            result[key] = [
+                _simplify_schema(item) if isinstance(item, dict) else item
+                for item in value
+            ]
         else:
             result[key] = value
 
@@ -65,7 +74,9 @@ def _get_simplified_schema(model: type) -> dict[str, Any]:
     return _simplify_schema(model.model_json_schema())
 
 
-def _output_fields_to_output_schema(output_fields: list[str] | None) -> dict[str, Any] | None:
+def _output_fields_to_output_schema(
+    output_fields: list[str] | None,
+) -> dict[str, Any] | None:
     """Convert simple output_fields list to JSON Schema for output_schema parameter.
 
     Args:
@@ -86,6 +97,7 @@ def _output_fields_to_output_schema(output_fields: list[str] | None) -> dict[str
             "properties": properties,
         },
     }
+
 
 # Tool definitions with annotations
 TOOLS = [
@@ -180,12 +192,16 @@ def create_server() -> Server:
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         try:
-            with YutoriClient() as client:
+            with MCPClientAdapter() as client:
                 result, context = _handle_tool(client, name, arguments)
                 formatted = format_response(name, result, **context)
                 return [TextContent(type="text", text=formatted)]
         except YutoriAPIError as e:
-            return [TextContent(type="text", text=f"API Error ({e.status_code}): {e.message}")]
+            return [
+                TextContent(
+                    type="text", text=f"API Error ({e.status_code}): {e.message}"
+                )
+            ]
         except Exception as e:
             logger.exception(f"Error handling tool {name}")
             return [TextContent(type="text", text=f"Error: {e!s}")]
@@ -193,7 +209,7 @@ def create_server() -> Server:
     return server
 
 
-def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> tuple[dict, dict]:
+def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict) -> tuple[dict, dict]:
     """Route tool calls to the appropriate client method.
 
     Returns:
@@ -240,17 +256,20 @@ def _handle_tool(client: YutoriClient, name: str, arguments: dict) -> tuple[dict
             old_scout = client.get_scout_detail(params.scout_id)
 
             # Apply config updates (so they take effect before status change)
-            has_config_updates = any(f is not None for f in [
-                params.query,
-                params.output_interval,
-                params.webhook_url,
-                params.webhook_format,
-                params.output_fields,
-                params.skip_email,
-                params.user_timezone,
-                params.user_location,
-                params.is_public,
-            ])
+            has_config_updates = any(
+                f is not None
+                for f in [
+                    params.query,
+                    params.output_interval,
+                    params.webhook_url,
+                    params.webhook_format,
+                    params.output_fields,
+                    params.skip_email,
+                    params.user_timezone,
+                    params.user_location,
+                    params.is_public,
+                ]
+            )
 
             if has_config_updates:
                 client.edit_scout(
@@ -322,12 +341,50 @@ async def run_server() -> None:
     """Run the MCP server using stdio transport."""
     server = create_server()
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
+        await server.run(
+            read_stream, write_stream, server.create_initialization_options()
+        )
 
 
 def main() -> None:
     """Entry point for the yutori-mcp command."""
+    import argparse
     import asyncio
+
+    parser = argparse.ArgumentParser(prog="yutori-mcp")
+    subparsers = parser.add_subparsers(dest="command")
+
+    subparsers.add_parser("login", help="Log in and save API key")
+    subparsers.add_parser("logout", help="Remove saved API key")
+    subparsers.add_parser("status", help="Show authentication status")
+
+    args = parser.parse_args()
+
+    if args.command in {"login", "logout", "status"}:
+        from yutori.auth import clear_config, get_auth_status, run_login_flow
+
+        if args.command == "login":
+            result = run_login_flow()
+            if result.success:
+                print("Successfully authenticated!")
+            else:
+                print(f"Authentication failed: {result.error}")
+            raise SystemExit(0 if result.success else 1)
+        if args.command == "logout":
+            clear_config()
+            print("Logged out successfully.")
+            raise SystemExit(0)
+        if args.command == "status":
+            status = get_auth_status()
+            if status.authenticated:
+                print(f"Authenticated (API key: {status.masked_key})")
+                if status.source == "config_file":
+                    print(f"  Source: {status.config_path}")
+                elif status.source == "env_var":
+                    print("  Source: YUTORI_API_KEY environment variable")
+            else:
+                print("Not authenticated. Run 'uvx yutori-mcp login' to authenticate.")
+            raise SystemExit(0)
 
     asyncio.run(run_server())
 

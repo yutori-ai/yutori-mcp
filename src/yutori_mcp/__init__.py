@@ -1,14 +1,14 @@
 """Yutori MCP Server - Web monitoring and browsing automation."""
 
-from .client import YutoriAPIError, YutoriClient
+from .adapter import MCPClientAdapter, YutoriAPIError
 from .server import create_server, main, run_server
 
 __all__ = [
-    "YutoriClient",
+    "MCPClientAdapter",
     "YutoriAPIError",
     "create_server",
     "run_server",
     "main",
 ]
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
