@@ -402,7 +402,7 @@ First run: 2026-01-07 03:10 UTC
 | `output_fields` | No | List of field names for structured output as array of objects |
 | `user_timezone` | No | Timezone for scheduling |
 | `skip_email` | No | Skip email notifications |
-| `start_timestamp` | No | ISO timestamp for when monitoring should start |
+| `start_timestamp` | No | Unix timestamp for when monitoring should start (0 = immediately) |
 | `user_location` | No | Location for geo-relevant searches |
 | `is_public` | No | Whether scout results are publicly accessible |
 
@@ -463,7 +463,6 @@ Changes applied:
 | `output_fields` | No | List of field names for structured output |
 | `user_timezone` | No | Timezone for scheduling |
 | `user_location` | No | Location for geo-relevant searches |
-| `is_public` | No | Whether results are public |
 | `skip_email` | No | Skip email notifications |
 
 #### delete_scout

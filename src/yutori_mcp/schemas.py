@@ -57,9 +57,9 @@ class CreateScoutInput(BaseModel):
         default=None,
         description="If true, skip email notifications (useful with webhooks)",
     )
-    start_timestamp: str | None = Field(
+    start_timestamp: int | None = Field(
         default=None,
-        description="ISO timestamp for when monitoring should start",
+        description="Unix timestamp for when monitoring should start (0 = immediately)",
     )
     user_location: str | None = Field(
         default=None,

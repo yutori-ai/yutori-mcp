@@ -373,6 +373,7 @@ def main() -> None:
                     print("  Source: YUTORI_API_KEY environment variable")
             else:
                 print("Not authenticated. Run 'uvx yutori-mcp login' to authenticate.")
+                raise SystemExit(1)
             raise SystemExit(0)
 
     asyncio.run(run_server())
