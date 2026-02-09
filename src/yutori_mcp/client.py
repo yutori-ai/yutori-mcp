@@ -29,13 +29,14 @@ class YutoriClient:
     def __init__(
         self,
         api_key: str | None = None,
+        base_url: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
         self.api_key = api_key or os.environ.get("YUTORI_API_KEY", "")
         if not self.api_key:
             raise ValueError("API key is required. Set YUTORI_API_KEY environment variable or pass api_key parameter.")
 
-        self.base_url = DEFAULT_BASE_URL
+        self.base_url = base_url or os.environ.get("YUTORI_BASE_URL", DEFAULT_BASE_URL)
         self._client = httpx.Client(timeout=timeout)
 
     def close(self) -> None:
