@@ -358,6 +358,8 @@ def main() -> None:
                 print("Successfully authenticated!")
             else:
                 print(f"Authentication failed: {result.error}")
+                if result.auth_url:
+                    print(f"\nIf the browser didn't open, visit:\n  {result.auth_url}")
             raise SystemExit(0 if result.success else 1)
         if args.command == "logout":
             clear_config()
