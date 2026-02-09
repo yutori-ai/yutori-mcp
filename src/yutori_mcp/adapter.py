@@ -51,8 +51,8 @@ class MCPClientAdapter:
     # Scout operations
     # -------------------------------------------------------------------------
 
-    def list_scouts(self, limit: int | None = None, status: str | None = None) -> dict[str, Any]:
-        return self._call(self._client.scouts.list, limit=limit, status=status)
+    def list_scouts(self, **kwargs: Any) -> dict[str, Any]:
+        return self._call(self._client.scouts.list, **_strip_none(kwargs))
 
     def get_scout_detail(self, scout_id: str) -> dict[str, Any]:
         return self._call(self._client.scouts.get, scout_id)
@@ -66,10 +66,8 @@ class MCPClientAdapter:
     def delete_scout(self, scout_id: str) -> dict[str, Any]:
         return self._call(self._client.scouts.delete, scout_id)
 
-    def get_scout_updates(
-        self, scout_id: str, cursor: str | None = None, limit: int | None = None
-    ) -> dict[str, Any]:
-        return self._call(self._client.scouts.get_updates, scout_id, limit=limit, cursor=cursor)
+    def get_scout_updates(self, scout_id: str, **kwargs: Any) -> dict[str, Any]:
+        return self._call(self._client.scouts.get_updates, scout_id, **_strip_none(kwargs))
 
     # -------------------------------------------------------------------------
     # Browsing operations
