@@ -23,6 +23,18 @@ Or with Homebrew:
 brew install uv
 ```
 
+### Authenticate
+
+Run this once to install and log in to your Yutori account:
+
+```bash
+uvx yutori-mcp login
+```
+
+This opens your browser, authenticates with Yutori, and saves an API key locally (`~/.yutori/config.json`). All platforms below will use this saved key automatically.
+
+### Choose your platform
+
 <details open>
 <summary>Claude Code</summary>
 
@@ -58,17 +70,11 @@ brew install uv
 
 2. **MCP Only** (if you prefer not to use the plugin)
 
-   Install and authenticate (one-time):
-   ```bash
-   uvx yutori-mcp login
-   ```
-
-   Then add the MCP server:
    ```bash
    claude mcp add --scope user yutori -- uvx yutori-mcp
    ```
 
-   Or set your API key manually instead of logging in:
+   Or pass your API key explicitly instead of logging in:
    ```bash
    claude mcp add --scope user yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
    ```
@@ -77,12 +83,7 @@ brew install uv
 <details>
 <summary>Claude Desktop</summary>
 
-Install and authenticate (one-time):
-```bash
-uvx yutori-mcp login
-```
-
-Then add to your `claude_desktop_config.json`:
+Add to your `claude_desktop_config.json`:
 
 ```json
 {
@@ -117,11 +118,6 @@ For setup details, see the [Claude Desktop MCP install guide](https://modelconte
 <details>
 <summary>Cursor</summary>
 
-Install and authenticate (one-time):
-```bash
-uvx yutori-mcp login
-```
-
 **Click the button to install:**
 
 [<img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Install in Cursor">](https://cursor.com/en/install-mcp?name=Yutori&config=eyJjb21tYW5kIjoidXZ4IHl1dG9yaS1tY3AifQ%3D%3D)
@@ -147,11 +143,6 @@ See the [Cursor MCP guide](https://cursor.com/docs/context/mcp) for setup detail
 <details>
 <summary>VS Code</summary>
 
-Install and authenticate (one-time):
-```bash
-uvx yutori-mcp login
-```
-
 **Click the button to install:**
 
 [<img src="https://img.shields.io/badge/VS_Code-VS_Code?style=flat-square&label=Install%20Server&color=0098FF" alt="Install in VS Code">](https://insiders.vscode.dev/redirect?url=vscode%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522yutori%2522%252C%2522command%2522%253A%2522uvx%2522%252C%2522args%2522%253A%255B%2522yutori-mcp%2522%255D%257D) [<img alt="Install in VS Code Insiders" src="https://img.shields.io/badge/VS_Code_Insiders-VS_Code_Insiders?style=flat-square&label=Install%20Server&color=24bfa5">](https://insiders.vscode.dev/redirect?url=vscode-insiders%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522yutori%2522%252C%2522command%2522%253A%2522uvx%2522%252C%2522args%2522%253A%255B%2522yutori-mcp%2522%255D%257D)
@@ -165,11 +156,6 @@ code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"]}'
 
 <details>
 <summary>ChatGPT</summary>
-
-Install and authenticate (one-time):
-```bash
-uvx yutori-mcp login
-```
 
 Open ChatGPT Desktop and go to Settings -> Connectors -> MCP Servers -> Add server.
 
@@ -189,11 +175,6 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
 
 <details open>
 <summary>Codex</summary>
-
-Install and authenticate (one-time):
-```bash
-uvx yutori-mcp login
-```
 
 1. **MCP Server:**
 
@@ -243,11 +224,6 @@ uvx yutori-mcp login
 
 <details>
 <summary>Gemini CLI</summary>
-
-Install and authenticate (one-time):
-```bash
-uvx yutori-mcp login
-```
 
 Add to `~/.gemini/settings.json`:
 
