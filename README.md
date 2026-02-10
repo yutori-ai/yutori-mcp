@@ -76,7 +76,7 @@ brew install uv
 <details>
 <summary>Claude Desktop</summary>
 
-First authenticate (one-time):
+Install and authenticate (one-time):
 ```bash
 uvx yutori-mcp login
 ```
@@ -116,7 +116,7 @@ For setup details, see the [Claude Desktop MCP install guide](https://modelconte
 <details>
 <summary>Cursor</summary>
 
-First authenticate (one-time):
+Install and authenticate (one-time):
 ```bash
 uvx yutori-mcp login
 ```
@@ -146,7 +146,7 @@ See the [Cursor MCP guide](https://cursor.com/docs/context/mcp) for setup detail
 <details>
 <summary>VS Code</summary>
 
-First authenticate (one-time):
+Install and authenticate (one-time):
 ```bash
 uvx yutori-mcp login
 ```
@@ -165,7 +165,7 @@ code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"]}'
 <details>
 <summary>ChatGPT</summary>
 
-First authenticate (one-time):
+Install and authenticate (one-time):
 ```bash
 uvx yutori-mcp login
 ```
@@ -189,7 +189,7 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
 <details open>
 <summary>Codex</summary>
 
-First authenticate (one-time):
+Install and authenticate (one-time):
 ```bash
 uvx yutori-mcp login
 ```
@@ -243,7 +243,7 @@ uvx yutori-mcp login
 <details>
 <summary>Gemini CLI</summary>
 
-First authenticate (one-time):
+Install and authenticate (one-time):
 ```bash
 uvx yutori-mcp login
 ```
