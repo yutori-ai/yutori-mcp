@@ -2,7 +2,6 @@
 
 An MCP server and Claude Code plugin for [Yutori](https://yutori.com) - web monitoring and browsing automation.
 
-> **📋 For Maintainers**: See [PUBLISHING_SUMMARY.md](PUBLISHING_SUMMARY.md) for marketplace publishing plan (Claude API & Codex).
 
 ## Features
 
@@ -192,11 +191,11 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
    $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-api-monitor
    ```
 
-   Or manually copy skills to your user directory:
+   Or manually copy skills to your user directory (use `-L` so symlinks are dereferenced and real files are copied):
 
    ```bash
    git clone https://github.com/yutori-ai/yutori-mcp /tmp/yutori-mcp
-   cp -r /tmp/yutori-mcp/.agents/skills/* ~/.agents/skills/
+   cp -rL /tmp/yutori-mcp/.agents/skills/* ~/.agents/skills/
    ```
 
    Restart Codex after installing skills.
