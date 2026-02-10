@@ -33,6 +33,12 @@ uvx yutori-mcp login
 
 This opens your browser, authenticates with Yutori, and saves an API key locally (`~/.yutori/config.json`). All platforms below will use this saved key automatically.
 
+Check the installed CLI version:
+
+```bash
+uvx yutori-mcp --version
+```
+
 ### Choose your platform
 
 <details open>

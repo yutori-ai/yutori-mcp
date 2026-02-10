@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from yutori.auth.types import AuthStatus, LoginResult
+from yutori_mcp import __version__
 from yutori_mcp.server import _output_fields_to_output_schema, _simplify_schema, _get_simplified_schema, main
 from yutori_mcp.schemas import ListScoutsInput, CreateScoutInput
 
@@ -233,3 +234,15 @@ class TestMainLoginAuthUrl:
         mock_run_login_flow.assert_called_once_with(key_source="yutori-mcp")
         output = capsys.readouterr().out
         assert "browser" not in output.lower()
+
+
+class TestMainVersionFlag:
+    """Ensure `yutori-mcp --version` prints version and exits 0."""
+
+    def test_version_flag_prints_version(self, capsys):
+        with patch("sys.argv", ["yutori-mcp", "--version"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 0
+        output = capsys.readouterr().out.strip()
+        assert output == f"yutori-mcp {__version__}"

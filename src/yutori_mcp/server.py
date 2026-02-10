@@ -9,6 +9,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from . import __version__
 from .adapter import MCPClientAdapter, YutoriAPIError
 from .formatters import format_response
 from .schemas import (
@@ -341,6 +342,12 @@ def main() -> None:
     import asyncio
 
     parser = argparse.ArgumentParser(prog="yutori-mcp")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show version and exit",
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("login", help="Log in and save API key")
