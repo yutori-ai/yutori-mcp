@@ -20,6 +20,7 @@ rm -f "$OUT_DIR"/*.zip
 
 # Strip non-allowed frontmatter keys from SKILL.md
 # Keeps: name, description, license, allowed-tools, compatibility, metadata
+# Preserves multi-line values (e.g. list items under allowed-tools).
 strip_frontmatter() {
   python3 -c "
 import sys, re
@@ -30,15 +31,27 @@ if not m:
     print(content, end='')
     sys.exit(0)
 
-fm_lines = m.group(1).split('\n')
+fm_block = m.group(1)
 body = m.group(2)
-
 allowed = {'name', 'description', 'license', 'allowed-tools', 'compatibility', 'metadata'}
-filtered = [l for l in fm_lines if l.split(':')[0].strip() in allowed]
+
+out_lines = []
+keep_block = False
+for line in fm_block.split('\n'):
+    # Top-level key: no leading space, then key: (key is alphanumeric, hyphen, underscore)
+    top_key_match = re.match(r'^([a-zA-Z0-9_-]+):\s*(.*)$', line)
+    if top_key_match:
+        key = top_key_match.group(1)
+        keep_block = key in allowed
+        if keep_block:
+            out_lines.append(line)
+    else:
+        # Continuation line (indented or list item under a key)
+        if keep_block:
+            out_lines.append(line)
 
 print('---')
-for l in filtered:
-    print(l)
+print('\n'.join(out_lines))
 print('---')
 print(body, end='')
 " "$1"
