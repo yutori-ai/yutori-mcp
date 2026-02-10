@@ -58,16 +58,17 @@ brew install uv
 
 2. **MCP Only** (if you prefer not to use the plugin)
 
-   ```bash
-   claude mcp add --scope user yutori -- uvx yutori-mcp
-   ```
-
-   Then authenticate:
+   Install and authenticate (one-time):
    ```bash
    uvx yutori-mcp login
    ```
 
-   Or set your API key manually:
+   Then add the MCP server:
+   ```bash
+   claude mcp add --scope user yutori -- uvx yutori-mcp
+   ```
+
+   Or set your API key manually instead of logging in:
    ```bash
    claude mcp add --scope user yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
    ```
