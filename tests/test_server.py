@@ -1,6 +1,11 @@
 """Tests for server helper functions."""
 
-from yutori_mcp.server import _output_fields_to_output_schema, _simplify_schema, _get_simplified_schema
+from unittest.mock import patch
+
+import pytest
+
+from yutori.auth.types import AuthStatus, LoginResult
+from yutori_mcp.server import _output_fields_to_output_schema, _simplify_schema, _get_simplified_schema, main
 from yutori_mcp.schemas import ListScoutsInput, CreateScoutInput
 
 
@@ -182,3 +187,49 @@ class TestOutputFieldsToOutputSchema:
         """Array items are always objects."""
         result = _output_fields_to_output_schema(["field1"])
         assert result["items"]["type"] == "object"
+
+
+class TestMainStatusExitCode:
+    """Ensure `yutori-mcp status` exits 1 when unauthenticated, 0 when authenticated."""
+
+    def test_status_unauthenticated_exits_1(self):
+        status = AuthStatus(authenticated=False, config_path="/tmp/.yutori/config.json")
+        with patch("sys.argv", ["yutori-mcp", "status"]), \
+             patch("yutori.auth.get_auth_status", return_value=status):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+    def test_status_authenticated_exits_0(self):
+        status = AuthStatus(authenticated=True, masked_key="yt-abc...xyz", source="config_file", config_path="/tmp")
+        with patch("sys.argv", ["yutori-mcp", "status"]), \
+             patch("yutori.auth.get_auth_status", return_value=status):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 0
+
+
+class TestMainLoginAuthUrl:
+    """Ensure `yutori-mcp login` surfaces auth_url on failure."""
+
+    def test_login_failure_prints_auth_url(self, capsys):
+        result = LoginResult(success=False, error="timed out", auth_url="https://clerk.example.com/oauth/authorize?x=1")
+        with patch("sys.argv", ["yutori-mcp", "login"]), \
+             patch("yutori.auth.run_login_flow", return_value=result) as mock_run_login_flow:
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+        mock_run_login_flow.assert_called_once_with(key_source="yutori-mcp")
+        output = capsys.readouterr().out
+        assert "https://clerk.example.com/oauth/authorize?x=1" in output
+
+    def test_login_failure_without_auth_url(self, capsys):
+        result = LoginResult(success=False, error="port in use")
+        with patch("sys.argv", ["yutori-mcp", "login"]), \
+             patch("yutori.auth.run_login_flow", return_value=result) as mock_run_login_flow:
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+        mock_run_login_flow.assert_called_once_with(key_source="yutori-mcp")
+        output = capsys.readouterr().out
+        assert "browser" not in output.lower()

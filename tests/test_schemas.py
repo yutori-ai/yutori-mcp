@@ -44,11 +44,11 @@ class TestCreateScoutInput:
         """New fields (start_timestamp, user_location, is_public) work."""
         data = CreateScoutInput(
             query="Track NVIDIA stock price",
-            start_timestamp="2026-01-20T00:00:00Z",
+            start_timestamp=1737331200,
             user_location="New York, NY, US",
             is_public=False,
         )
-        assert data.start_timestamp == "2026-01-20T00:00:00Z"
+        assert data.start_timestamp == 1737331200
         assert data.user_location == "New York, NY, US"
         assert data.is_public is False
 
@@ -111,16 +111,14 @@ class TestEditScoutInput:
         assert data.query == "new query"
 
     def test_new_fields(self):
-        """New fields (user_timezone, user_location, is_public) work."""
+        """New fields (user_timezone, user_location) work."""
         data = EditScoutInput(
             scout_id="abc-123",
             user_timezone="America/New_York",
             user_location="San Francisco, CA",
-            is_public=True,
         )
         assert data.user_timezone == "America/New_York"
         assert data.user_location == "San Francisco, CA"
-        assert data.is_public is True
 
     def test_output_fields(self):
         """output_fields can be updated."""

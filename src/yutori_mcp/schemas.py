@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -57,9 +57,9 @@ class CreateScoutInput(BaseModel):
         default=None,
         description="If true, skip email notifications (useful with webhooks)",
     )
-    start_timestamp: str | None = Field(
+    start_timestamp: int | None = Field(
         default=None,
-        description="ISO timestamp for when monitoring should start",
+        description="Unix timestamp for when monitoring should start (0 = immediately)",
     )
     user_location: str | None = Field(
         default=None,
@@ -120,10 +120,6 @@ class EditScoutInput(BaseModel):
         default=None,
         description="User location for geo-relevant searches",
     )
-    is_public: bool | None = Field(
-        default=None,
-        description="Whether scout results are publicly accessible",
-    )
 
     @model_validator(mode="after")
     def validate_has_changes(self) -> "EditScoutInput":
@@ -138,7 +134,6 @@ class EditScoutInput(BaseModel):
             self.skip_email,
             self.user_timezone,
             self.user_location,
-            self.is_public,
         ]
         if not any(f is not None for f in fields):
             raise ValueError("edit_scout requires at least one field to update")
