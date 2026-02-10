@@ -46,16 +46,8 @@ This opens your browser, authenticates with Yutori, and saves an API key locally
    /plugin install yutori@yutori-plugins
    ```
 
-   Then log in to connect your Yutori account:
-   ```
-   /yutori:login
-   ```
-
-   This opens your browser to authenticate with Yutori and saves an API key locally (`~/.yutori/config.json`). After login, all `/yutori:*` commands work automatically.
-
    | Skill | Description |
    |-------|-------------|
-   | `/yutori:login` | Log in to Yutori and save API key |
    | `/yutori:scout` | Set up continuous web monitoring with comprehensive queries |
    | `/yutori:research` | Deep web research workflow (async, 5-10 min) |
    | `/yutori:browse` | Browser automation tasks |
