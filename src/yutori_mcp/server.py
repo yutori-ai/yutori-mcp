@@ -353,7 +353,7 @@ def main() -> None:
         from yutori.auth import clear_config, get_auth_status, run_login_flow
 
         if args.command == "login":
-            result = run_login_flow()
+            result = run_login_flow(key_source="yutori-mcp")
             if result.success:
                 print("Successfully authenticated!")
             else:

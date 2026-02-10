@@ -215,19 +215,21 @@ class TestMainLoginAuthUrl:
     def test_login_failure_prints_auth_url(self, capsys):
         result = LoginResult(success=False, error="timed out", auth_url="https://clerk.example.com/oauth/authorize?x=1")
         with patch("sys.argv", ["yutori-mcp", "login"]), \
-             patch("yutori.auth.run_login_flow", return_value=result):
+             patch("yutori.auth.run_login_flow", return_value=result) as mock_run_login_flow:
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
+        mock_run_login_flow.assert_called_once_with(key_source="yutori-mcp")
         output = capsys.readouterr().out
         assert "https://clerk.example.com/oauth/authorize?x=1" in output
 
     def test_login_failure_without_auth_url(self, capsys):
         result = LoginResult(success=False, error="port in use")
         with patch("sys.argv", ["yutori-mcp", "login"]), \
-             patch("yutori.auth.run_login_flow", return_value=result):
+             patch("yutori.auth.run_login_flow", return_value=result) as mock_run_login_flow:
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
+        mock_run_login_flow.assert_called_once_with(key_source="yutori-mcp")
         output = capsys.readouterr().out
         assert "browser" not in output.lower()
