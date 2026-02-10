@@ -1,0 +1,17 @@
+appearance:
+  name: "Competitor Watch"
+  description: "Quick competitor monitoring template"
+  icon: "👁️"
+  color: "#DC2626"
+
+interface:
+  display_name: "Competitor Watch"
+  description: "Quick competitor monitoring template"
+  icon_small: "./assets/icon-512.png"
+  icon_large: "./assets/icon-512.png"
+  brand_color: "#5ae8bd"
+  default_prompt: "Watch a competitor using the Yutori API"
+
+dependencies:
+  mcp_servers:
+    - yutori

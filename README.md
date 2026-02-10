@@ -2,6 +2,7 @@
 
 An MCP server and Claude Code plugin for [Yutori](https://yutori.com) - web monitoring and browsing automation.
 
+
 ## Features
 
 - **Scouts**: Create agents that that monitor the web for anything you care about at a desired frequency
@@ -180,22 +181,32 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
 
 2. **Skills** (optional, for workflow guidance):
 
-   Install the skills using `$skill-installer` inside Codex:
+   Install skills using `$skill-installer` inside Codex:
 
    ```
-   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/skills/01-scout
-   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/skills/02-research
-   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/skills/03-browse
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-scout
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-research
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-browse
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-competitor-watch
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-api-monitor
    ```
 
-   Or manually copy skills to your user directory:
+   Or manually copy skills to your user directory (use `-L` so symlinks are dereferenced and real files are copied):
 
    ```bash
    git clone https://github.com/yutori-ai/yutori-mcp /tmp/yutori-mcp
-   cp -r /tmp/yutori-mcp/skills/* ~/.codex/skills/
+   cp -rL /tmp/yutori-mcp/.agents/skills/* ~/.agents/skills/
    ```
 
-   Restart Codex after installing skills. Invoke skills with `$scout`, `$research`, or `$browse`.
+   Restart Codex after installing skills.
+
+   | Skill | Command | Description |
+   |-------|---------|-------------|
+   | Scout | `$yutori-scout` | Set up continuous web monitoring |
+   | Research | `$yutori-research` | Deep web research (async, 5-10 min) |
+   | Browse | `$yutori-browse` | Browser automation with AI navigator |
+   | Competitor Watch | `$yutori-competitor-watch` | Quick competitor monitoring template |
+   | API Monitor | `$yutori-api-monitor` | API/changelog monitoring template |
 
    See the [Codex Skills docs](https://developers.openai.com/codex/skills/) for more on skills.
 </details>

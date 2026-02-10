@@ -1,0 +1,20 @@
+appearance:
+  name: "API Monitor"
+  description: "API and changelog monitoring template"
+  icon: "🔌"
+  color: "#059669"
+
+
+
+interface:
+  display_name: "API Monitor"
+  description: "API and changelog monitoring template"
+  icon_small: "./assets/icon-512.png"
+  icon_large: "./assets/icon-512.png"
+  brand_color: "#5ae8bd"
+  default_prompt: "Monitor a website using the Yutori API"
+
+
+dependencies:
+  mcp_servers:
+    - yutori

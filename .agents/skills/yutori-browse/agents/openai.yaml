@@ -1,0 +1,21 @@
+appearance:
+  name: "Yutori Browse"
+  description: "Browser automation with AI navigator"
+  icon: "🌐"
+  color: "#2563EB"
+
+
+
+interface:
+  display_name: "Yutori Browse"
+  description: "Browser automation with AI navigator"
+  icon_small: "./assets/icon-512.png"
+  icon_large: "./assets/icon-512.png"
+  brand_color: "#5ae8bd"
+  default_prompt: "Browse a website using the Yutori API"
+
+
+
+dependencies:
+  mcp_servers:
+    - yutori
