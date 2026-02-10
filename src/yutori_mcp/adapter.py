@@ -98,10 +98,10 @@ class MCPClientAdapter:
         """Call an SDK method, converting SDK APIError to MCP YutoriAPIError."""
         try:
             return fn(*args, **kwargs)
-        except APIError as e:
-            raise YutoriAPIError(message=e.message, status_code=e.status_code) from e
         except AuthenticationError as e:
             raise YutoriAPIError(message=str(e), status_code=401) from e
+        except APIError as e:
+            raise YutoriAPIError(message=e.message, status_code=e.status_code) from e
 
 
 def _strip_none(d: dict[str, Any]) -> dict[str, Any]:

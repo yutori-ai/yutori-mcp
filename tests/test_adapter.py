@@ -43,6 +43,20 @@ class TestErrorMapping:
         assert exc_info.value.status_code == 401
         assert "Invalid API key" in exc_info.value.message
 
+    def test_authentication_handler_preferred_if_auth_error_becomes_api_subclass(self):
+        class AuthAsApiError(APIError):
+            pass
+
+        def raise_auth_as_api_error():
+            raise AuthAsApiError("Invalid API key", status_code=403)
+
+        with patch("yutori_mcp.adapter.AuthenticationError", AuthAsApiError):
+            with pytest.raises(YutoriAPIError) as exc_info:
+                MCPClientAdapter._call(raise_auth_as_api_error)
+
+        assert exc_info.value.status_code == 401
+        assert "Invalid API key" in exc_info.value.message
+
     def test_api_error_preserves_status_code(self, adapter):
         for code in [400, 403, 429, 500, 503]:
             sdk_error = APIError(message=f"Error {code}", status_code=code)
