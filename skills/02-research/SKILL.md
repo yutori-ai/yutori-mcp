@@ -1,5 +1,5 @@
 ---
-name: research
+name: Yutori research
 description: Execute deep web research on any topic using Yutori's research agents. Use for competitive analysis, market research, finding documentation, or answering complex questions that require synthesizing information from multiple sources.
 argument-hint: "[research question]"
 ---
