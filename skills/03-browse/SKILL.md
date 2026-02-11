@@ -1,5 +1,5 @@
 ---
-name: browse
+name: Yutori browse
 description: Automate browser tasks like form filling, data extraction, or multi-step web workflows. Use when the user needs to interact with websites that require clicking, typing, or navigation.
 argument-hint: "[task description] [starting URL]"
 ---

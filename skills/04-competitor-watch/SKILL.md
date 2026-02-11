@@ -1,5 +1,5 @@
 ---
-name: competitor-watch
+name:  Yutori competitor-watch
 description: Quickly set up monitoring for a competitor company. Tracks news, product updates, funding, and public announcements.
 argument-hint: "[competitor name]"
 disable-model-invocation: true
