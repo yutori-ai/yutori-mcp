@@ -2,7 +2,7 @@
 
 An MCP server and skills for [Yutori](https://yutori.com/api) — web monitoring and browsing automation.
 
-You can use it with Claude Code, Cursor, VS Code, ChatGPT, Codex, OpenClaw, and other MCP hosts.
+You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and other MCP hosts.
 
 ## Features
 
@@ -30,55 +30,51 @@ brew install uv
 
 For the quickstart below, Node.js is also required (for `npx`).
 
-### Quickstart
+### Quick install
 
-1. Authenticate using
+1. Run in terminal:
 
     ```bash
     uvx yutori-mcp login
     ```
-    to get your setup automatically.
+    This will open Yutori Platform in your browser and save your API key locally.
 
-    Or
+    <details>
+    <summary>Or, manually add your API key</summary>
 
-    Go to (https://platform.yutori.com) and add your API key to your shell profile (once):
-   ```bash
-   echo 'export YUTORI_API_KEY=yt-your-api-key' >> ~/.zshrc
-   source ~/.zshrc
-   ```
+    Go to (https://platform.yutori.com) and add your key to the config file:
+    ```bash
+    mkdir -p ~/.yutori
+    cat > ~/.yutori/config.json << 'EOF'
+    {"api_key": "yt-your-api-key"}
+    EOF
+    ```
+    </details>
 
 
 
-2. Install MCP and skills for your tools via [skills.sh](https://skills.sh):
-   ```bash
-   npx skills add yutori-ai/yutori-mcp
-   ```
-   When prompted, choose which skills to install and which tools (e.g. OpenClaw, Codex).
-
-3. For Claude Code
-
-Inside Claude
+2. For Claude Code, run inside Claude:
    ```
    /plugin marketplace add yutori-ai/yutori-mcp
    /plugin install yutori@yutori-plugins
    ```
 
+3. For all other clients, install skills and MCP via [skills.sh](https://skills.sh):
+   ```bash
+   npx skills add yutori-ai/yutori-mcp
+   ```
+   When prompted, select the skills and clients you want (e.g. Cursor, Codex, OpenClaw).
 
 
-### Per-client setup
+
+### Manual per-client setup (optional)
 
 <details>
 <summary>Claude Code</summary>
 
 1. **Plugin (Recommended)** - Includes MCP tools + workflow skills
 
-   First, add your API key to your shell profile (only needed once):
-   ```bash
-   echo 'export YUTORI_API_KEY=yt-your-api-key' >> ~/.zshrc
-   source ~/.zshrc
-   ```
-
-   Then run these commands inside Claude Code:
+   Run these commands inside Claude Code:
    ```
    /plugin marketplace add yutori-ai/yutori-mcp
    /plugin install yutori@yutori-plugins
@@ -103,8 +99,10 @@ Inside Claude
 2. **MCP Only** (if you prefer not to use the plugin)
 
    ```bash
-   claude mcp add --scope user yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
+   claude mcp add --scope user yutori -- uvx yutori-mcp
    ```
+
+   The server reads your API key from `~/.yutori/config.json` (set up via `uvx yutori-mcp login`).
 </details>
 
 <details>
@@ -117,14 +115,13 @@ Add to your `claude_desktop_config.json`:
   "mcpServers": {
     "yutori": {
       "command": "uvx",
-      "args": ["yutori-mcp"],
-      "env": {
-        "YUTORI_API_KEY": "yt-your-api-key"
-      }
+      "args": ["yutori-mcp"]
     }
   }
 }
 ```
+
+The server reads your API key from `~/.yutori/config.json`.
 
 For setup details, see the [Claude Desktop MCP install guide](https://modelcontextprotocol.io/docs/develop/connect-local-servers).
 </details>
@@ -136,12 +133,6 @@ For setup details, see the [Claude Desktop MCP install guide](https://modelconte
 
 [<img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Install in Cursor">](https://cursor.com/en/install-mcp?name=Yutori&config=eyJjb21tYW5kIjoidXZ4IHl1dG9yaS1tY3AifQ%3D%3D)
 
-The Cursor install button does not support env vars, so you must set `YUTORI_API_KEY` manually after install.
-
-Set `YUTORI_API_KEY` in the server env settings (Cursor Settings → MCP), then restart the server.
-
-![Cursor MCP server env settings](images/cursor-mcp-settings.png)
-
 **Or install manually:**
 
 Go to Cursor Settings → MCP → Add new MCP Server, then add:
@@ -151,14 +142,13 @@ Go to Cursor Settings → MCP → Add new MCP Server, then add:
   "mcpServers": {
     "yutori": {
       "command": "uvx",
-      "args": ["yutori-mcp"],
-      "env": {
-        "YUTORI_API_KEY": "yt-your-api-key"
-      }
+      "args": ["yutori-mcp"]
     }
   }
 }
 ```
+
+The server reads your API key from `~/.yutori/config.json`.
 
 See the [Cursor MCP guide](https://cursor.com/docs/context/mcp) for setup details.
 </details>
@@ -170,13 +160,13 @@ See the [Cursor MCP guide](https://cursor.com/docs/context/mcp) for setup detail
 
 [<img src="https://img.shields.io/badge/VS_Code-VS_Code?style=flat-square&label=Install%20Server&color=0098FF" alt="Install in VS Code">](https://insiders.vscode.dev/redirect?url=vscode%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522yutori%2522%252C%2522command%2522%253A%2522uvx%2522%252C%2522args%2522%253A%255B%2522yutori-mcp%2522%255D%257D) [<img alt="Install in VS Code Insiders" src="https://img.shields.io/badge/VS_Code_Insiders-VS_Code_Insiders?style=flat-square&label=Install%20Server&color=24bfa5">](https://insiders.vscode.dev/redirect?url=vscode-insiders%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522yutori%2522%252C%2522command%2522%253A%2522uvx%2522%252C%2522args%2522%253A%255B%2522yutori-mcp%2522%255D%257D)
 
-Set `YUTORI_API_KEY` in your environment before first use.
-
 **Or install manually:**
 
 ```bash
-code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"],"envFile":"path/to/.env"}'
+code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"]}'
 ```
+
+The server reads your API key from `~/.yutori/config.json`.
 </details>
 
 <details>
@@ -189,14 +179,13 @@ Open ChatGPT Desktop and go to Settings -> Connectors -> MCP Servers -> Add serv
   "mcpServers": {
     "yutori": {
       "command": "uvx",
-      "args": ["yutori-mcp"],
-      "env": {
-        "YUTORI_API_KEY": "yt-your-api-key"
-      }
+      "args": ["yutori-mcp"]
     }
   }
 }
 ```
+
+The server reads your API key from `~/.yutori/config.json`.
 
 For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/mcp).
 </details>
@@ -207,7 +196,7 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
 1. **MCP Server:**
 
    ```bash
-   codex mcp add yutori --env YUTORI_API_KEY=yt-your-api-key -- uvx yutori-mcp
+   codex mcp add yutori -- uvx yutori-mcp
    ```
 
    Or add to `~/.codex/config.toml`:
@@ -216,10 +205,9 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
    [mcp_servers.yutori]
    command = "uvx"
    args = ["yutori-mcp"]
-
-   [mcp_servers.yutori.env]
-   YUTORI_API_KEY = "yt-your-api-key"
    ```
+
+   The server reads your API key from `~/.yutori/config.json`.
 
 2. **Skills** (optional, for workflow guidance):
 
@@ -258,13 +246,7 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
 
 Follow the **Quickstart** above:
 
-1. Add your API key to your shell profile (only needed once):
-   ```bash
-   echo 'export YUTORI_API_KEY=yt-your-api-key' >> ~/.zshrc
-   source ~/.zshrc
-   ```
-
-2. Install skills and MCP for OpenClaw (and optionally other tools) via [skills.sh](https://skills.sh):
+1. Install skills and MCP for OpenClaw (and optionally other tools) via [skills.sh](https://skills.sh):
    ```bash
    npx skills add yutori-ai/yutori-mcp
    ```
@@ -285,14 +267,13 @@ Add to `~/.gemini/settings.json`. If you already have `mcp` or `mcpServers`, mer
   "mcpServers": {
     "yutori": {
       "command": "uvx",
-      "args": ["yutori-mcp"],
-      "env": {
-        "YUTORI_API_KEY": "yt-your-api-key"
-      }
+      "args": ["yutori-mcp"]
     }
   }
 }
 ```
+
+The server reads your API key from `~/.yutori/config.json`.
 
 Add `"yutori"` to `mcp.allowed` if you already list other MCPs there. For more details, see the [Gemini CLI MCP settings guide](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md#configure-the-mcp-server-in-settingsjson).
 </details>
