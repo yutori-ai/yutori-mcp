@@ -84,11 +84,11 @@ For the quickstart below, Node.js is also required (for `npx`).
 
    | Skill | Description |
    |-------|-------------|
-   | `/yutori:scout` | Set up continuous web monitoring with comprehensive queries |
-   | `/yutori:research` | Deep web research workflow (async, 5-10 min) |
-   | `/yutori:browse` | Browser automation tasks |
-   | `/yutori:competitor-watch` | Quick competitor monitoring template |
-   | `/yutori:api-monitor` | API/changelog monitoring template |
+   | `/yutori-scout` | Set up continuous web monitoring with comprehensive queries |
+   | `/yutori-research` | Deep web research workflow (async, 5-10 min) |
+   | `/yutori-browse` | Browser automation tasks |
+   | `/yutori-competitor-watch` | Quick competitor monitoring template |
+   | `/yutori-api-monitor` | API/changelog monitoring template |
 
    > **Already have the MCP server installed?** Remove it first to avoid duplicate configurations:
    > ```bash

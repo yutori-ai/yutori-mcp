@@ -1,5 +1,5 @@
 ---
-name: Yutori-api-monitor
+name: yutori-api-monitor
 description: Set up monitoring for API changes, changelogs, or documentation updates. Useful for tracking breaking changes in services you depend on.
 argument-hint: "[service or API name]"
 disable-model-invocation: true
