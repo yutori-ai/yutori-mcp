@@ -30,7 +30,7 @@ brew install uv
 
 For the quickstart below, Node.js is also required (for `npx`).
 
-### Quick install
+### Quick install (recommended)
 
 1. Run in terminal:
 
@@ -67,7 +67,7 @@ For the quickstart below, Node.js is also required (for `npx`).
 
 
 
-### Manual per-client setup (optional)
+### Manual per-client setup
 
 <details>
 <summary>Claude Code</summary>
