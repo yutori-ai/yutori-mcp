@@ -37,7 +37,7 @@ For the quickstart below, Node.js is also required (for `npx`).
     ```bash
     uvx yutori-mcp login
     ```
-    This will authenticate and save your API key automatically.
+    This will prompt you to log into Yutori Platform on your browser and save your API key automatically.
 
     <details>
     <summary>Or, manually add your API key</summary>
