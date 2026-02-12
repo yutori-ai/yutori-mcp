@@ -57,9 +57,7 @@ For the quickstart below, Node.js is also required (for `npx`).
    ```
    When prompted, choose which skills to install and which tools (e.g. OpenClaw, Codex).
 
-3. For Claude Code
-
-Inside Claude
+3. For Claude Code, run inside Claude:
    ```
    /plugin marketplace add yutori-ai/yutori-mcp
    /plugin install yutori@yutori-plugins
