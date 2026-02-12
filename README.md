@@ -53,17 +53,17 @@ For the quickstart below, Node.js is also required (for `npx`).
 
 
 
-2. Install MCP and skills for your tools via [skills.sh](https://skills.sh):
-   ```bash
-   npx skills add yutori-ai/yutori-mcp
-   ```
-   When prompted, choose which skills to install and which tools (e.g. OpenClaw, Codex).
-
-3. For Claude Code, run inside Claude:
+2. For Claude Code, run inside Claude:
    ```
    /plugin marketplace add yutori-ai/yutori-mcp
    /plugin install yutori@yutori-plugins
    ```
+
+3. For all other clients, install skills and MCP via [skills.sh](https://skills.sh):
+   ```bash
+   npx skills add yutori-ai/yutori-mcp
+   ```
+   When prompted, choose which skills to install and which tools (e.g. OpenClaw, Codex).
 
 
 
