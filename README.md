@@ -2,7 +2,7 @@
 
 An MCP server and skills for [Yutori](https://yutori.com/api) — web monitoring and browsing automation.
 
-You can use it with Claude Code, Cursor, VS Code, ChatGPT, Codex, OpenClaw, and other MCP hosts.
+You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and other MCP hosts.
 
 ## Features
 
