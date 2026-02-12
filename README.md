@@ -63,7 +63,7 @@ For the quickstart below, Node.js is also required (for `npx`).
    ```bash
    npx skills add yutori-ai/yutori-mcp
    ```
-   When prompted, choose which skills to install and which tools (e.g. OpenClaw, Codex).
+   When prompted, select the skills and clients you want (e.g. Cursor, Codex, OpenClaw).
 
 
 
