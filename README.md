@@ -32,12 +32,12 @@ For the quickstart below, Node.js is also required (for `npx`).
 
 ### Quickstart
 
-1. Authenticate using
+1. Run in terminal:
 
     ```bash
     uvx yutori-mcp login
     ```
-    to get your setup automatically.
+    This will authenticate and save your API key automatically.
 
     <details>
     <summary>Or, manually add your API key</summary>
