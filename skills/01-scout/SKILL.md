@@ -1,5 +1,5 @@
 ---
-name: Yutori scout
+name: Yutori-scout
 description: Set up continuous web monitoring with Yutori Scouts. Use when the user wants to track news, competitors, product updates, funding rounds, price changes, or any recurring web information.
 argument-hint: "[topic or monitoring goal]"
 ---

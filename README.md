@@ -32,23 +32,20 @@ For the quickstart below, Node.js is also required (for `npx`).
 
 ### Quickstart
 
-1. Grab your API key. Enter
+1. Authenticate using
 
     ```bash
     uvx yutori-mcp login
     ```
-
     to get your setup automatically.
 
+    Or
 
-    Or add your API key to your shell profile (once):
+    Go to (https://platform.yutori.com) and add your API key to your shell profile (once):
    ```bash
    echo 'export YUTORI_API_KEY=yt-your-api-key' >> ~/.zshrc
    source ~/.zshrc
    ```
-
-
-   If you manually add the key, you will have to install the mcp in Claude Code and Codex!
 
 
 
@@ -56,7 +53,17 @@ For the quickstart below, Node.js is also required (for `npx`).
    ```bash
    npx skills add yutori-ai/yutori-mcp
    ```
-   When prompted, choose which skills to install and which tools (e.g. Claude Code, OpenClaw, Codex).
+   When prompted, choose which skills to install and which tools (e.g. OpenClaw, Codex).
+
+3. For Claude Code
+
+Inside Claude
+   ```
+   /plugin marketplace add yutori-ai/yutori-mcp
+   /plugin install yutori@yutori-plugins
+   ```
+
+
 
 ### Per-client setup
 
