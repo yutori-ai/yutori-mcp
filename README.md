@@ -41,7 +41,7 @@ For the quickstart below, Node.js is also required (for `npx`).
 
     Or
 
-    Go to (https://platform.yutori.com) and add your API key to the config file:
+    Go to (https://platform.yutori.com) and manually add your API key to the config file:
    ```bash
    mkdir -p ~/.yutori
    cat > ~/.yutori/config.json << 'EOF'
