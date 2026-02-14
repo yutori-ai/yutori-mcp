@@ -53,12 +53,22 @@ For the quickstart below, Node.js is also required (for `npx`).
 
 
 
-2. For Claude Code, run inside Claude:
+
+2. Install mcp using [add-mcp](https://neon.com/blog/add-mcp)
    ```
-   /plugin marketplace add yutori-ai/yutori-mcp
-   /plugin install yutori@yutori-plugins
+   npx add-mcp "uvx yutori-mcp"
    ```
-    Restart claude.
+
+    Pick the tools that you want to configure.
+
+3. Install skills using [skills.sh](https://skills.sh)
+   ```
+   npx skills add yutori-ai/yutori-mcp
+   ```
+
+    Pick the tools that you want to configure.
+
+4. Restart the tool you are using.
 
 
 ### Manual per-client setup
