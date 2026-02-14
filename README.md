@@ -1,4 +1,4 @@
-# Yutori MCP Server / Plugin / Skills
+# The Yutori MCP Toolkit
 
 An MCP server and skills for [Yutori](https://yutori.com/api) — web monitoring and browsing automation.
 
@@ -58,13 +58,7 @@ For the quickstart below, Node.js is also required (for `npx`).
    /plugin marketplace add yutori-ai/yutori-mcp
    /plugin install yutori@yutori-plugins
    ```
-
-3. For all other clients, install skills and MCP via [skills.sh](https://skills.sh):
-   ```bash
-   npx skills add yutori-ai/yutori-mcp
-   ```
-   When prompted, select the skills and clients you want (e.g. Cursor, Codex, OpenClaw).
-
+    Restart claude.
 
 
 ### Manual per-client setup
