@@ -211,3 +211,5 @@ __marimo__/
 
 # Local skill symlinks (for development testing)
 .claude/skills/
+
+scripts/*
