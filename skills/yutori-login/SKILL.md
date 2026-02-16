@@ -1,5 +1,5 @@
 ---
-name: login
+name: yutori-login
 description: Log in to Yutori to connect your account
 argument-hint: ""
 ---
