@@ -6,8 +6,8 @@ You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and 
 
 ## Features
 
-**API tools:**
-- **Scouts** — Monitor the web continuously for anything you care about at a desired frequency
+**Capabilities:**
+- **Scouting** — Monitor the web continuously for anything you care about at a desired frequency
 - **Research** — Run one-time deep web research tasks
 - **Browsing** — Automate websites with an AI navigator
 
