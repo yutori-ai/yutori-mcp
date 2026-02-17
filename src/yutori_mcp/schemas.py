@@ -120,6 +120,10 @@ class EditScoutInput(BaseModel):
         default=None,
         description="User location for geo-relevant searches",
     )
+    is_public: bool | None = Field(
+        default=None,
+        description="Whether scout results are publicly accessible",
+    )
 
     @model_validator(mode="after")
     def validate_has_changes(self) -> "EditScoutInput":
@@ -134,6 +138,7 @@ class EditScoutInput(BaseModel):
             self.skip_email,
             self.user_timezone,
             self.user_location,
+            self.is_public,
         ]
         if not any(f is not None for f in fields):
             raise ValueError("edit_scout requires at least one field to update")

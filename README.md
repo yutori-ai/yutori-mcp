@@ -33,7 +33,7 @@ Or with Homebrew:
 brew install uv
 ```
 
-
+Python 3.10 or higher is required (`uv` manages this automatically for most installs).
 
 For the quickstart below, Node.js is also required (for `npx`).
 
@@ -61,19 +61,19 @@ For the quickstart below, Node.js is also required (for `npx`).
 
 
 
-2. Install mcp using [add-mcp](https://neon.com/blog/add-mcp)
+2. Install MCP using [add-mcp](https://neon.com/blog/add-mcp) (requires Node.js):
    ```
    npx add-mcp "uvx yutori-mcp"
    ```
 
-    Pick the tools that you want to configure.
+    Pick the clients you want to configure.
 
-3. Install skills using [skills.sh](https://skills.sh)
+3. (Optional) Install workflow skills using [skills.sh](https://skills.sh) (requires Node.js):
    ```
    npx skills add yutori-ai/yutori-mcp
    ```
 
-    Pick the tools that you want to configure.
+    Adds slash-command shortcuts like `/yutori-scout`, `/yutori-research`, and more. Skip if you only need the MCP tools.
 
 4. Restart the tool you are using.
 
@@ -85,7 +85,7 @@ For the quickstart below, Node.js is also required (for `npx`).
 
 1. **Plugin (Recommended)** - Includes MCP tools + workflow skills
 
-   Run these commands inside Claude Code:
+   Type these commands in Claude Code's input (not in a terminal):
    ```
    /plugin marketplace add yutori-ai/yutori-mcp
    /plugin install yutori@yutori-plugins
@@ -323,7 +323,7 @@ pytest
 
 ```bash
 yutori-mcp login    # authenticate (one-time)
-python -m yutori_mcp.server
+yutori-mcp          # run the server (or: python -m yutori_mcp.server)
 ```
 
 ### Debugging with MCP Inspector
