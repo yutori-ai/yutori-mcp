@@ -6,10 +6,9 @@ You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and 
 
 ## Features
 
-- **Scouts**: Create agents that monitor the web for anything you care about at a desired frequency
+- **Scouts**: Create agents that monitor the web for anything you care about at a desired frequency, list them and check the status
 - **Research**: Execute one-time deep web research tasks
 - **Browsing**: Execute one-time web browsing tasks using an AI website navigator
-- **Skills**: Workflow templates (competitor watch, API/changelog monitoring) for clients that support them
 
 ## Installation
 
