@@ -1,14 +1,22 @@
 # The Yutori MCP Toolkit
 
-An MCP server and skills for [Yutori](https://yutori.com/api) — web monitoring and browsing automation.
+MCP tools and skills for web monitoring, deep research, and browser automation — powered by [Yutori](https://yutori.com/api)'s web agentic tech.
 
 You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and other MCP hosts.
 
 ## Features
 
-- **Scouts**: Create agents that monitor the web for anything you care about at a desired frequency, list them and check the status
-- **Research**: Execute one-time deep web research tasks
-- **Browsing**: Execute one-time web browsing tasks using an AI website navigator
+**API tools:**
+- **Scouts** — Monitor the web continuously for anything you care about at a desired frequency
+- **Research** — Run one-time deep web research tasks
+- **Browsing** — Automate websites with an AI navigator
+
+**Workflow skills** (for clients that support slash commands):
+- [`/yutori-scout`](skills/01-scout/SKILL.md) — Set up continuous web monitoring
+- [`/yutori-research`](skills/02-research/SKILL.md) — Deep web research (async, 5–10 min)
+- [`/yutori-browse`](skills/03-browse/SKILL.md) — Browser automation
+- [`/yutori-competitor-watch`](skills/04-competitor-watch/SKILL.md) — Competitor monitoring template
+- [`/yutori-api-monitor`](skills/05-api-monitor/SKILL.md) — API/changelog monitoring template
 
 ## Installation
 
@@ -293,7 +301,7 @@ pip install yutori-mcp
 
 ## Tools
 
-Parameters, example requests/responses, and annotations for all MCP tools. See **[TOOLS.md](TOOLS.md)** for the full reference (Scout, Research, and Browsing tools).
+See [TOOLS.md](TOOLS.md) for the full tool reference — Scout, Research, and Browsing tools with parameters, examples, and response formats.
 
 ## Development
 
