@@ -275,6 +275,8 @@ def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict) -> tuple[
                 config_kwargs["user_timezone"] = params.user_timezone
             if params.user_location is not None:
                 config_kwargs["user_location"] = params.user_location
+            if params.is_public is not None:
+                config_kwargs["is_public"] = params.is_public
 
             if config_kwargs:
                 client.edit_scout(scout_id=params.scout_id, **config_kwargs)

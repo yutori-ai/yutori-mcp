@@ -1,14 +1,22 @@
 # The Yutori MCP Toolkit
 
-An MCP server and skills for [Yutori](https://yutori.com/api) — web monitoring and browsing automation.
+MCP tools and skills for web monitoring, deep research, and browser automation — powered by [Yutori](https://yutori.com/api)'s web agentic tech.
 
 You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and other MCP hosts.
 
 ## Features
 
-- **Scouts**: Create agents that monitor the web for anything you care about at a desired frequency, list them and check the status
-- **Research**: Execute one-time deep web research tasks
-- **Browsing**: Execute one-time web browsing tasks using an AI website navigator
+**Capabilities:**
+- **Scouting** — Monitor the web continuously for anything you care about at a desired frequency
+- **Research** — Run one-time deep web research tasks
+- **Browsing** — Automate websites with an AI navigator
+
+**Workflow skills** (for clients that support slash commands):
+- [`/yutori-scout`](skills/01-scout/SKILL.md) — Set up continuous web monitoring
+- [`/yutori-research`](skills/02-research/SKILL.md) — Deep web research (async, 5–10 min)
+- [`/yutori-browse`](skills/03-browse/SKILL.md) — Browser automation
+- [`/yutori-competitor-watch`](skills/04-competitor-watch/SKILL.md) — Competitor monitoring template
+- [`/yutori-api-monitor`](skills/05-api-monitor/SKILL.md) — API/changelog monitoring template
 
 ## Installation
 
@@ -25,7 +33,7 @@ Or with Homebrew:
 brew install uv
 ```
 
-
+Python 3.10 or higher is required (`uv` manages this automatically for most installs).
 
 For the quickstart below, Node.js is also required (for `npx`).
 
@@ -53,19 +61,19 @@ For the quickstart below, Node.js is also required (for `npx`).
 
 
 
-2. Install mcp using [add-mcp](https://neon.com/blog/add-mcp)
+2. Install MCP using [add-mcp](https://neon.com/blog/add-mcp) (requires Node.js):
    ```
    npx add-mcp "uvx yutori-mcp"
    ```
 
-    Pick the tools that you want to configure.
+    Pick the clients you want to configure.
 
-3. Install skills using [skills.sh](https://skills.sh)
+3. (Optional) Install workflow skills using [skills.sh](https://skills.sh) (requires Node.js):
    ```
    npx skills add yutori-ai/yutori-mcp
    ```
 
-    Pick the tools that you want to configure.
+    Adds slash-command shortcuts like `/yutori-scout`, `/yutori-research`, and more. Skip if you only need the MCP tools.
 
 4. Restart the tool you are using.
 
@@ -77,7 +85,7 @@ For the quickstart below, Node.js is also required (for `npx`).
 
 1. **Plugin (Recommended)** - Includes MCP tools + workflow skills
 
-   Run these commands inside Claude Code:
+   Type these commands in Claude Code's input (not in a terminal):
    ```
    /plugin marketplace add yutori-ai/yutori-mcp
    /plugin install yutori@yutori-plugins
@@ -293,7 +301,7 @@ pip install yutori-mcp
 
 ## Tools
 
-Parameters, example requests/responses, and annotations for all MCP tools. See **[TOOLS.md](TOOLS.md)** for the full reference (Scout, Research, and Browsing tools).
+See [TOOLS.md](TOOLS.md) for the full tool reference — Scout, Research, and Browsing tools with parameters, examples, and response formats.
 
 ## Development
 
@@ -315,7 +323,7 @@ pytest
 
 ```bash
 yutori-mcp login    # authenticate (one-time)
-python -m yutori_mcp.server
+yutori-mcp          # run the server (or: python -m yutori_mcp.server)
 ```
 
 ### Debugging with MCP Inspector
