@@ -269,7 +269,7 @@ Research task started.
 
 Task ID: ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395
 Status: queued
-View progress: https://scouts.yutori.com/ae27a17c-a4ed-4c69-8b2a-4bec330fc935
+View progress: https://platform.yutori.com/research/tasks/ae27a17c-a4ed-4c69-8b2a-4bec330fc935
 
 Poll with get_research_task_result(task_id="ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395") to check status.
 ```
@@ -358,7 +358,7 @@ Browsing task started.
 
 Task ID: 54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396
 Status: queued
-View progress: https://scouts.yutori.com/54fb19fd-277e-4098-ab72-5a9f8a4347fc
+View progress: https://platform.yutori.com/browsing/tasks/54fb19fd-277e-4098-ab72-5a9f8a4347fc
 
 Poll with get_browsing_task_result(task_id="54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396") to check status.
 ```

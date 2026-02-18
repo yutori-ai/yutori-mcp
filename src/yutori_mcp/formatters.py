@@ -156,6 +156,7 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
         lines.append(f"\n{i}. {name} ({status})")
         lines.append(f'   Query: "{_truncate(query)}"')
         lines.append(f"   ID: {scout_id}")
+        lines.append(f"   URL: https://platform.yutori.com/scouting/tasks/{scout_id}")
         lines.append(f"   Runs {interval} | Next: {next_run}")
 
     # Add hints
@@ -179,6 +180,7 @@ def format_scout_detail(response: dict[str, Any], **context: Any) -> str:
     lines = [
         f"Scout: {name}",
         f"ID: {scout_id}",
+        f"URL: https://platform.yutori.com/scouting/tasks/{scout_id}",
         f"Status: {status}",
         "",
         f'Query: "{query}"',
@@ -283,6 +285,7 @@ def format_scout_created(response: dict[str, Any], **context: Any) -> str:
         "",
         f"Name: {name}",
         f"ID: {scout_id}",
+        f"URL: https://platform.yutori.com/scouting/tasks/{scout_id}",
         f"Status: {status}",
         "",
         f'Query: "{_truncate(query, 80)}"',
@@ -310,6 +313,7 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
                 "",
                 f"Name: {name}",
                 f"ID: {scout_id}",
+                f"URL: https://platform.yutori.com/scouting/tasks/{scout_id}",
                 f"Status: {status}",
                 "",
                 "Use get_scout_detail(scout_id) for full details.",
@@ -325,6 +329,7 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
         "",
         f"Name: {name}",
         f"ID: {scout_id}",
+        f"URL: https://platform.yutori.com/scouting/tasks/{scout_id}",
         "",
         "Changes applied:",
     ]
