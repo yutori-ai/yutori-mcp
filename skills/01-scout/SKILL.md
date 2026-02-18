@@ -55,7 +55,7 @@ Help the user set up a Yutori Scout for continuous web monitoring.
    Use the `create_scout` tool with:
    - `query`: The comprehensive monitoring query
    - `output_interval`: 86400 (daily), 43200 (twice daily), or 1800 (minimum, every 30 min)
-   - `webhook_url` and `webhook_format` if they want webhook notifications
+   - `webhook_url` and `webhook_format` if they want webhook notifications. **Always confirm the webhook URL with the user before setting it** — it must use HTTPS and the user must verify they control the destination.
    - `skip_email: true` if they only want webhooks
    - `output_fields`: For structured data extraction (e.g., ["company", "amount", "round_type", "source_url"])
 
