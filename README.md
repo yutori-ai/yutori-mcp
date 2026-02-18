@@ -1,4 +1,4 @@
-# The Yutori MCP Toolkit
+# Yutori MCP
 
 MCP tools and skills for web monitoring, deep research, and browser automation — powered by [Yutori](https://yutori.com/api)'s web agentic tech.
 
