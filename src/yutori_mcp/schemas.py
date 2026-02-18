@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class CreateScoutInput(BaseModel):
@@ -33,7 +33,10 @@ class CreateScoutInput(BaseModel):
     )
     webhook_url: str | None = Field(
         default=None,
-        description="URL to receive webhook notifications when updates are available",
+        description=(
+            "HTTPS URL to receive webhook notifications when updates are available. "
+            "Must use https://. Confirm the URL with the user before setting."
+        ),
     )
     webhook_format: str | None = Field(
         default=None,
@@ -70,6 +73,13 @@ class CreateScoutInput(BaseModel):
         description="Whether scout results are publicly accessible",
     )
 
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: str | None) -> str | None:
+        if v is not None and not v.startswith("https://"):
+            raise ValueError("webhook_url must use HTTPS (https://)")
+        return v
+
 
 class EditScoutInput(BaseModel):
     """Input for editing an existing scout or changing its status."""
@@ -93,12 +103,19 @@ class EditScoutInput(BaseModel):
     )
     webhook_url: str | None = Field(
         default=None,
-        description="Updated webhook URL",
+        description="Updated HTTPS webhook URL. Must use https://. Confirm the URL with the user before setting.",
     )
     webhook_format: str | None = Field(
         default=None,
         description="Updated webhook format: 'scout', 'slack', or 'zapier'",
     )
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: str | None) -> str | None:
+        if v is not None and not v.startswith("https://"):
+            raise ValueError("webhook_url must use HTTPS (https://)")
+        return v
     output_fields: list[str] | None = Field(
         default=None,
         description=(
@@ -224,12 +241,19 @@ class BrowsingTaskInput(BaseModel):
     )
     webhook_url: str | None = Field(
         default=None,
-        description="URL to receive webhook notification when task completes",
+        description="HTTPS URL to receive webhook notification when task completes. Must use https://.",
     )
     webhook_format: str | None = Field(
         default=None,
         description="Webhook payload format: 'scout' (default) or 'slack'",
     )
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: str | None) -> str | None:
+        if v is not None and not v.startswith("https://"):
+            raise ValueError("webhook_url must use HTTPS (https://)")
+        return v
 
 
 class TaskIdInput(BaseModel):
@@ -278,9 +302,16 @@ class ResearchTaskInput(BaseModel):
     )
     webhook_url: str | None = Field(
         default=None,
-        description="URL to receive webhook notification when research completes",
+        description="HTTPS URL to receive webhook notification when research completes. Must use https://.",
     )
     webhook_format: str | None = Field(
         default=None,
         description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
     )
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: str | None) -> str | None:
+        if v is not None and not v.startswith("https://"):
+            raise ValueError("webhook_url must use HTTPS (https://)")
+        return v
