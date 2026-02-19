@@ -208,6 +208,21 @@ def format_scout_detail(response: dict[str, Any], **context: Any) -> str:
     if response.get("user_location"):
         lines.append(f"  Location: {response['user_location']}")
 
+    # Add sources/citations if present
+    sources = response.get("sources") or response.get("citations")
+    if sources:
+        lines.append("")
+        lines.append("Sources:")
+        for source in sources[:10]:
+            if isinstance(source, dict):
+                url = source.get("url", "")
+                title = source.get("title", url)
+                lines.append(f"  - {title}: {url}")
+            else:
+                lines.append(f"  - {source}")
+        if len(sources) > 10:
+            lines.append(f"  ... and {len(sources) - 10} more")
+
     lines.append("")
     lines.append(f"Created: {created}")
 
@@ -266,6 +281,21 @@ def format_scout_updates(response: dict[str, Any], **context: Any) -> str:
             if len(findings) > 5:
                 lines.append(f"  ... and {len(findings) - 5} more")
             lines.append("[EXTERNAL CONTENT END]")
+
+        # Add sources/citations if present
+        sources = update.get("sources") or update.get("citations")
+        if sources:
+            lines.append("")
+            lines.append("Sources:")
+            for source in sources[:10]:
+                if isinstance(source, dict):
+                    url = source.get("url", "")
+                    title = source.get("title", url)
+                    lines.append(f"  - {title}: {url}")
+                else:
+                    lines.append(f"  - {source}")
+            if len(sources) > 10:
+                lines.append(f"  ... and {len(sources) - 10} more")
 
     if has_more and next_cursor:
         lines.append("")

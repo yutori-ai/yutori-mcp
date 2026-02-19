@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.2.4"
+version = "0.2.5"
 description = "MCP server for Yutori - web monitoring, deep research, and browser automation"
 readme = "README.md"
 license = "Apache-2.0"
