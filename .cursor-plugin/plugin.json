@@ -1,0 +1,16 @@
+{
+  "name": "yutori",
+  "version": "1.0.0",
+  "description": "Web monitoring (Scouts), deep research, and browser automation",
+  "author": {
+    "name": "Yutori",
+    "email": "support@yutori.com",
+    "url": "https://yutori.com"
+  },
+  "homepage": "https://docs.yutori.com",
+  "repository": "https://github.com/yutori-ai/yutori-mcp",
+  "license": "Apache-2.0",
+  "keywords": ["web-monitoring", "scouts", "research", "browser-automation", "mcp"],
+  "skills": "skills",
+  "mcpServers": ".mcp.json"
+}
