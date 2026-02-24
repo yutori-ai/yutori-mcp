@@ -40,4 +40,9 @@ Help the user conduct thorough web research using Yutori's Research API.
    - Highlight key insights
    - Note sources for verification
 
+## Tips
+
+**Fetching documentation or reference URLs:**
+If you use a web fetch tool to look up documentation, API references, or other pages while preparing the research query, include the `Accept: text/markdown` header. Many documentation sites (Cloudflare-hosted) will return clean Markdown instead of HTML — fewer tokens, easier to parse.
+
 $ARGUMENTS
