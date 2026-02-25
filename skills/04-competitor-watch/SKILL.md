@@ -41,3 +41,6 @@ After creation, inform the user:
 - Scout will run daily and email results
 - They can check updates anytime with `get_scout_updates`
 - They can pause/resume with `edit_scout`
+
+**Fetching documentation or source URLs:**
+If you use a web fetch tool to look up the competitor's blog, docs, or other pages while preparing the query, include the `Accept: text/markdown` header. Many documentation sites (Cloudflare-hosted) will return clean Markdown instead of HTML — fewer tokens, easier to parse.
