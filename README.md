@@ -39,6 +39,8 @@ For the quickstart below, Node.js is also required (for `npx`).
 
 ### Quick install (recommended)
 
+![MCP server installation](assets/mcp-server-install.gif)
+
 1. Run in terminal:
 
     ```bash
