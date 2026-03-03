@@ -2,6 +2,50 @@
 
 All tool outputs are formatted as human-readable text optimized for LLM consumption.
 
+## Usage
+
+### list_api_usage
+
+Get API usage statistics including active scout counts, rate limits, and activity metrics.
+
+```json
+{
+  "period": "7d"
+}
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `period` | No | Activity time range: `24h` (default), `7d`, `30d`, or `90d` |
+
+Example response:
+
+```
+Active Scouts: 5
+  - a1b2c3d4-e5f6-7890-abcd-ef1234567890
+  - b2c3d4e5-f6a7-8901-bcde-f12345678901
+  ... and 3 more
+
+API Rate Limits (available):
+  Requests today: 1250
+  Daily limit: 10000
+  Remaining: 8750
+  Resets at: 2026-03-04T00:00:00+00:00
+
+n1 API Rate Limits:
+  Requests today: 342
+  Daily limit: 50000
+  Remaining: 49658
+  Per-second limit: 20
+  Resets at: 2026-03-04T00:00:00+00:00
+
+Activity (7d):
+  Scout runs: 47
+  Browsing tasks: 12
+  Research tasks: 8
+  n1 API calls: 1523
+```
+
 ## Scout Tools
 
 ### list_scouts
@@ -428,6 +472,6 @@ Tools include hints for client behavior:
 
 | Tool | Annotation |
 |------|------------|
-| `list_scouts`, `get_scout_detail`, `get_scout_updates`, `get_browsing_task_result`, `get_research_task_result` | `readOnlyHint: true` |
+| `list_api_usage`, `list_scouts`, `get_scout_detail`, `get_scout_updates`, `get_browsing_task_result`, `get_research_task_result` | `readOnlyHint: true` |
 | `edit_scout` | `idempotentHint: true` |
 | `delete_scout` | `destructiveHint: true` |

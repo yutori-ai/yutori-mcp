@@ -11,6 +11,7 @@ from yutori_mcp.formatters import (
     format_scout_updates,
     format_task_result,
     format_task_started,
+    format_usage,
 )
 
 
@@ -39,6 +40,94 @@ class TestDictToMarkdown:
         assert "name: John" in result
         assert "email" not in result
         assert "phone" not in result
+
+
+class TestFormatUsage:
+    USAGE_RESPONSE = {
+        "num_active_scouts": 3,
+        "active_scout_ids": ["id-1", "id-2", "id-3"],
+        "rate_limits": {
+            "requests_today": 500,
+            "daily_limit": 10000,
+            "remaining_requests": 9500,
+            "reset_at": "2026-03-04T00:00:00+00:00",
+            "status": "available",
+        },
+        "n1_rate_limits": {
+            "requests_today": 100,
+            "daily_limit": 50000,
+            "remaining_requests": 49900,
+            "reset_at": "2026-03-04T00:00:00+00:00",
+            "per_second_limit": 20,
+        },
+        "activity": {
+            "period": "7d",
+            "scout_runs": 21,
+            "browsing_tasks": 5,
+            "research_tasks": 3,
+            "n1_calls": 800,
+        },
+    }
+
+    def test_active_scouts_shown(self):
+        result = format_usage(self.USAGE_RESPONSE)
+        assert "Active Scouts: 3" in result
+        assert "id-1" in result
+        assert "id-2" in result
+
+    def test_rate_limits_shown(self):
+        result = format_usage(self.USAGE_RESPONSE)
+        assert "API Rate Limits (available)" in result
+        assert "Requests today: 500" in result
+        assert "Daily limit: 10000" in result
+        assert "Remaining: 9500" in result
+
+    def test_n1_rate_limits_shown(self):
+        result = format_usage(self.USAGE_RESPONSE)
+        assert "n1 API Rate Limits" in result
+        assert "Requests today: 100" in result
+        assert "Per-second limit: 20" in result
+
+    def test_activity_shown(self):
+        result = format_usage(self.USAGE_RESPONSE)
+        assert "Activity (7d)" in result
+        assert "Scout runs: 21" in result
+        assert "Browsing tasks: 5" in result
+        assert "Research tasks: 3" in result
+        assert "n1 API calls: 800" in result
+
+    def test_unavailable_rate_limits(self):
+        """When rate limits are unavailable, don't show request counts."""
+        response = {
+            **self.USAGE_RESPONSE,
+            "rate_limits": {
+                "requests_today": None,
+                "daily_limit": None,
+                "remaining_requests": None,
+                "reset_at": "2026-03-04T00:00:00+00:00",
+                "status": "unavailable",
+            },
+        }
+        result = format_usage(response)
+        assert "API Rate Limits (unavailable)" in result
+        # Should not show request counts when unavailable
+        assert "Requests today: None" not in result
+
+    def test_many_active_scouts_truncated(self):
+        """More than 5 active scouts shows truncation hint."""
+        response = {
+            **self.USAGE_RESPONSE,
+            "num_active_scouts": 8,
+            "active_scout_ids": [f"id-{i}" for i in range(8)],
+        }
+        result = format_usage(response)
+        assert "Active Scouts: 8" in result
+        assert "... and 3 more" in result
+
+    def test_format_response_routes_to_usage(self):
+        """format_response correctly routes list_api_usage."""
+        result = format_response("list_api_usage", self.USAGE_RESPONSE)
+        assert "Active Scouts: 3" in result
 
 
 class TestFormatListScouts:

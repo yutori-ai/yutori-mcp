@@ -21,6 +21,7 @@ from .schemas import (
     ResearchTaskInput,
     ScoutIdInput,
     TaskIdInput,
+    UsageInput,
 )
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,15 @@ def _output_fields_to_output_schema(
 
 # Tool definitions with annotations
 TOOLS = [
+    # Usage
+    Tool(
+        name="list_api_usage",
+        description=(
+            "Get API usage statistics including active scout counts, rate limits, and activity metrics."
+        ),
+        inputSchema=_get_simplified_schema(UsageInput),
+        annotations={"readOnlyHint": True},
+    ),
     # Read operations
     Tool(
         name="list_scouts",
@@ -217,6 +227,12 @@ def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict) -> tuple[
         Tuple of (result, context) where context contains extra info for formatting.
     """
     match name:
+        # Usage
+        case "list_api_usage":
+            params = UsageInput(**arguments)
+            result = client.get_usage(period=params.period)
+            return result, {}
+
         # Read operations
         case "list_scouts":
             params = ListScoutsInput(**arguments)

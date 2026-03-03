@@ -47,6 +47,7 @@ def _to_markdown_lines(obj: Any, level: int = 0) -> list[str]:
 def format_response(tool_name: str, response: dict[str, Any], **context: Any) -> str:
     """Route to appropriate formatter based on tool name."""
     formatters = {
+        "list_api_usage": format_usage,
         "list_scouts": format_list_scouts,
         "get_scout_detail": format_scout_detail,
         "get_scout_updates": format_scout_updates,
@@ -112,6 +113,58 @@ def _truncate(text: str, max_len: int = 60) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 3] + "..."
+
+
+# -----------------------------------------------------------------------------
+# Usage formatter
+# -----------------------------------------------------------------------------
+
+
+def format_usage(response: dict[str, Any], **context: Any) -> str:
+    """Format list_api_usage response as readable text."""
+    num_active = response.get("num_active_scouts", 0)
+    active_ids = response.get("active_scout_ids", [])
+
+    lines = [f"Active Scouts: {num_active}"]
+
+    if active_ids:
+        for sid in active_ids[:5]:
+            lines.append(f"  - {sid}")
+        if len(active_ids) > 5:
+            lines.append(f"  ... and {len(active_ids) - 5} more")
+
+    # Rate limits
+    rate_limits = response.get("rate_limits", {})
+    if rate_limits:
+        status = rate_limits.get("status", "unknown")
+        lines.append(f"\nAPI Rate Limits ({status}):")
+        if status == "available":
+            lines.append(f"  Requests today: {rate_limits.get('requests_today', 'N/A')}")
+            lines.append(f"  Daily limit: {rate_limits.get('daily_limit', 'N/A')}")
+            lines.append(f"  Remaining: {rate_limits.get('remaining_requests', 'N/A')}")
+        lines.append(f"  Resets at: {rate_limits.get('reset_at', 'N/A')}")
+
+    # n1 rate limits
+    n1_limits = response.get("n1_rate_limits", {})
+    if n1_limits:
+        lines.append("\nn1 API Rate Limits:")
+        lines.append(f"  Requests today: {n1_limits.get('requests_today', 'N/A')}")
+        lines.append(f"  Daily limit: {n1_limits.get('daily_limit', 'N/A')}")
+        lines.append(f"  Remaining: {n1_limits.get('remaining_requests', 'N/A')}")
+        lines.append(f"  Per-second limit: {n1_limits.get('per_second_limit', 'N/A')}")
+        lines.append(f"  Resets at: {n1_limits.get('reset_at', 'N/A')}")
+
+    # Activity
+    activity = response.get("activity", {})
+    if activity:
+        period = activity.get("period", "24h")
+        lines.append(f"\nActivity ({period}):")
+        lines.append(f"  Scout runs: {activity.get('scout_runs', 0)}")
+        lines.append(f"  Browsing tasks: {activity.get('browsing_tasks', 0)}")
+        lines.append(f"  Research tasks: {activity.get('research_tasks', 0)}")
+        lines.append(f"  n1 API calls: {activity.get('n1_calls', 0)}")
+
+    return "\n".join(lines)
 
 
 # -----------------------------------------------------------------------------

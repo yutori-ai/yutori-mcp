@@ -7,6 +7,15 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+class UsageInput(BaseModel):
+    """Input for retrieving API usage statistics."""
+
+    period: Literal["24h", "7d", "30d", "90d"] | None = Field(
+        default=None,
+        description="Time range for activity counts: '24h' (default), '7d', '30d', or '90d'",
+    )
+
+
 class CreateScoutInput(BaseModel):
     """Input for creating a new monitoring scout.
 
