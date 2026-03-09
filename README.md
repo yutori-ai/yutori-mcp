@@ -120,6 +120,11 @@ For the quickstart below, Node.js is also required (for `npx`).
    > claude mcp remove yutori -s local  # if installed at local/project scope
    > ```
 
+   To uninstall the plugin later:
+   ```
+   /plugin uninstall yutori@yutori-plugins -s user
+   ```
+
 2. **MCP Only** (if you prefer not to use the plugin)
 
    ```bash
