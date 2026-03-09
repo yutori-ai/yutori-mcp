@@ -81,7 +81,7 @@ For the quickstart below, Node.js is also required (for `npx`).
 
     To list or remove skills later:
    <details>
-   <summary>To list or remove skills later:</summary>
+   <summary>Show commands</summary>
 
    ```bash
    npx skills ls -g
