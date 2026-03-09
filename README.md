@@ -83,8 +83,6 @@ For the quickstart below, Node.js is also required (for `npx`).
    npx skills remove -g yutori-login
    ```
 
-    If you installed without `-g`, use `npx skills list` and `npx skills remove ...` instead. If you are not sure which scope you used, check both. Older installs may still be named `login`, so remove that too if it appears.
-
 4. Restart the tool you are using.
 
 
