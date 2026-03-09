@@ -72,10 +72,18 @@ For the quickstart below, Node.js is also required (for `npx`).
 
 3. (Optional) Install workflow skills using [skills.sh](https://skills.sh) (requires Node.js):
    ```
-   npx skills add yutori-ai/yutori-mcp
+   npx skills add yutori-ai/yutori-mcp -g
    ```
 
-    Adds slash-command shortcuts like `/yutori-scout`, `/yutori-research`, and more. Skip if you only need the MCP tools.
+    Adds slash-command shortcuts like `/yutori-scout`, `/yutori-research`, and more. `-g` installs them at user scope so they are available across projects. Omit `-g` if you want a project-local install instead.
+
+    To list or remove skills later, use the same scope you installed with:
+   ```
+   npx skills ls -g
+   npx skills remove -g yutori-login
+   ```
+
+    If you installed without `-g`, use `npx skills list` and `npx skills remove ...` instead. If you are not sure which scope you used, check both. Older installs may still be named `login`, so remove that too if it appears.
 
 4. Restart the tool you are using.
 
@@ -240,6 +248,8 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
    git clone https://github.com/yutori-ai/yutori-mcp /tmp/yutori-mcp
    cp -rL /tmp/yutori-mcp/.agents/skills/* ~/.agents/skills/
    ```
+
+   To uninstall manually copied skills, delete the matching directories from `~/.agents/skills/`. When updating this way, remove old Yutori skill directories first, since `cp -rL` will not delete renamed or removed skills.
 
    Restart Codex after installing skills.
 
