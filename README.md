@@ -70,18 +70,18 @@ For the quickstart below, Node.js is also required (for `npx`).
 
     Pick the clients you want to configure.
 
-3. (Optional) Install workflow skills using [skills.sh](https://skills.sh) (requires Node.js):
+3. Install workflow skills using [skills.sh](https://skills.sh) (requires Node.js):
    ```
    npx skills add yutori-ai/yutori-mcp -g
    ```
 
     Adds slash-command shortcuts like `/yutori-scout`, `/yutori-research`, and more.
 
-    `-g` installs them at user scope so they are available across projects. Omit `-g` if you want a project-local install instead.
+    `-g` installs them at user scope. Omit `-g` if you want a project-local install instead.
 
-    To list or remove skills later, use the same scope you installed with:
+    To list or remove skills later:
    <details>
-   <summary>Show list/remove commands</summary>
+   <summary>To list or remove skills later:</summary>
 
    ```bash
    npx skills ls -g
