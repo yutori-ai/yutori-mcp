@@ -79,9 +79,8 @@ For the quickstart below, Node.js is also required (for `npx`).
 
     `-g` installs them at user scope. Omit `-g` if you want a project-local install instead.
 
-    To list or remove skills later:
    <details>
-   <summary>Show commands</summary>
+   <summary>To list or remove skills later:</summary>
 
    ```bash
    npx skills ls -g
