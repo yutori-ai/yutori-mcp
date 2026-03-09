@@ -75,13 +75,19 @@ For the quickstart below, Node.js is also required (for `npx`).
    npx skills add yutori-ai/yutori-mcp -g
    ```
 
-    Adds slash-command shortcuts like `/yutori-scout`, `/yutori-research`, and more. `-g` installs them at user scope so they are available across projects. Omit `-g` if you want a project-local install instead.
+    Adds slash-command shortcuts like `/yutori-scout`, `/yutori-research`, and more.
+
+    `-g` installs them at user scope so they are available across projects. Omit `-g` if you want a project-local install instead.
 
     To list or remove skills later, use the same scope you installed with:
-   ```
+   <details>
+   <summary>Show list/remove commands</summary>
+
+   ```bash
    npx skills ls -g
    npx skills remove -g yutori-login
    ```
+   </details>
 
 4. Restart the tool you are using.
 
