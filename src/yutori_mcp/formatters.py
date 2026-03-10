@@ -443,8 +443,11 @@ def format_task_started(response: dict[str, Any], **context: Any) -> str:
         else:
             task_type = "Task"
 
+    browser = context.get("browser")
+    browser_note = " (using local desktop browser)" if browser == "local" else ""
+
     lines = [
-        f"{task_type} task started.",
+        f"{task_type} task started{browser_note}.",
         "",
         f"Task ID: {task_id}",
         f"Status: {status}",

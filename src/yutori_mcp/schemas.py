@@ -229,6 +229,14 @@ class BrowsingTaskInput(BaseModel):
         le=100,
         description="Maximum number of browser actions (1-100). Default: 25",
     )
+    browser: str | None = Field(
+        default=None,
+        description=(
+            "Where to run the browser. 'cloud' (default) uses Yutori's cloud browser. "
+            "'local' uses the desktop app (Yutori's Computer) with the user's logged-in sessions. "
+            "Requires the desktop app to be running."
+        ),
+    )
     output_fields: list[str] | None = Field(
         default=None,
         description=(
