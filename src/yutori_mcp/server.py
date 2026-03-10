@@ -152,8 +152,9 @@ TOOLS = [
     Tool(
         name="run_browsing_task",
         description=(
-            "Execute a one-time web browsing task. The navigator agent runs a cloud browser and "
-            "operates it like a person. Returns a task_id for polling. Example: 'list employees'."
+            "Execute a one-time web browsing task. The navigator agent runs a browser and "
+            "operates it like a person. Returns a task_id for polling. Example: 'list employees'. "
+            "Set browser='local' to use the desktop app with the user's logged-in sessions."
         ),
         inputSchema=_get_simplified_schema(BrowsingTaskInput),
     ),
@@ -300,11 +301,12 @@ def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict) -> tuple[
                 task=params.task,
                 start_url=params.start_url,
                 max_steps=params.max_steps,
+                browser=params.browser,
                 output_schema=_output_fields_to_output_schema(params.output_fields),
                 webhook_url=params.webhook_url,
                 webhook_format=params.webhook_format,
             )
-            return result, {"task_type": "Browsing"}
+            return result, {"task_type": "Browsing", "browser": params.browser}
         case "get_browsing_task_result":
             params = TaskIdInput(**arguments)
             return client.get_browsing_task(params.task_id), {"task_type": "Browsing"}

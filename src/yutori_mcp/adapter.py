@@ -74,6 +74,8 @@ class MCPClientAdapter:
     # -------------------------------------------------------------------------
 
     def run_browsing_task(self, task: str, start_url: str, **kwargs: Any) -> dict[str, Any]:
+        # The SDK's browsing.create() may not support 'browser' yet; pass it as extra kwarg
+        # which _strip_none will keep if non-None.
         return self._call(self._client.browsing.create, task, start_url, **_strip_none(kwargs))
 
     def get_browsing_task(self, task_id: str) -> dict[str, Any]:
