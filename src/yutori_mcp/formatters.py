@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-DEFAULT_LIMIT = 10
-
 
 def dict_to_markdown(obj: Any, level: int = 0) -> str:
     """Convert a nested dict/list structure to markdown text."""
