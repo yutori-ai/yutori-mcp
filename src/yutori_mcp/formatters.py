@@ -240,7 +240,7 @@ def format_scout_updates(response: dict[str, Any], **context: Any) -> str:
 
     for i, update in enumerate(updates, 1):
         lines.append("")
-        lines.append(f"--- Update #{i} —")
+        lines.append(f"--- Update #{i} ---")
 
         timestamp = _format_datetime(
             update.get("created_at") or update.get("timestamp")
