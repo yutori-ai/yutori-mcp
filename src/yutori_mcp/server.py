@@ -202,7 +202,7 @@ def create_server() -> Server:
         return TOOLS
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         try:
             with MCPClientAdapter() as client:
                 result, context = _handle_tool(client, name, arguments)
@@ -221,7 +221,7 @@ def create_server() -> Server:
     return server
 
 
-def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict) -> tuple[dict, dict]:
+def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict[str, Any]) -> tuple[dict, dict]:
     """Route tool calls to the appropriate client method.
 
     Returns:
