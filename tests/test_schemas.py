@@ -12,7 +12,26 @@ from yutori_mcp.schemas import (
     ResearchTaskInput,
     ScoutIdInput,
     TaskIdInput,
+    UsageInput,
 )
+
+
+class TestUsageInput:
+    def test_default_period(self):
+        """Period defaults to None."""
+        data = UsageInput()
+        assert data.period is None
+
+    def test_valid_periods(self):
+        """All valid period values are accepted."""
+        for period in ("24h", "7d", "30d", "90d"):
+            data = UsageInput(period=period)
+            assert data.period == period
+
+    def test_invalid_period_rejected(self):
+        """Invalid period values are rejected."""
+        with pytest.raises(ValidationError):
+            UsageInput(period="1h")
 
 
 class TestCreateScoutInput:

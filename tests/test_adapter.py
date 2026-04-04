@@ -134,6 +134,24 @@ class TestStripNone:
 # ---------------------------------------------------------------------------
 
 
+class TestGetUsageForwarding:
+    """get_usage must forward period and strip None values."""
+
+    def test_period_forwarded(self, adapter):
+        adapter._client.get_usage = MagicMock(return_value={"num_active_scouts": 1})
+        adapter.get_usage(period="7d")
+
+        _, kwargs = adapter._client.get_usage.call_args
+        assert kwargs["period"] == "7d"
+
+    def test_none_period_not_forwarded(self, adapter):
+        adapter._client.get_usage = MagicMock(return_value={"num_active_scouts": 0})
+        adapter.get_usage(period=None)
+
+        _, kwargs = adapter._client.get_usage.call_args
+        assert "period" not in kwargs
+
+
 class TestCreateScoutForwarding:
     """create_scout must not send None for optional fields (SDK has non-optional defaults)."""
 
