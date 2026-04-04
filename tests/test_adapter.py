@@ -106,7 +106,6 @@ class TestAdapterInit:
         with patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-key"), \
              patch("yutori_mcp.adapter.YutoriClient") as mock_client_cls:
             MCPClientAdapter()
-            mock_resolve = patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-key")
             mock_client_cls.assert_called_once_with(api_key="yt-key")
 
 
