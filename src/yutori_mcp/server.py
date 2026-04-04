@@ -221,7 +221,7 @@ def create_server() -> Server:
     return server
 
 
-def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict[str, Any]) -> tuple[dict, dict]:
+def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     """Route tool calls to the appropriate client method.
 
     Returns:
