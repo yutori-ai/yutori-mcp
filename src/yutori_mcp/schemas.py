@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, Field, model_validator
+
+
+def _validate_https_url(v: str | None) -> str | None:
+    if v is not None and not v.startswith("https://"):
+        raise ValueError("webhook_url must use HTTPS (https://)")
+    return v
+
+
+WebhookUrl = Annotated[str | None, AfterValidator(_validate_https_url)]
 
 
 class UsageInput(BaseModel):
@@ -40,7 +49,7 @@ class CreateScoutInput(BaseModel):
         ge=1800,
         description="Seconds between scout runs. Minimum 1800 (30 minutes). Default: 86400 (daily)",
     )
-    webhook_url: str | None = Field(
+    webhook_url: WebhookUrl = Field(
         default=None,
         description=(
             "HTTPS URL to receive webhook notifications when updates are available. "
@@ -82,13 +91,6 @@ class CreateScoutInput(BaseModel):
         description="Whether scout results are publicly accessible",
     )
 
-    @field_validator("webhook_url")
-    @classmethod
-    def validate_webhook_url(cls, v: str | None) -> str | None:
-        if v is not None and not v.startswith("https://"):
-            raise ValueError("webhook_url must use HTTPS (https://)")
-        return v
-
 
 class EditScoutInput(BaseModel):
     """Input for editing an existing scout or changing its status."""
@@ -110,7 +112,7 @@ class EditScoutInput(BaseModel):
         ge=1800,
         description="Updated run interval in seconds. Minimum 1800 (30 minutes)",
     )
-    webhook_url: str | None = Field(
+    webhook_url: WebhookUrl = Field(
         default=None,
         description="Updated HTTPS webhook URL. Must use https://. Confirm the URL with the user before setting.",
     )
@@ -118,13 +120,6 @@ class EditScoutInput(BaseModel):
         default=None,
         description="Updated webhook format: 'scout', 'slack', or 'zapier'",
     )
-
-    @field_validator("webhook_url")
-    @classmethod
-    def validate_webhook_url(cls, v: str | None) -> str | None:
-        if v is not None and not v.startswith("https://"):
-            raise ValueError("webhook_url must use HTTPS (https://)")
-        return v
     output_fields: list[str] | None = Field(
         default=None,
         description=(
@@ -256,7 +251,7 @@ class BrowsingTaskInput(BaseModel):
             "https://docs.yutori.com/reference/browsing-create#using-webhooks-and-a-structured-output-schema)."
         ),
     )
-    webhook_url: str | None = Field(
+    webhook_url: WebhookUrl = Field(
         default=None,
         description="HTTPS URL to receive webhook notification when task completes. Must use https://.",
     )
@@ -264,13 +259,6 @@ class BrowsingTaskInput(BaseModel):
         default=None,
         description="Webhook payload format: 'scout' (default) or 'slack'",
     )
-
-    @field_validator("webhook_url")
-    @classmethod
-    def validate_webhook_url(cls, v: str | None) -> str | None:
-        if v is not None and not v.startswith("https://"):
-            raise ValueError("webhook_url must use HTTPS (https://)")
-        return v
 
 
 class TaskIdInput(BaseModel):
@@ -317,7 +305,7 @@ class ResearchTaskInput(BaseModel):
             "https://docs.yutori.com/reference/research-create#using-webhooks-and-a-structured-output-schema)."
         ),
     )
-    webhook_url: str | None = Field(
+    webhook_url: WebhookUrl = Field(
         default=None,
         description="HTTPS URL to receive webhook notification when research completes. Must use https://.",
     )
@@ -325,10 +313,3 @@ class ResearchTaskInput(BaseModel):
         default=None,
         description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
     )
-
-    @field_validator("webhook_url")
-    @classmethod
-    def validate_webhook_url(cls, v: str | None) -> str | None:
-        if v is not None and not v.startswith("https://"):
-            raise ValueError("webhook_url must use HTTPS (https://)")
-        return v
