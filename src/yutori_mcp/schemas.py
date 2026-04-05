@@ -89,10 +89,7 @@ class CreateScoutInput(BaseModel):
         description="Whether scout results are publicly accessible",
     )
 
-    @field_validator("webhook_url")
-    @classmethod
-    def validate_webhook_url(cls, v: str | None) -> str | None:
-        return _check_webhook_https(v)
+    validate_webhook_url = field_validator("webhook_url")(_check_webhook_https)
 
 
 class EditScoutInput(BaseModel):
@@ -149,10 +146,7 @@ class EditScoutInput(BaseModel):
         description="Whether scout results are publicly accessible",
     )
 
-    @field_validator("webhook_url")
-    @classmethod
-    def validate_webhook_url(cls, v: str | None) -> str | None:
-        return _check_webhook_https(v)
+    validate_webhook_url = field_validator("webhook_url")(_check_webhook_https)
 
     @model_validator(mode="after")
     def validate_has_changes(self) -> "EditScoutInput":
@@ -268,10 +262,7 @@ class BrowsingTaskInput(BaseModel):
         description="Webhook payload format: 'scout' (default) or 'slack'",
     )
 
-    @field_validator("webhook_url")
-    @classmethod
-    def validate_webhook_url(cls, v: str | None) -> str | None:
-        return _check_webhook_https(v)
+    validate_webhook_url = field_validator("webhook_url")(_check_webhook_https)
 
 
 class TaskIdInput(BaseModel):
@@ -327,7 +318,4 @@ class ResearchTaskInput(BaseModel):
         description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
     )
 
-    @field_validator("webhook_url")
-    @classmethod
-    def validate_webhook_url(cls, v: str | None) -> str | None:
-        return _check_webhook_https(v)
+    validate_webhook_url = field_validator("webhook_url")(_check_webhook_https)
