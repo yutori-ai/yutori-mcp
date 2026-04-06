@@ -34,6 +34,44 @@ class TestUsageInput:
             UsageInput(period="1h")
 
 
+class TestWebhookUrlValidation:
+    """Tests for the shared _check_webhook_https validator across all schemas."""
+
+    def test_http_url_rejected_create_scout(self):
+        """CreateScoutInput rejects non-HTTPS webhook URLs."""
+        with pytest.raises(ValidationError, match="webhook_url must use HTTPS"):
+            CreateScoutInput(query="Test", webhook_url="http://example.com/webhook")
+
+    def test_http_url_rejected_edit_scout(self):
+        """EditScoutInput rejects non-HTTPS webhook URLs."""
+        with pytest.raises(ValidationError, match="webhook_url must use HTTPS"):
+            EditScoutInput(scout_id="abc-123", webhook_url="http://example.com/webhook")
+
+    def test_http_url_rejected_browsing_task(self):
+        """BrowsingTaskInput rejects non-HTTPS webhook URLs."""
+        with pytest.raises(ValidationError, match="webhook_url must use HTTPS"):
+            BrowsingTaskInput(
+                task="Test",
+                start_url="https://example.com",
+                webhook_url="http://example.com/webhook",
+            )
+
+    def test_http_url_rejected_research_task(self):
+        """ResearchTaskInput rejects non-HTTPS webhook URLs."""
+        with pytest.raises(ValidationError, match="webhook_url must use HTTPS"):
+            ResearchTaskInput(query="Test", webhook_url="http://example.com/webhook")
+
+    def test_https_url_accepted(self):
+        """HTTPS webhook URLs are accepted across all schemas."""
+        data = CreateScoutInput(query="Test", webhook_url="https://example.com/webhook")
+        assert data.webhook_url == "https://example.com/webhook"
+
+    def test_none_url_accepted(self):
+        """None webhook URL passes validation."""
+        data = CreateScoutInput(query="Test", webhook_url=None)
+        assert data.webhook_url is None
+
+
 class TestCreateScoutInput:
     def test_minimal_input(self):
         """Query is the only required field."""
