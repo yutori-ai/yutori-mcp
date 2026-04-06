@@ -7,6 +7,13 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+def _check_webhook_https(v: str | None) -> str | None:
+    """Validate that webhook_url uses HTTPS."""
+    if v is not None and not v.startswith("https://"):
+        raise ValueError("webhook_url must use HTTPS (https://)")
+    return v
+
+
 class UsageInput(BaseModel):
     """Input for retrieving API usage statistics."""
 
@@ -85,9 +92,7 @@ class CreateScoutInput(BaseModel):
     @field_validator("webhook_url")
     @classmethod
     def validate_webhook_url(cls, v: str | None) -> str | None:
-        if v is not None and not v.startswith("https://"):
-            raise ValueError("webhook_url must use HTTPS (https://)")
-        return v
+        return _check_webhook_https(v)
 
 
 class EditScoutInput(BaseModel):
@@ -118,13 +123,6 @@ class EditScoutInput(BaseModel):
         default=None,
         description="Updated webhook format: 'scout', 'slack', or 'zapier'",
     )
-
-    @field_validator("webhook_url")
-    @classmethod
-    def validate_webhook_url(cls, v: str | None) -> str | None:
-        if v is not None and not v.startswith("https://"):
-            raise ValueError("webhook_url must use HTTPS (https://)")
-        return v
     output_fields: list[str] | None = Field(
         default=None,
         description=(
@@ -150,6 +148,11 @@ class EditScoutInput(BaseModel):
         default=None,
         description="Whether scout results are publicly accessible",
     )
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: str | None) -> str | None:
+        return _check_webhook_https(v)
 
     @model_validator(mode="after")
     def validate_has_changes(self) -> "EditScoutInput":
@@ -268,9 +271,7 @@ class BrowsingTaskInput(BaseModel):
     @field_validator("webhook_url")
     @classmethod
     def validate_webhook_url(cls, v: str | None) -> str | None:
-        if v is not None and not v.startswith("https://"):
-            raise ValueError("webhook_url must use HTTPS (https://)")
-        return v
+        return _check_webhook_https(v)
 
 
 class TaskIdInput(BaseModel):
@@ -329,6 +330,4 @@ class ResearchTaskInput(BaseModel):
     @field_validator("webhook_url")
     @classmethod
     def validate_webhook_url(cls, v: str | None) -> str | None:
-        if v is not None and not v.startswith("https://"):
-            raise ValueError("webhook_url must use HTTPS (https://)")
-        return v
+        return _check_webhook_https(v)
