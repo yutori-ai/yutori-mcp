@@ -243,7 +243,7 @@ class BrowsingTaskInput(BaseModel):
     )
     require_auth: bool | None = Field(
         default=None,
-        description="If true, use the auth-optimized browser for login and other authenticated flows.",
+        description="If true, use an auth-optimized cloud browser provider for login flows. Only applies when browser is 'cloud' (default).",
     )
     browser: Literal["cloud", "local"] | None = Field(
         default=None,

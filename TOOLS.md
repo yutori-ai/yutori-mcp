@@ -393,7 +393,6 @@ Execute a one-time web browsing task using the navigator agent. The agent runs e
   "start_url": "https://example.com/login",
   "max_steps": 75,
   "require_auth": true,
-  "browser": "local",
   "webhook_url": "https://example.com/webhook",
   "output_fields": ["name", "title"]
 }
@@ -416,7 +415,7 @@ Poll with get_browsing_task_result(task_id="54fb19fd-277e-4098-ab72-5a9f8a4347fc
 | `task` | Yes | Natural language instruction for the navigator |
 | `start_url` | Yes | URL where browsing begins |
 | `max_steps` | No | Max browser actions (1-100). Default: 25 |
-| `require_auth` | No | If true, use the auth-optimized browser for login and other authenticated flows |
+| `require_auth` | No | If true, use an auth-optimized cloud browser provider for login flows. Only applies when browser is `cloud` (default) |
 | `browser` | No | `cloud` (default) or `local` to use Yutori Local with the user's logged-in desktop browser |
 | `output_fields` | No | List of field names for structured output as array of objects |
 | `webhook_url` | No | URL for completion notification |
