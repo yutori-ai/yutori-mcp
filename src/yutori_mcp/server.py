@@ -180,7 +180,8 @@ TOOLS = [
         description=(
             "Execute a one-time deep web research task. The research agent searches, "
             "reads, and synthesizes information from across the web. Returns a task_id for polling. "
-            "Example: 'latest AI startup funding announcements'."
+            "Example: 'latest AI startup funding announcements'. Set browser='local' "
+            "to use Yutori Local with the user's logged-in sessions."
         ),
         inputSchema=_get_simplified_schema(ResearchTaskInput),
     ),
@@ -317,6 +318,7 @@ def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict[str, Any])
                 task=params.task,
                 start_url=params.start_url,
                 max_steps=params.max_steps,
+                require_auth=params.require_auth,
                 browser=params.browser,
                 output_schema=_output_fields_to_output_schema(params.output_fields),
                 webhook_url=params.webhook_url,
@@ -334,11 +336,12 @@ def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict[str, Any])
                 query=params.query,
                 user_timezone=params.user_timezone,
                 user_location=params.user_location,
+                browser=params.browser,
                 output_schema=_output_fields_to_output_schema(params.output_fields),
                 webhook_url=params.webhook_url,
                 webhook_format=params.webhook_format,
             )
-            return result, {"task_type": "Research"}
+            return result, {"task_type": "Research", "browser": params.browser}
         case "get_research_task_result":
             params = TaskIdInput(**arguments)
             return client.get_research_task(params.task_id), {"task_type": "Research"}

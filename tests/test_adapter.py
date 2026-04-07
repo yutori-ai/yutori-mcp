@@ -190,3 +190,29 @@ class TestEditScoutForwarding:
         _, kwargs = adapter._client.scouts.update.call_args
         assert kwargs["query"] == "updated query"
         assert kwargs["skip_email"] is True
+
+
+class TestBrowsingAndResearchForwarding:
+    """Browsing and research should forward newly supported developer API fields."""
+
+    def test_browsing_forwards_require_auth_browser_and_zapier(self, adapter):
+        adapter._client.browsing.create = MagicMock(return_value={"task_id": "t1"})
+        adapter.run_browsing_task(
+            "Log in and export data",
+            "https://example.com/login",
+            require_auth=True,
+            browser="local",
+            webhook_format="zapier",
+        )
+
+        _, kwargs = adapter._client.browsing.create.call_args
+        assert kwargs["require_auth"] is True
+        assert kwargs["browser"] == "local"
+        assert kwargs["webhook_format"] == "zapier"
+
+    def test_research_forwards_browser(self, adapter):
+        adapter._client.research.create = MagicMock(return_value={"task_id": "r1"})
+        adapter.run_research_task("Research a logged-in dashboard", browser="local")
+
+        _, kwargs = adapter._client.research.create.call_args
+        assert kwargs["browser"] == "local"

@@ -301,6 +301,7 @@ Execute a one-time deep web research task. The research agent searches, reads, a
 {
   "query": "What are the latest developments in quantum computing from the past week? Include company announcements, research papers, and product releases.",
   "user_timezone": "America/Los_Angeles",
+  "browser": "local",
   "webhook_url": "https://example.com/webhook",
   "output_fields": ["title", "summary", "source_url", "category"]
 }
@@ -323,6 +324,7 @@ Poll with get_research_task_result(task_id="ae27a17c-a4ed-4c69-8b2a-4bec330fc935
 | `query` | Yes | Natural language description of what to research |
 | `user_timezone` | No | Timezone for context. Default: 'America/Los_Angeles' |
 | `user_location` | No | Location for context. Default: 'San Francisco, CA, US' |
+| `browser` | No | `cloud` (default) or `local` to use Yutori Local with the user's logged-in desktop browser |
 | `output_fields` | No | List of field names for structured output as array of objects |
 | `webhook_url` | No | URL for completion notification |
 | `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
@@ -372,7 +374,7 @@ and an industry appearance from January 12–19, 2026.
 
 ### run_browsing_task
 
-Execute a one-time web browsing task using the navigator agent. The agent runs a cloud browser and operates it like a person - clicking, typing, scrolling, and navigating for you.
+Execute a one-time web browsing task using the navigator agent. The agent runs either a cloud browser or Yutori Local on the desktop and operates it like a person - clicking, typing, scrolling, and navigating for you.
 
 **Basic example:**
 
@@ -387,9 +389,11 @@ Execute a one-time web browsing task using the navigator agent. The agent runs a
 
 ```json
 {
-  "task": "Give me a list of all employees (names and titles) of Yutori.",
-  "start_url": "https://yutori.com",
+  "task": "Log in and export the latest invoice.",
+  "start_url": "https://example.com/login",
   "max_steps": 75,
+  "require_auth": true,
+  "browser": "local",
   "webhook_url": "https://example.com/webhook",
   "output_fields": ["name", "title"]
 }
@@ -412,9 +416,11 @@ Poll with get_browsing_task_result(task_id="54fb19fd-277e-4098-ab72-5a9f8a4347fc
 | `task` | Yes | Natural language instruction for the navigator |
 | `start_url` | Yes | URL where browsing begins |
 | `max_steps` | No | Max browser actions (1-100). Default: 25 |
+| `require_auth` | No | If true, use the auth-optimized browser for login and other authenticated flows |
+| `browser` | No | `cloud` (default) or `local` to use Yutori Local with the user's logged-in desktop browser |
 | `output_fields` | No | List of field names for structured output as array of objects |
 | `webhook_url` | No | URL for completion notification |
-| `webhook_format` | No | `scout` (default) or `slack` |
+| `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
 
 ### get_browsing_task_result
 

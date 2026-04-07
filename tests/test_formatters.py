@@ -172,6 +172,23 @@ class TestFormatListScouts:
         result = format_list_scouts(response)
         assert "limit=50" in result
 
+    def test_shows_rejection_reason(self):
+        """Scout list includes rejection reason when present."""
+        response = {
+            "scouts": [
+                {
+                    "id": "abc-123",
+                    "query": "monitor something",
+                    "status": "paused",
+                    "rejection_reason": "invalid_query",
+                }
+            ],
+            "total": 1,
+            "summary": {"active": 0, "paused": 1, "done": 0},
+        }
+        result = format_list_scouts(response)
+        assert "Rejection reason: invalid_query" in result
+
 
 class TestFormatScoutDetail:
     def test_full_detail(self):
@@ -196,6 +213,17 @@ class TestFormatScoutDetail:
         assert "daily" in result
         assert "Email notifications: enabled" in result
         assert "Public: yes" in result
+
+    def test_shows_rejection_reason(self):
+        """Scout detail includes rejection reason when present."""
+        response = {
+            "id": "abc-123",
+            "query": "monitor AI news",
+            "status": "paused",
+            "rejection_reason": "invalid_query",
+        }
+        result = format_scout_detail(response)
+        assert "Rejection reason: invalid_query" in result
 
 
 class TestFormatScoutCreated:
@@ -301,6 +329,18 @@ class TestFormatTaskStarted:
         assert "get_browsing_task_result" in result
         assert "https://yutori.com/tasks/xyz" in result
 
+    def test_shows_rejection_reason(self):
+        """Failed create output includes rejection reason when present."""
+        response = {
+            "task_id": "task-abc",
+            "status": "failed",
+            "rejection_reason": "billing_limit_reached",
+        }
+        result = format_task_started(response, task_type="Research")
+        assert "Research task failed to start" in result
+        assert "Rejection reason: billing_limit_reached" in result
+        assert "Poll with" not in result
+
 
 class TestFormatTaskResult:
     def test_in_progress(self):
@@ -318,6 +358,18 @@ class TestFormatTaskResult:
         assert "Task completed" in result
         assert "succeeded" in result
         assert "Here are the findings" in result
+
+    def test_failed_shows_rejection_reason(self):
+        """Failed task output includes rejection reason when present."""
+        response = {
+            "task_id": "task-abc",
+            "status": "failed",
+            "error": "Rejected",
+            "rejection_reason": "billing_limit_reached",
+        }
+        result = format_task_result(response)
+        assert "Task failed" in result
+        assert "Rejection reason: billing_limit_reached" in result
 
     def test_failed(self):
         """Failed task shows error."""

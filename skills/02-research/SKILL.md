@@ -27,6 +27,7 @@ Help the user conduct thorough web research using Yutori's Research API.
    Use `run_research_task` with:
    - `query`: The research question with context
    - `user_timezone`: For time-relevant searches
+   - `browser: "local"`: When the research needs a logged-in desktop browser session through Yutori Local
    - `output_fields`: If structured output is needed (e.g., ["title", "summary", "source_url", "date"])
 
 4. **Poll for results**

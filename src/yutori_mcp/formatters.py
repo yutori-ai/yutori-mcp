@@ -113,6 +113,14 @@ def _truncate(text: str, max_len: int = 60) -> str:
     return text[: max_len - 3] + "..."
 
 
+def _append_rejection_reason(
+    lines: list[str], rejection_reason: str | None, *, indent: str = ""
+) -> None:
+    """Append rejection_reason when present."""
+    if rejection_reason:
+        lines.append(f"{indent}Rejection reason: {rejection_reason}")
+
+
 # -----------------------------------------------------------------------------
 # Usage formatter
 # -----------------------------------------------------------------------------
@@ -209,6 +217,7 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
         lines.append(f"   ID: {scout_id}")
         lines.append(f"   URL: https://platform.yutori.com/scouting/tasks/{scout_id}")
         lines.append(f"   Runs {interval} | Next: {next_run}")
+        _append_rejection_reason(lines, scout.get("rejection_reason"), indent="   ")
 
     # Add hints
     lines.append("")
@@ -233,13 +242,18 @@ def format_scout_detail(response: dict[str, Any], **context: Any) -> str:
         f"ID: {scout_id}",
         f"URL: https://platform.yutori.com/scouting/tasks/{scout_id}",
         f"Status: {status}",
-        "",
-        f'Query: "{query}"',
-        "",
-        "Schedule:",
-        f"  Interval: {_format_interval(response.get('output_interval'))}",
-        f"  Next run: {_format_datetime(response.get('next_output_timestamp'))}",
     ]
+    _append_rejection_reason(lines, response.get("rejection_reason"))
+    lines.extend(
+        [
+            "",
+            f'Query: "{query}"',
+            "",
+            "Schedule:",
+            f"  Interval: {_format_interval(response.get('output_interval'))}",
+            f"  Next run: {_format_datetime(response.get('next_output_timestamp'))}",
+        ]
+    )
 
     if response.get("user_timezone"):
         lines.append(f"  Timezone: {response['user_timezone']}")
@@ -373,11 +387,16 @@ def format_scout_created(response: dict[str, Any], **context: Any) -> str:
         f"ID: {scout_id}",
         f"URL: https://platform.yutori.com/scouting/tasks/{scout_id}",
         f"Status: {status}",
-        "",
-        f'Query: "{_truncate(query, 80)}"',
-        f"Schedule: runs {interval}",
-        f"First run: {next_run}",
     ]
+    _append_rejection_reason(lines, response.get("rejection_reason"))
+    lines.extend(
+        [
+            "",
+            f'Query: "{_truncate(query, 80)}"',
+            f"Schedule: runs {interval}",
+            f"First run: {next_run}",
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -392,19 +411,17 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
         name = new.get("display_name") or new.get("query", "")[:40]
         scout_id = new.get("id", "")
         status = new.get("status", "unknown")
-
-        return "\n".join(
-            [
-                "Scout updated successfully.",
-                "",
-                f"Name: {name}",
-                f"ID: {scout_id}",
-                f"URL: https://platform.yutori.com/scouting/tasks/{scout_id}",
-                f"Status: {status}",
-                "",
-                "Use get_scout_detail(scout_id) for full details.",
-            ]
-        )
+        lines = [
+            "Scout updated successfully.",
+            "",
+            f"Name: {name}",
+            f"ID: {scout_id}",
+            f"URL: https://platform.yutori.com/scouting/tasks/{scout_id}",
+            f"Status: {status}",
+        ]
+        _append_rejection_reason(lines, new.get("rejection_reason"))
+        lines.extend(["", "Use get_scout_detail(scout_id) for full details."])
+        return "\n".join(lines)
 
     # Show diff
     name = new.get("display_name") or new.get("query", "")[:40]
@@ -455,6 +472,11 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
     if not changes_found:
         lines.append("  (no changes detected)")
 
+    reason = new.get("rejection_reason")
+    if reason:
+        lines.append("")
+        _append_rejection_reason(lines, reason)
+
     return "\n".join(lines)
 
 
@@ -497,12 +519,25 @@ def format_task_started(response: dict[str, Any], **context: Any) -> str:
     browser = context.get("browser")
     browser_note = " (using local desktop browser)" if browser == "local" else ""
 
+    if status == "failed":
+        lines = [
+            f"{task_type} task failed to start{browser_note}.",
+            "",
+            f"Task ID: {task_id}",
+            f"Status: {status}",
+        ]
+        _append_rejection_reason(lines, response.get("rejection_reason"))
+        if view_url:
+            lines.append(f"View details: {view_url}")
+        return "\n".join(lines)
+
     lines = [
         f"{task_type} task started{browser_note}.",
         "",
         f"Task ID: {task_id}",
         f"Status: {status}",
     ]
+    _append_rejection_reason(lines, response.get("rejection_reason"))
 
     if view_url:
         lines.append(f"View progress: {view_url}")
@@ -547,14 +582,14 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
     # Handle failed state
     if status == "failed":
         error = response.get("error") or response.get("message") or "Unknown error"
-        return "\n".join(
-            [
-                "Task failed.",
-                "",
-                f"Task ID: {task_id}",
-                f"Error: {error}",
-            ]
-        )
+        lines = [
+            "Task failed.",
+            "",
+            f"Task ID: {task_id}",
+            f"Error: {error}",
+        ]
+        _append_rejection_reason(lines, response.get("rejection_reason"))
+        return "\n".join(lines)
 
     # Handle completed state
     lines = [

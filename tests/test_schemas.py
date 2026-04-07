@@ -195,6 +195,8 @@ class TestBrowsingTaskInput:
         )
         assert data.task == "Find AAPL stock price"
         assert data.start_url == "https://finance.yahoo.com"
+        assert data.require_auth is None
+        assert data.browser is None
 
     def test_missing_task(self):
         """task is required."""
@@ -230,6 +232,19 @@ class TestBrowsingTaskInput:
         """output_fields is optional."""
         data = BrowsingTaskInput(task="Test", start_url="https://example.com")
         assert data.output_fields is None
+
+    def test_full_input(self):
+        """Local browser, auth, and zapier webhook are accepted."""
+        data = BrowsingTaskInput(
+            task="Log in and export data",
+            start_url="https://example.com/login",
+            require_auth=True,
+            browser="local",
+            webhook_format="zapier",
+        )
+        assert data.require_auth is True
+        assert data.browser == "local"
+        assert data.webhook_format == "zapier"
 
 
 class TestScoutIdInput:
@@ -319,6 +334,7 @@ class TestResearchTaskInput:
         assert data.query == "Research quantum computing developments"
         assert data.user_timezone is None
         assert data.user_location is None
+        assert data.browser is None
 
     def test_full_input(self):
         """All fields can be provided."""
@@ -326,12 +342,14 @@ class TestResearchTaskInput:
             query="Research quantum computing developments",
             user_timezone="America/New_York",
             user_location="New York, NY, US",
+            browser="local",
             output_fields=["title", "summary", "source_url"],
             webhook_url="https://example.com/webhook",
             webhook_format="slack",
         )
         assert data.user_timezone == "America/New_York"
         assert data.user_location == "New York, NY, US"
+        assert data.browser == "local"
         assert data.webhook_format == "slack"
         assert data.output_fields == ["title", "summary", "source_url"]
 
@@ -344,3 +362,69 @@ class TestResearchTaskInput:
         """output_fields is optional."""
         data = ResearchTaskInput(query="Research AI")
         assert data.output_fields is None
+
+    def test_local_browser_supported(self):
+        """Research can target the local desktop browser."""
+        data = ResearchTaskInput(
+            query="Research a logged-in dashboard",
+            browser="local",
+        )
+        assert data.browser == "local"
+
+
+class TestInvalidBrowserRejected:
+    """Verify that invalid browser values are rejected."""
+
+    def test_browsing_task_rejects_invalid_browser(self):
+        """BrowsingTaskInput rejects browser='remote'."""
+        with pytest.raises(ValidationError):
+            BrowsingTaskInput(
+                task="Test task",
+                start_url="https://example.com",
+                browser="remote",
+            )
+
+    def test_research_task_rejects_invalid_browser(self):
+        """ResearchTaskInput rejects browser='remote'."""
+        with pytest.raises(ValidationError):
+            ResearchTaskInput(
+                query="Test query",
+                browser="remote",
+            )
+
+
+class TestInvalidWebhookFormatRejected:
+    """Verify that invalid webhook_format values are rejected."""
+
+    def test_browsing_task_rejects_invalid_webhook_format(self):
+        """BrowsingTaskInput rejects webhook_format='discord'."""
+        with pytest.raises(ValidationError):
+            BrowsingTaskInput(
+                task="Test task",
+                start_url="https://example.com",
+                webhook_format="discord",
+            )
+
+    def test_research_task_rejects_invalid_webhook_format(self):
+        """ResearchTaskInput rejects webhook_format='discord'."""
+        with pytest.raises(ValidationError):
+            ResearchTaskInput(
+                query="Test query",
+                webhook_format="discord",
+            )
+
+    def test_create_scout_rejects_invalid_webhook_format(self):
+        """CreateScoutInput rejects webhook_format='discord'."""
+        with pytest.raises(ValidationError):
+            CreateScoutInput(
+                query="Test query",
+                webhook_format="discord",
+            )
+
+    def test_edit_scout_rejects_invalid_webhook_format(self):
+        """EditScoutInput rejects webhook_format='discord'."""
+        with pytest.raises(ValidationError):
+            EditScoutInput(
+                scout_id="abc-123",
+                webhook_format="discord",
+            )

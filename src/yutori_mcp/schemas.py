@@ -54,7 +54,7 @@ class CreateScoutInput(BaseModel):
             "Must use https://. Confirm the URL with the user before setting."
         ),
     )
-    webhook_format: str | None = Field(
+    webhook_format: Literal["scout", "slack", "zapier"] | None = Field(
         default=None,
         description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
     )
@@ -119,7 +119,7 @@ class EditScoutInput(BaseModel):
         default=None,
         description="Updated HTTPS webhook URL. Must use https://. Confirm the URL with the user before setting.",
     )
-    webhook_format: str | None = Field(
+    webhook_format: Literal["scout", "slack", "zapier"] | None = Field(
         default=None,
         description="Updated webhook format: 'scout', 'slack', or 'zapier'",
     )
@@ -241,11 +241,15 @@ class BrowsingTaskInput(BaseModel):
         le=100,
         description="Maximum number of browser actions (1-100). Default: 25",
     )
-    browser: str | None = Field(
+    require_auth: bool | None = Field(
+        default=None,
+        description="If true, use the auth-optimized browser for login and other authenticated flows.",
+    )
+    browser: Literal["cloud", "local"] | None = Field(
         default=None,
         description=(
             "Where to run the browser. 'cloud' (default) uses Yutori's cloud browser. "
-            "'local' uses the desktop app (Yutori's Computer) with the user's logged-in sessions. "
+            "'local' uses Yutori Local with the user's logged-in sessions on the desktop. "
             "Requires the desktop app to be running."
         ),
     )
@@ -263,9 +267,9 @@ class BrowsingTaskInput(BaseModel):
         default=None,
         description="HTTPS URL to receive webhook notification when task completes. Must use https://.",
     )
-    webhook_format: str | None = Field(
+    webhook_format: Literal["scout", "slack", "zapier"] | None = Field(
         default=None,
-        description="Webhook payload format: 'scout' (default) or 'slack'",
+        description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
     )
 
     @field_validator("webhook_url")
@@ -308,6 +312,14 @@ class ResearchTaskInput(BaseModel):
         default=None,
         description="Location for contextual awareness. Format: 'city, region, country'. Default: 'San Francisco, CA, US'",
     )
+    browser: Literal["cloud", "local"] | None = Field(
+        default=None,
+        description=(
+            "Where to run the browser when research needs web interaction. 'cloud' (default) uses "
+            "Yutori's cloud browser. 'local' uses Yutori Local with the user's logged-in sessions "
+            "on the desktop. Requires the desktop app to be running."
+        ),
+    )
     output_fields: list[str] | None = Field(
         default=None,
         description=(
@@ -322,7 +334,7 @@ class ResearchTaskInput(BaseModel):
         default=None,
         description="HTTPS URL to receive webhook notification when research completes. Must use https://.",
     )
-    webhook_format: str | None = Field(
+    webhook_format: Literal["scout", "slack", "zapier"] | None = Field(
         default=None,
         description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
     )
