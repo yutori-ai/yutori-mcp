@@ -28,6 +28,8 @@ Help the user automate browser-based tasks using Yutori's Navigator agent.
    - `require_auth: true`: For login forms or other authenticated workflows
    - `browser: "local"`: When the task should run through Yutori Local with the user's desktop session
    - `output_fields`: For structured data extraction (e.g., ["name", "price", "url"])
+   - `webhook_url`: HTTPS URL for completion notification
+   - `webhook_format`: `scout` (default), `slack`, or `zapier`
 
 4. **Poll for results**
    - Browsing typically takes 30-120 seconds depending on complexity
