@@ -225,6 +225,48 @@ class TestFormatScoutDetail:
         result = format_scout_detail(response)
         assert "Rejection reason: invalid_query" in result
 
+    def test_shows_sources(self):
+        """Scout detail shows sources when present."""
+        response = {
+            "id": "abc-123",
+            "display_name": "My Scout",
+            "query": "monitor AI news",
+            "status": "active",
+            "sources": [
+                {"url": "https://example.com", "title": "Example"},
+                "https://plain-url.com",
+            ],
+        }
+        result = format_scout_detail(response)
+        assert "Sources:" in result
+        assert "  - Example: https://example.com" in result
+        assert "  - https://plain-url.com" in result
+
+    def test_shows_citations_fallback(self):
+        """Scout detail falls back to 'citations' key when 'sources' is absent."""
+        response = {
+            "id": "abc-123",
+            "query": "monitor AI news",
+            "status": "active",
+            "citations": [{"url": "https://cite.com", "title": "Cite"}],
+        }
+        result = format_scout_detail(response)
+        assert "Sources:" in result
+        assert "  - Cite: https://cite.com" in result
+
+    def test_sources_truncated_at_10(self):
+        """Sources list is capped at 10 entries with overflow message."""
+        response = {
+            "id": "abc-123",
+            "query": "test",
+            "status": "active",
+            "sources": [{"url": f"https://s{i}.com", "title": f"S{i}"} for i in range(15)],
+        }
+        result = format_scout_detail(response)
+        assert "S9" in result
+        assert "S10" not in result
+        assert "... and 5 more" in result
+
 
 class TestFormatScoutCreated:
     def test_created_confirmation(self):
@@ -377,6 +419,26 @@ class TestFormatTaskResult:
         result = format_task_result(response)
         assert "Task failed" in result
         assert "Something went wrong" in result
+
+    def test_completed_with_sources(self):
+        """Completed task includes sources without extra indent."""
+        response = {
+            "task_id": "task-abc",
+            "status": "succeeded",
+            "result": "Some findings",
+            "sources": [
+                {"url": "https://example.com", "title": "Example"},
+                "https://plain.com",
+            ],
+        }
+        result = format_task_result(response)
+        assert "Sources:" in result
+        assert "- Example: https://example.com" in result
+        assert "- https://plain.com" in result
+        # Ensure no extra indent (unlike scout detail which uses "  -")
+        for line in result.split("\n"):
+            if "Example:" in line:
+                assert line.startswith("- "), f"Expected no indent, got: {line!r}"
 
 
 class TestFormatResponse:
