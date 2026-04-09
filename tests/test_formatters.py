@@ -1,6 +1,7 @@
 """Tests for output formatters."""
 
 from yutori_mcp.formatters import (
+    _format_sources,
     dict_to_markdown,
     format_list_scouts,
     format_response,
@@ -393,3 +394,109 @@ class TestFormatResponse:
         result = format_response("unknown_tool", response)
         assert "some: data" in result
         assert "key: value" in result
+
+
+class TestFormatSources:
+    def test_no_sources(self):
+        """Returns empty list when no sources or citations."""
+        assert _format_sources({}) == []
+        assert _format_sources({"sources": None}) == []
+        assert _format_sources({"sources": []}) == []
+
+    def test_dict_sources_with_url_and_title(self):
+        """Dict sources format as 'title: url'."""
+        response = {
+            "sources": [
+                {"url": "https://example.com", "title": "Example"},
+                {"url": "https://other.com", "title": "Other"},
+            ]
+        }
+        lines = _format_sources(response)
+        assert "Sources:" in lines
+        assert "  - Example: https://example.com" in lines
+        assert "  - Other: https://other.com" in lines
+
+    def test_dict_source_without_title_uses_url(self):
+        """Dict source with no title falls back to url."""
+        response = {"sources": [{"url": "https://example.com"}]}
+        lines = _format_sources(response)
+        assert "  - https://example.com: https://example.com" in lines
+
+    def test_string_sources(self):
+        """String sources are formatted as-is."""
+        response = {"sources": ["https://example.com", "https://other.com"]}
+        lines = _format_sources(response)
+        assert "  - https://example.com" in lines
+        assert "  - https://other.com" in lines
+
+    def test_citations_key(self):
+        """Also works with 'citations' key."""
+        response = {"citations": [{"url": "https://example.com", "title": "Cited"}]}
+        lines = _format_sources(response)
+        assert "  - Cited: https://example.com" in lines
+
+    def test_truncation_at_max_items(self):
+        """Sources beyond max_items are truncated with count."""
+        response = {"sources": [{"url": f"https://{i}.com", "title": f"S{i}"} for i in range(15)]}
+        lines = _format_sources(response, max_items=10)
+        assert "  ... and 5 more" in lines
+        # Should have header + 10 items + truncation line + blank line prefix
+        source_lines = [l for l in lines if l.startswith("  - ")]
+        assert len(source_lines) == 10
+
+    def test_custom_indent(self):
+        """Custom indent is applied to all source lines."""
+        response = {"sources": [{"url": "https://example.com", "title": "Ex"}]}
+        lines = _format_sources(response, indent="")
+        assert "- Ex: https://example.com" in lines
+        # No leading spaces
+        assert "  - Ex: https://example.com" not in lines
+
+    def test_starts_with_blank_line(self):
+        """Output starts with a blank line for spacing."""
+        response = {"sources": [{"url": "https://example.com", "title": "Ex"}]}
+        lines = _format_sources(response)
+        assert lines[0] == ""
+        assert lines[1] == "Sources:"
+
+    def test_scout_detail_includes_sources(self):
+        """format_scout_detail includes sources via _format_sources."""
+        response = {
+            "id": "abc-123",
+            "query": "test",
+            "status": "active",
+            "sources": [
+                {"url": "https://example.com", "title": "Example Source"},
+            ],
+        }
+        result = format_scout_detail(response)
+        assert "Sources:" in result
+        assert "Example Source: https://example.com" in result
+
+    def test_scout_updates_include_sources(self):
+        """format_scout_updates includes sources on individual updates."""
+        response = {
+            "updates": [
+                {
+                    "created_at": "2026-01-20T05:00:00Z",
+                    "content": "Found results",
+                    "citations": [{"url": "https://cited.com", "title": "Cited"}],
+                }
+            ],
+            "has_more": False,
+        }
+        result = format_scout_updates(response)
+        assert "Sources:" in result
+        assert "Cited: https://cited.com" in result
+
+    def test_task_result_includes_sources(self):
+        """format_task_result includes sources with no indent."""
+        response = {
+            "task_id": "task-1",
+            "status": "succeeded",
+            "result": "Done",
+            "sources": [{"url": "https://src.com", "title": "Src"}],
+        }
+        result = format_task_result(response)
+        assert "Sources:" in result
+        assert "- Src: https://src.com" in result
