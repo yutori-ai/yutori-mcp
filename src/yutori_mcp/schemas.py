@@ -14,6 +14,19 @@ def _check_webhook_https(v: str | None) -> str | None:
     return v
 
 
+class _WebhookValidated(BaseModel):
+    """Mixin: validates that ``webhook_url`` uses HTTPS.
+
+    Inherit from this in any schema that declares a ``webhook_url`` field
+    so the HTTPS check is defined in exactly one place.
+    """
+
+    @field_validator("webhook_url", check_fields=False)
+    @classmethod
+    def validate_webhook_url(cls, v: str | None) -> str | None:
+        return _check_webhook_https(v)
+
+
 class UsageInput(BaseModel):
     """Input for retrieving API usage statistics."""
 
@@ -23,7 +36,7 @@ class UsageInput(BaseModel):
     )
 
 
-class CreateScoutInput(BaseModel):
+class CreateScoutInput(_WebhookValidated):
     """Input for creating a new monitoring scout.
 
     Scouts enable continuous monitoring of the web at a configurable schedule
@@ -89,13 +102,8 @@ class CreateScoutInput(BaseModel):
         description="Whether scout results are publicly accessible",
     )
 
-    @field_validator("webhook_url")
-    @classmethod
-    def validate_webhook_url(cls, v: str | None) -> str | None:
-        return _check_webhook_https(v)
 
-
-class EditScoutInput(BaseModel):
+class EditScoutInput(_WebhookValidated):
     """Input for editing an existing scout or changing its status."""
 
     scout_id: str = Field(..., description="The scout's unique identifier (UUID)")
@@ -148,11 +156,6 @@ class EditScoutInput(BaseModel):
         default=None,
         description="Whether scout results are publicly accessible",
     )
-
-    @field_validator("webhook_url")
-    @classmethod
-    def validate_webhook_url(cls, v: str | None) -> str | None:
-        return _check_webhook_https(v)
 
     @model_validator(mode="after")
     def validate_has_changes(self) -> "EditScoutInput":
@@ -211,7 +214,7 @@ class GetUpdatesInput(BaseModel):
     )
 
 
-class BrowsingTaskInput(BaseModel):
+class BrowsingTaskInput(_WebhookValidated):
     """Input for running a one-time browsing task.
 
     The Browsing API enables automation of browser-based workflows.
@@ -272,11 +275,6 @@ class BrowsingTaskInput(BaseModel):
         description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
     )
 
-    @field_validator("webhook_url")
-    @classmethod
-    def validate_webhook_url(cls, v: str | None) -> str | None:
-        return _check_webhook_https(v)
-
 
 class TaskIdInput(BaseModel):
     """Input for retrieving a browsing or research task result."""
@@ -284,7 +282,7 @@ class TaskIdInput(BaseModel):
     task_id: str = Field(..., description="The task's unique identifier")
 
 
-class ResearchTaskInput(BaseModel):
+class ResearchTaskInput(_WebhookValidated):
     """Input for running a one-time research task.
 
     The Research API executes deep web research on any topic.
@@ -338,8 +336,3 @@ class ResearchTaskInput(BaseModel):
         default=None,
         description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
     )
-
-    @field_validator("webhook_url")
-    @classmethod
-    def validate_webhook_url(cls, v: str | None) -> str | None:
-        return _check_webhook_https(v)
