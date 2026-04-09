@@ -10,7 +10,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from . import __version__
-from .adapter import MCPClientAdapter, YutoriAPIError, _strip_none
+from .adapter import MCPClientAdapter, YutoriAPIError
 from .formatters import format_response
 from .schemas import (
     BrowsingTaskInput,
@@ -275,18 +275,14 @@ def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict[str, Any])
             # Fetch current state for diff (also validates scout exists)
             old_scout = client.get_scout_detail(params.scout_id)
 
-            # Apply config updates (so they take effect before status change)
-            config_kwargs = _strip_none({
-                "query": params.query,
-                "output_interval": params.output_interval,
-                "webhook_url": params.webhook_url,
-                "webhook_format": params.webhook_format,
-                "output_schema": _output_fields_to_output_schema(params.output_fields),
-                "skip_email": params.skip_email,
-                "user_timezone": params.user_timezone,
-                "user_location": params.user_location,
-                "is_public": params.is_public,
-            })
+            # Build config kwargs, excluding control fields and None values
+            config_kwargs = params.model_dump(
+                exclude={"scout_id", "status", "output_fields"},
+                exclude_none=True,
+            )
+            # output_fields needs transformation to the API's output_schema format
+            if params.output_fields is not None:
+                config_kwargs["output_schema"] = _output_fields_to_output_schema(params.output_fields)
 
             if config_kwargs:
                 client.edit_scout(scout_id=params.scout_id, **config_kwargs)
