@@ -121,6 +121,31 @@ def _append_rejection_reason(
         lines.append(f"{indent}Rejection reason: {rejection_reason}")
 
 
+def _format_sources(
+    response: dict[str, Any], *, indent: str = "  ", max_items: int = 10
+) -> list[str]:
+    """Format sources/citations from a response dict.
+
+    Checks for both "sources" and "citations" keys. Each source can be
+    a dict with url/title keys or a plain string.
+    """
+    sources = response.get("sources") or response.get("citations")
+    if not sources:
+        return []
+
+    lines = ["", "Sources:"]
+    for source in sources[:max_items]:
+        if isinstance(source, dict):
+            url = source.get("url", "")
+            title = source.get("title", url)
+            lines.append(f"{indent}- {title}: {url}")
+        else:
+            lines.append(f"{indent}- {source}")
+    if len(sources) > max_items:
+        lines.append(f"{indent}... and {len(sources) - max_items} more")
+    return lines
+
+
 # -----------------------------------------------------------------------------
 # Usage formatter
 # -----------------------------------------------------------------------------
@@ -273,20 +298,7 @@ def format_scout_detail(response: dict[str, Any], **context: Any) -> str:
     if response.get("user_location"):
         lines.append(f"  Location: {response['user_location']}")
 
-    # Add sources/citations if present
-    sources = response.get("sources") or response.get("citations")
-    if sources:
-        lines.append("")
-        lines.append("Sources:")
-        for source in sources[:10]:
-            if isinstance(source, dict):
-                url = source.get("url", "")
-                title = source.get("title", url)
-                lines.append(f"  - {title}: {url}")
-            else:
-                lines.append(f"  - {source}")
-        if len(sources) > 10:
-            lines.append(f"  ... and {len(sources) - 10} more")
+    lines.extend(_format_sources(response))
 
     lines.append("")
     lines.append(f"Created: {created}")
@@ -347,20 +359,7 @@ def format_scout_updates(response: dict[str, Any], **context: Any) -> str:
                 lines.append(f"  ... and {len(findings) - 5} more")
             lines.append("[EXTERNAL CONTENT END]")
 
-        # Add sources/citations if present
-        sources = update.get("sources") or update.get("citations")
-        if sources:
-            lines.append("")
-            lines.append("Sources:")
-            for source in sources[:10]:
-                if isinstance(source, dict):
-                    url = source.get("url", "")
-                    title = source.get("title", url)
-                    lines.append(f"  - {title}: {url}")
-                else:
-                    lines.append(f"  - {source}")
-            if len(sources) > 10:
-                lines.append(f"  ... and {len(sources) - 10} more")
+        lines.extend(_format_sources(update))
 
     if has_more and next_cursor:
         lines.append("")
@@ -618,19 +617,6 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
                     lines.append(f"- {item}")
         lines.append("[EXTERNAL CONTENT END]")
 
-    # Add sources if present
-    sources = response.get("sources") or response.get("citations")
-    if sources:
-        lines.append("")
-        lines.append("Sources:")
-        for source in sources[:10]:  # Limit to 10
-            if isinstance(source, dict):
-                url = source.get("url", "")
-                title = source.get("title", url)
-                lines.append(f"- {title}: {url}")
-            else:
-                lines.append(f"- {source}")
-        if len(sources) > 10:
-            lines.append(f"... and {len(sources) - 10} more")
+    lines.extend(_format_sources(response, indent=""))
 
     return "\n".join(lines)
