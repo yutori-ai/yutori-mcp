@@ -6,7 +6,8 @@ import pytest
 
 from yutori.auth.types import AuthStatus, LoginResult
 from yutori_mcp import __version__
-from yutori_mcp.server import _output_fields_to_output_schema, _simplify_schema, _get_simplified_schema, main
+from yutori_mcp.schema_utils import _output_fields_to_output_schema, _simplify_schema, _get_simplified_schema
+from yutori_mcp.server import main
 from yutori_mcp.schemas import ListScoutsInput, CreateScoutInput
 
 
