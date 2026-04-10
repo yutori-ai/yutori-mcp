@@ -12,6 +12,7 @@ from mcp.types import TextContent, Tool
 from . import __version__
 from .adapter import MCPClientAdapter, YutoriAPIError
 from .formatters import format_response
+from .schema_utils import get_simplified_schema, output_fields_to_output_schema
 from .schemas import (
     BrowsingTaskInput,
     CreateScoutInput,
@@ -27,80 +28,6 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 
-def _simplify_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Simplify JSON Schema for MCP clients by flattening anyOf with null.
-
-    Pydantic generates `anyOf: [{type: X}, {type: null}]` for optional fields.
-    MCP clients don't always understand this, showing "unknown" for types.
-    This function converts such patterns to just `{type: X}` while preserving
-    other properties like default, description, minimum, maximum, enum, etc.
-    """
-    if not isinstance(schema, dict):
-        return schema
-
-    result = {}
-    for key, value in schema.items():
-        if key == "anyOf" and isinstance(value, list) and len(value) == 2:
-            # Check if this is the pattern: [{actual_type}, {type: null}]
-            non_null = [
-                v
-                for v in value
-                if not (isinstance(v, dict) and v.get("type") == "null")
-            ]
-            null_types = [
-                v for v in value if isinstance(v, dict) and v.get("type") == "null"
-            ]
-
-            if len(non_null) == 1 and len(null_types) == 1:
-                # Flatten: merge the non-null type's properties into result
-                for k, v in _simplify_schema(non_null[0]).items():
-                    result[k] = v
-                continue
-
-        # Recursively simplify nested structures
-        if isinstance(value, dict):
-            result[key] = _simplify_schema(value)
-        elif isinstance(value, list):
-            result[key] = [
-                _simplify_schema(item) if isinstance(item, dict) else item
-                for item in value
-            ]
-        else:
-            result[key] = value
-
-    return result
-
-
-def _get_simplified_schema(model: type) -> dict[str, Any]:
-    """Get a simplified JSON Schema from a Pydantic model."""
-    return _simplify_schema(model.model_json_schema())
-
-
-def _output_fields_to_output_schema(
-    output_fields: list[str] | None,
-) -> dict[str, Any] | None:
-    """Convert simple output_fields list to JSON Schema for output_schema parameter.
-
-    Args:
-        output_fields: List of field names, e.g. ['headline', 'summary', 'url']
-
-    Returns:
-        JSON Schema dict for API output_schema parameter, or None if output_fields is None.
-    """
-    if output_fields is None:
-        return None
-
-    properties = {field: {"type": "string"} for field in output_fields}
-
-    return {
-        "type": "array",
-        "items": {
-            "type": "object",
-            "properties": properties,
-        },
-    }
-
-
 # Tool definitions with annotations
 TOOLS = [
     # Usage
@@ -109,7 +36,7 @@ TOOLS = [
         description=(
             "Get API usage statistics including active scout counts, rate limits, and activity metrics."
         ),
-        inputSchema=_get_simplified_schema(UsageInput),
+        inputSchema=get_simplified_schema(UsageInput),
         annotations={"readOnlyHint": True},
     ),
     # Read operations
@@ -119,19 +46,19 @@ TOOLS = [
             "List all scouts for the authenticated user. "
             "Returns basic metadata; use get_scout_detail for full fields."
         ),
-        inputSchema=_get_simplified_schema(ListScoutsInput),
+        inputSchema=get_simplified_schema(ListScoutsInput),
         annotations={"readOnlyHint": True},
     ),
     Tool(
         name="get_scout_detail",
         description="Get detailed information about a specific scout.",
-        inputSchema=_get_simplified_schema(ScoutIdInput),
+        inputSchema=get_simplified_schema(ScoutIdInput),
         annotations={"readOnlyHint": True},
     ),
     Tool(
         name="get_scout_updates",
         description="Get paginated updates/reports for a scout. Each update contains findings from a run.",
-        inputSchema=_get_simplified_schema(GetUpdatesInput),
+        inputSchema=get_simplified_schema(GetUpdatesInput),
         annotations={"readOnlyHint": True},
     ),
     # Scout lifecycle
@@ -141,7 +68,7 @@ TOOLS = [
             "Create a monitoring scout for continuous web monitoring. Scouts track changes relevant to "
             "a query and alert you. Examples: 'news about Yutori', 'H100 pricing below $1.50'."
         ),
-        inputSchema=_get_simplified_schema(CreateScoutInput),
+        inputSchema=get_simplified_schema(CreateScoutInput),
     ),
     Tool(
         name="edit_scout",
@@ -149,13 +76,13 @@ TOOLS = [
             "Update an existing scout's query, schedule, webhook configuration, or status. "
             "Use status='paused' to pause, 'active' to resume, or 'done' to archive."
         ),
-        inputSchema=_get_simplified_schema(EditScoutInput),
+        inputSchema=get_simplified_schema(EditScoutInput),
         annotations={"idempotentHint": True},
     ),
     Tool(
         name="delete_scout",
         description="Permanently delete a scout and all its data. This action cannot be undone.",
-        inputSchema=_get_simplified_schema(ScoutIdInput),
+        inputSchema=get_simplified_schema(ScoutIdInput),
         annotations={"destructiveHint": True},
     ),
     # Browsing operations
@@ -166,12 +93,12 @@ TOOLS = [
             "operates it like a person. Returns a task_id for polling. Example: 'list employees'. "
             "Set browser='local' to use the desktop app with the user's logged-in sessions."
         ),
-        inputSchema=_get_simplified_schema(BrowsingTaskInput),
+        inputSchema=get_simplified_schema(BrowsingTaskInput),
     ),
     Tool(
         name="get_browsing_task_result",
         description="Poll for browsing task status and result. Call until status is 'succeeded' or 'failed'.",
-        inputSchema=_get_simplified_schema(TaskIdInput),
+        inputSchema=get_simplified_schema(TaskIdInput),
         annotations={"readOnlyHint": True},
     ),
     # Research operations
@@ -183,12 +110,12 @@ TOOLS = [
             "Example: 'latest AI startup funding announcements'. Set browser='local' "
             "to use Yutori Local with the user's logged-in sessions."
         ),
-        inputSchema=_get_simplified_schema(ResearchTaskInput),
+        inputSchema=get_simplified_schema(ResearchTaskInput),
     ),
     Tool(
         name="get_research_task_result",
         description="Poll for research task status and result. Call until status is 'succeeded' or 'failed'.",
-        inputSchema=_get_simplified_schema(TaskIdInput),
+        inputSchema=get_simplified_schema(TaskIdInput),
         annotations={"readOnlyHint": True},
     ),
 ]
@@ -260,7 +187,7 @@ def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict[str, Any])
                 output_interval=params.output_interval,
                 webhook_url=params.webhook_url,
                 webhook_format=params.webhook_format,
-                output_schema=_output_fields_to_output_schema(params.output_fields),
+                output_schema=output_fields_to_output_schema(params.output_fields),
                 user_timezone=params.user_timezone,
                 skip_email=params.skip_email,
                 start_timestamp=params.start_timestamp,
@@ -282,7 +209,7 @@ def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict[str, Any])
             )
             # output_fields needs transformation to the API's output_schema format
             if params.output_fields is not None:
-                config_kwargs["output_schema"] = _output_fields_to_output_schema(params.output_fields)
+                config_kwargs["output_schema"] = output_fields_to_output_schema(params.output_fields)
 
             if config_kwargs:
                 client.edit_scout(scout_id=params.scout_id, **config_kwargs)
@@ -308,7 +235,7 @@ def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict[str, Any])
                 max_steps=params.max_steps,
                 require_auth=params.require_auth,
                 browser=params.browser,
-                output_schema=_output_fields_to_output_schema(params.output_fields),
+                output_schema=output_fields_to_output_schema(params.output_fields),
                 webhook_url=params.webhook_url,
                 webhook_format=params.webhook_format,
             )
@@ -325,7 +252,7 @@ def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict[str, Any])
                 user_timezone=params.user_timezone,
                 user_location=params.user_location,
                 browser=params.browser,
-                output_schema=_output_fields_to_output_schema(params.output_fields),
+                output_schema=output_fields_to_output_schema(params.output_fields),
                 webhook_url=params.webhook_url,
                 webhook_format=params.webhook_format,
             )

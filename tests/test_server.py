@@ -6,7 +6,8 @@ import pytest
 
 from yutori.auth.types import AuthStatus, LoginResult
 from yutori_mcp import __version__
-from yutori_mcp.server import _output_fields_to_output_schema, _simplify_schema, _get_simplified_schema, main
+from yutori_mcp.schema_utils import get_simplified_schema, output_fields_to_output_schema, simplify_schema
+from yutori_mcp.server import main
 from yutori_mcp.schemas import ListScoutsInput, CreateScoutInput
 
 
@@ -25,7 +26,7 @@ class TestSimplifySchema:
                 }
             }
         }
-        result = _simplify_schema(schema)
+        result = simplify_schema(schema)
         assert result["properties"]["limit"] == {
             "type": "integer",
             "minimum": 1,
@@ -47,7 +48,7 @@ class TestSimplifySchema:
                 }
             }
         }
-        result = _simplify_schema(schema)
+        result = simplify_schema(schema)
         assert result["properties"]["status"] == {
             "type": "string",
             "enum": ["active", "paused", "done"],
@@ -62,7 +63,7 @@ class TestSimplifySchema:
             },
             "required": ["query"],
         }
-        result = _simplify_schema(schema)
+        result = simplify_schema(schema)
         assert result == schema
 
     def test_handles_nested_objects(self):
@@ -80,7 +81,7 @@ class TestSimplifySchema:
                 }
             }
         }
-        result = _simplify_schema(schema)
+        result = simplify_schema(schema)
         assert result["properties"]["config"]["properties"]["timeout"] == {
             "type": "integer",
             "default": 30,
@@ -94,7 +95,7 @@ class TestSimplifySchema:
                 {"type": "integer"},
             ]
         }
-        result = _simplify_schema(schema)
+        result = simplify_schema(schema)
         assert result["items"][0] == {"type": "string"}
         assert result["items"][1] == {"type": "integer"}
 
@@ -107,7 +108,7 @@ class TestSimplifySchema:
                 }
             }
         }
-        result = _simplify_schema(schema)
+        result = simplify_schema(schema)
         # Should be unchanged since it's not the [type, null] pattern
         assert result["properties"]["value"]["anyOf"] == [
             {"type": "string"},
@@ -118,14 +119,14 @@ class TestSimplifySchema:
 class TestGetSimplifiedSchema:
     def test_list_scouts_schema_has_integer_limit(self):
         """ListScoutsInput.limit should be integer, not anyOf."""
-        schema = _get_simplified_schema(ListScoutsInput)
+        schema = get_simplified_schema(ListScoutsInput)
         limit_schema = schema["properties"]["limit"]
         assert limit_schema["type"] == "integer"
         assert "anyOf" not in limit_schema
 
     def test_list_scouts_schema_has_string_status(self):
         """ListScoutsInput.status should be string with enum, not anyOf."""
-        schema = _get_simplified_schema(ListScoutsInput)
+        schema = get_simplified_schema(ListScoutsInput)
         status_schema = schema["properties"]["status"]
         assert status_schema["type"] == "string"
         assert status_schema["enum"] == ["active", "paused", "done"]
@@ -133,7 +134,7 @@ class TestGetSimplifiedSchema:
 
     def test_create_scout_schema_has_integer_output_interval(self):
         """CreateScoutInput.output_interval should be integer, not anyOf."""
-        schema = _get_simplified_schema(CreateScoutInput)
+        schema = get_simplified_schema(CreateScoutInput)
         interval_schema = schema["properties"]["output_interval"]
         assert interval_schema["type"] == "integer"
         assert interval_schema["minimum"] == 1800
@@ -143,11 +144,11 @@ class TestGetSimplifiedSchema:
 class TestOutputFieldsToOutputSchema:
     def test_none_returns_none(self):
         """None input returns None."""
-        assert _output_fields_to_output_schema(None) is None
+        assert output_fields_to_output_schema(None) is None
 
     def test_empty_list(self):
         """Empty list produces empty properties."""
-        result = _output_fields_to_output_schema([])
+        result = output_fields_to_output_schema([])
         assert result == {
             "type": "array",
             "items": {
@@ -158,7 +159,7 @@ class TestOutputFieldsToOutputSchema:
 
     def test_single_field(self):
         """Single field is converted correctly."""
-        result = _output_fields_to_output_schema(["headline"])
+        result = output_fields_to_output_schema(["headline"])
         assert result == {
             "type": "array",
             "items": {
@@ -171,7 +172,7 @@ class TestOutputFieldsToOutputSchema:
 
     def test_multiple_fields(self):
         """Multiple fields are all converted to string properties."""
-        result = _output_fields_to_output_schema(["headline", "summary", "url"])
+        result = output_fields_to_output_schema(["headline", "summary", "url"])
         expected_properties = {
             "headline": {"type": "string"},
             "summary": {"type": "string"},
@@ -181,12 +182,12 @@ class TestOutputFieldsToOutputSchema:
 
     def test_output_is_array_type(self):
         """Output schema is always array type."""
-        result = _output_fields_to_output_schema(["field1"])
+        result = output_fields_to_output_schema(["field1"])
         assert result["type"] == "array"
 
     def test_items_are_objects(self):
         """Array items are always objects."""
-        result = _output_fields_to_output_schema(["field1"])
+        result = output_fields_to_output_schema(["field1"])
         assert result["items"]["type"] == "object"
 
 
