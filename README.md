@@ -20,7 +20,9 @@ You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and 
 
 ## Installation
 
-### Requirements
+<details>
+<summary>Requirements</summary>
+
 If you don't already have `uv` installed, install it (it includes `uvx`):
 
 ```bash
@@ -36,6 +38,7 @@ brew install uv
 Python 3.10 or higher is required (`uv` manages this automatically for most installs).
 
 For the quickstart below, Node.js is also required (for `npx`).
+</details>
 
 ### Quick install (recommended)
 
