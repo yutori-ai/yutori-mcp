@@ -113,6 +113,11 @@ def _truncate(text: str, max_len: int = 60) -> str:
     return text[: max_len - 3] + "..."
 
 
+def _scout_url(scout_id: str) -> str:
+    """Return the platform URL for a scout."""
+    return f"https://platform.yutori.com/scouting/tasks/{scout_id}"
+
+
 def _append_rejection_reason(
     lines: list[str], rejection_reason: str | None, *, indent: str = ""
 ) -> None:
@@ -240,7 +245,7 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
         lines.append(f"\n{i}. {name} ({status})")
         lines.append(f'   Query: "{_truncate(query)}"')
         lines.append(f"   ID: {scout_id}")
-        lines.append(f"   URL: https://platform.yutori.com/scouting/tasks/{scout_id}")
+        lines.append(f"   URL: {_scout_url(scout_id)}")
         lines.append(f"   Runs {interval} | Next: {next_run}")
         _append_rejection_reason(lines, scout.get("rejection_reason"), indent="   ")
 
@@ -265,7 +270,7 @@ def format_scout_detail(response: dict[str, Any], **context: Any) -> str:
     lines = [
         f"Scout: {name}",
         f"ID: {scout_id}",
-        f"URL: https://platform.yutori.com/scouting/tasks/{scout_id}",
+        f"URL: {_scout_url(scout_id)}",
         f"Status: {status}",
     ]
     _append_rejection_reason(lines, response.get("rejection_reason"))
@@ -384,7 +389,7 @@ def format_scout_created(response: dict[str, Any], **context: Any) -> str:
         "",
         f"Name: {name}",
         f"ID: {scout_id}",
-        f"URL: https://platform.yutori.com/scouting/tasks/{scout_id}",
+        f"URL: {_scout_url(scout_id)}",
         f"Status: {status}",
     ]
     _append_rejection_reason(lines, response.get("rejection_reason"))
@@ -415,7 +420,7 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
             "",
             f"Name: {name}",
             f"ID: {scout_id}",
-            f"URL: https://platform.yutori.com/scouting/tasks/{scout_id}",
+            f"URL: {_scout_url(scout_id)}",
             f"Status: {status}",
         ]
         _append_rejection_reason(lines, new.get("rejection_reason"))
@@ -431,7 +436,7 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
         "",
         f"Name: {name}",
         f"ID: {scout_id}",
-        f"URL: https://platform.yutori.com/scouting/tasks/{scout_id}",
+        f"URL: {_scout_url(scout_id)}",
         "",
         "Changes applied:",
     ]
