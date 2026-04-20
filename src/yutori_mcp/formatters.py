@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -44,21 +45,7 @@ def _to_markdown_lines(obj: Any, level: int = 0) -> list[str]:
 
 def format_response(tool_name: str, response: dict[str, Any], **context: Any) -> str:
     """Route to appropriate formatter based on tool name."""
-    formatters = {
-        "list_api_usage": format_usage,
-        "list_scouts": format_list_scouts,
-        "get_scout_detail": format_scout_detail,
-        "get_scout_updates": format_scout_updates,
-        "create_scout": format_scout_created,
-        "edit_scout": format_scout_edited,
-        "delete_scout": format_scout_deleted,
-        "run_browsing_task": format_task_started,
-        "get_browsing_task_result": format_task_result,
-        "run_research_task": format_task_started,
-        "get_research_task_result": format_task_result,
-    }
-
-    formatter = formatters.get(tool_name)
+    formatter = _FORMATTERS.get(tool_name)
     if formatter:
         return formatter(response, **context)
 
@@ -95,8 +82,6 @@ def _format_datetime(timestamp: str | int | None) -> str:
         return "not set"
     # Handle Unix timestamp in milliseconds (integer)
     if isinstance(timestamp, int):
-        from datetime import datetime, timezone
-
         # Convert milliseconds to seconds
         dt = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
         return dt.strftime("%Y-%m-%d %H:%M UTC")
@@ -116,6 +101,14 @@ def _truncate(text: str, max_len: int = 60) -> str:
 def _scout_platform_url(scout_id: str) -> str:
     """Build the platform URL for viewing a scout."""
     return f"https://platform.yutori.com/scouting/tasks/{scout_id}"
+
+
+def _scout_id_url_lines(scout_id: str, *, indent: str = "") -> list[str]:
+    """Return the standard ID + platform URL line pair for a scout."""
+    return [
+        f"{indent}ID: {scout_id}",
+        f"{indent}URL: {_scout_platform_url(scout_id)}",
+    ]
 
 
 def _append_rejection_reason(
@@ -244,8 +237,7 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
 
         lines.append(f"\n{i}. {name} ({status})")
         lines.append(f'   Query: "{_truncate(query)}"')
-        lines.append(f"   ID: {scout_id}")
-        lines.append(f"   URL: {_scout_platform_url(scout_id)}")
+        lines.extend(_scout_id_url_lines(scout_id, indent="   "))
         lines.append(f"   Runs {interval} | Next: {next_run}")
         _append_rejection_reason(lines, scout.get("rejection_reason"), indent="   ")
 
@@ -267,12 +259,9 @@ def format_scout_detail(response: dict[str, Any], **context: Any) -> str:
     query = response.get("query", "")
     created = _format_date(response.get("created_at"))
 
-    lines = [
-        f"Scout: {name}",
-        f"ID: {scout_id}",
-        f"URL: {_scout_platform_url(scout_id)}",
-        f"Status: {status}",
-    ]
+    lines = [f"Scout: {name}"]
+    lines.extend(_scout_id_url_lines(scout_id))
+    lines.append(f"Status: {status}")
     _append_rejection_reason(lines, response.get("rejection_reason"))
     lines.extend(
         [
@@ -388,10 +377,9 @@ def format_scout_created(response: dict[str, Any], **context: Any) -> str:
         "Scout created successfully.",
         "",
         f"Name: {name}",
-        f"ID: {scout_id}",
-        f"URL: {_scout_platform_url(scout_id)}",
-        f"Status: {status}",
     ]
+    lines.extend(_scout_id_url_lines(scout_id))
+    lines.append(f"Status: {status}")
     _append_rejection_reason(lines, response.get("rejection_reason"))
     lines.extend(
         [
@@ -419,10 +407,9 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
             "Scout updated successfully.",
             "",
             f"Name: {name}",
-            f"ID: {scout_id}",
-            f"URL: {_scout_platform_url(scout_id)}",
-            f"Status: {status}",
         ]
+        lines.extend(_scout_id_url_lines(scout_id))
+        lines.append(f"Status: {status}")
         _append_rejection_reason(lines, new.get("rejection_reason"))
         lines.extend(["", "Use get_scout_detail(scout_id) for full details."])
         return "\n".join(lines)
@@ -435,11 +422,14 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
         "Scout updated successfully.",
         "",
         f"Name: {name}",
-        f"ID: {scout_id}",
-        f"URL: {_scout_platform_url(scout_id)}",
-        "",
-        "Changes applied:",
     ]
+    lines.extend(_scout_id_url_lines(scout_id))
+    lines.extend(
+        [
+            "",
+            "Changes applied:",
+        ]
+    )
 
     # Compare fields
     fields_to_compare = [
@@ -625,3 +615,23 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
     lines.extend(_format_sources(response, indent=""))
 
     return "\n".join(lines)
+
+
+# -----------------------------------------------------------------------------
+# Dispatch table — defined after all formatters are declared.
+# -----------------------------------------------------------------------------
+
+
+_FORMATTERS = {
+    "list_api_usage": format_usage,
+    "list_scouts": format_list_scouts,
+    "get_scout_detail": format_scout_detail,
+    "get_scout_updates": format_scout_updates,
+    "create_scout": format_scout_created,
+    "edit_scout": format_scout_edited,
+    "delete_scout": format_scout_deleted,
+    "run_browsing_task": format_task_started,
+    "get_browsing_task_result": format_task_result,
+    "run_research_task": format_task_started,
+    "get_research_task_result": format_task_result,
+}
