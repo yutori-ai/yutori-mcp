@@ -74,11 +74,13 @@ Showing 10 of 87:
 1. Yutori news and updates (active)
    Query: "Tell me about the latest news, product updates, or..."
    ID: 690bd26c-0ef8-42f4-99e4-8fca6ea20e6f
+   URL: https://platform.yutori.com/scouting/tasks/690bd26c-0ef8-42f4-99e4-8fca6ea20e6f
    Runs daily | Next: 2026-01-16
 
 2. Yutori API changelog (paused)
    Query: "Monitor Yutori API changelog for breaking changes"
    ID: 36d178a0-591f-4567-8019-32d24f9e55ba
+   URL: https://platform.yutori.com/scouting/tasks/36d178a0-591f-4567-8019-32d24f9e55ba
    Runs every 12 hours | Next: 2026-01-10
 
 ... (8 more)
@@ -103,6 +105,7 @@ Example response:
 ```
 Scout: Yutori news and updates
 ID: 690bd26c-0ef8-42f4-99e4-8fca6ea20e6f
+URL: https://platform.yutori.com/scouting/tasks/690bd26c-0ef8-42f4-99e4-8fca6ea20e6f
 Status: active
 
 Query: "Tell me about the latest news, product updates, or announcements about Yutori"
@@ -152,6 +155,7 @@ Scout created successfully.
 
 Name: Yutori news and updates
 ID: 3d1d5e2a-5b6c-4a9c-8f8c-2f2e3b4a5c6d
+URL: https://platform.yutori.com/scouting/tasks/3d1d5e2a-5b6c-4a9c-8f8c-2f2e3b4a5c6d
 Status: active
 
 Query: "Tell me about the latest news, product updates, press releases, social..."
@@ -212,6 +216,7 @@ Scout updated successfully.
 
 Name: Yutori API changelog
 ID: 7c8692c3-c637-4302-a982-b9f4f7b49407
+URL: https://platform.yutori.com/scouting/tasks/7c8692c3-c637-4302-a982-b9f4f7b49407
 
 Changes applied:
   • Status: paused → active
