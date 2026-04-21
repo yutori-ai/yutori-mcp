@@ -150,19 +150,11 @@ class EditScoutInput(BaseModel):
     @model_validator(mode="after")
     def validate_has_changes(self) -> "EditScoutInput":
         """Ensure at least one field besides scout_id is provided."""
-        fields = [
-            self.status,
-            self.query,
-            self.output_interval,
-            self.webhook_url,
-            self.webhook_format,
-            self.output_fields,
-            self.skip_email,
-            self.user_timezone,
-            self.user_location,
-            self.is_public,
-        ]
-        if not any(f is not None for f in fields):
+        if not any(
+            getattr(self, name) is not None
+            for name in type(self).model_fields
+            if name != "scout_id"
+        ):
             raise ValueError("edit_scout requires at least one field to update")
         return self
 
