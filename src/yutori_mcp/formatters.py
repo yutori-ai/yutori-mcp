@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -44,21 +45,7 @@ def _to_markdown_lines(obj: Any, level: int = 0) -> list[str]:
 
 def format_response(tool_name: str, response: dict[str, Any], **context: Any) -> str:
     """Route to appropriate formatter based on tool name."""
-    formatters = {
-        "list_api_usage": format_usage,
-        "list_scouts": format_list_scouts,
-        "get_scout_detail": format_scout_detail,
-        "get_scout_updates": format_scout_updates,
-        "create_scout": format_scout_created,
-        "edit_scout": format_scout_edited,
-        "delete_scout": format_scout_deleted,
-        "run_browsing_task": format_task_started,
-        "get_browsing_task_result": format_task_result,
-        "run_research_task": format_task_started,
-        "get_research_task_result": format_task_result,
-    }
-
-    formatter = formatters.get(tool_name)
+    formatter = _TOOL_FORMATTERS.get(tool_name)
     if formatter:
         return formatter(response, **context)
 
@@ -95,8 +82,6 @@ def _format_datetime(timestamp: str | int | None) -> str:
         return "not set"
     # Handle Unix timestamp in milliseconds (integer)
     if isinstance(timestamp, int):
-        from datetime import datetime, timezone
-
         # Convert milliseconds to seconds
         dt = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
         return dt.strftime("%Y-%m-%d %H:%M UTC")
@@ -625,3 +610,21 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
     lines.extend(_format_sources(response, indent=""))
 
     return "\n".join(lines)
+
+
+# Tool-name -> formatter registry, referenced by format_response() above.
+# Defined at module scope (after all formatters) so the dict is built once at
+# import time rather than rebuilt on every call.
+_TOOL_FORMATTERS = {
+    "list_api_usage": format_usage,
+    "list_scouts": format_list_scouts,
+    "get_scout_detail": format_scout_detail,
+    "get_scout_updates": format_scout_updates,
+    "create_scout": format_scout_created,
+    "edit_scout": format_scout_edited,
+    "delete_scout": format_scout_deleted,
+    "run_browsing_task": format_task_started,
+    "get_browsing_task_result": format_task_result,
+    "run_research_task": format_task_started,
+    "get_research_task_result": format_task_result,
+}
