@@ -44,6 +44,14 @@ class TestDictToMarkdown:
 
 
 class TestFormatUsage:
+    # Current server emits both navigator_* (primary) and n1_* (deprecated alias) with equal values.
+    _NAVIGATOR_LIMITS = {
+        "requests_today": 100,
+        "daily_limit": 50000,
+        "remaining_requests": 49900,
+        "reset_at": "2026-03-04T00:00:00+00:00",
+        "per_second_limit": 20,
+    }
     USAGE_RESPONSE = {
         "num_active_scouts": 3,
         "active_scout_ids": ["id-1", "id-2", "id-3"],
@@ -54,18 +62,14 @@ class TestFormatUsage:
             "reset_at": "2026-03-04T00:00:00+00:00",
             "status": "available",
         },
-        "n1_rate_limits": {
-            "requests_today": 100,
-            "daily_limit": 50000,
-            "remaining_requests": 49900,
-            "reset_at": "2026-03-04T00:00:00+00:00",
-            "per_second_limit": 20,
-        },
+        "navigator_rate_limits": _NAVIGATOR_LIMITS,
+        "n1_rate_limits": _NAVIGATOR_LIMITS,
         "activity": {
             "period": "7d",
             "scout_runs": 21,
             "browsing_tasks": 5,
             "research_tasks": 3,
+            "navigator_calls": 800,
             "n1_calls": 800,
         },
     }
@@ -83,11 +87,18 @@ class TestFormatUsage:
         assert "Daily limit: 10000" in result
         assert "Remaining: 9500" in result
 
-    def test_n1_rate_limits_shown(self):
+    def test_navigator_rate_limits_shown(self):
         result = format_usage(self.USAGE_RESPONSE)
-        assert "n1 API Rate Limits" in result
+        assert "Navigator API Rate Limits" in result
         assert "Requests today: 100" in result
         assert "Per-second limit: 20" in result
+
+    def test_navigator_rate_limits_fallback_to_deprecated_n1_key(self):
+        """If only the deprecated n1_rate_limits field is present, still render the section."""
+        response = {k: v for k, v in self.USAGE_RESPONSE.items() if k != "navigator_rate_limits"}
+        result = format_usage(response)
+        assert "Navigator API Rate Limits" in result
+        assert "Requests today: 100" in result
 
     def test_activity_shown(self):
         result = format_usage(self.USAGE_RESPONSE)
@@ -95,7 +106,22 @@ class TestFormatUsage:
         assert "Scout runs: 21" in result
         assert "Browsing tasks: 5" in result
         assert "Research tasks: 3" in result
-        assert "n1 API calls: 800" in result
+        assert "Navigator API calls: 800" in result
+
+    def test_activity_falls_back_to_deprecated_n1_calls_key(self):
+        """Older servers may only emit activity.n1_calls."""
+        response = {
+            **self.USAGE_RESPONSE,
+            "activity": {
+                "period": "7d",
+                "scout_runs": 21,
+                "browsing_tasks": 5,
+                "research_tasks": 3,
+                "n1_calls": 42,
+            },
+        }
+        result = format_usage(response)
+        assert "Navigator API calls: 42" in result
 
     def test_unavailable_rate_limits(self):
         """When rate limits are unavailable, don't show request counts."""
