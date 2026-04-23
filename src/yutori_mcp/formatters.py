@@ -103,6 +103,38 @@ def _scout_platform_url(scout_id: str) -> str:
     return f"https://platform.yutori.com/scouting/tasks/{scout_id}"
 
 
+_STATUS_UNSET: Any = object()
+
+
+def _scout_identity_lines(
+    *,
+    name: str,
+    scout_id: str,
+    status: Any = _STATUS_UNSET,
+    name_label: str = "Name",
+) -> list[str]:
+    """Build the shared `{name_label}: ...` / `ID: ...` / `URL: ...` (+ `Status: ...`) header block.
+
+    The ``Status:`` line is appended whenever the caller passes a ``status``
+    argument, including when the value is ``None`` — this preserves the
+    pre-refactor behavior where ``response.get("status", "unknown")`` returning
+    a literal ``None`` (explicit null) would still render as ``Status: None``.
+    Callers that want to omit the line entirely (e.g. the diff path of
+    ``format_scout_edited``) simply don't pass ``status``.
+
+    Used by the top-level scout detail / created / edited formatters. The list-scouts
+    formatter uses its own indented variant and doesn't call this helper.
+    """
+    lines = [
+        f"{name_label}: {name}",
+        f"ID: {scout_id}",
+        f"URL: {_scout_platform_url(scout_id)}",
+    ]
+    if status is not _STATUS_UNSET:
+        lines.append(f"Status: {status}")
+    return lines
+
+
 def _append_rejection_reason(
     lines: list[str], rejection_reason: str | None, *, indent: str = ""
 ) -> None:
@@ -252,12 +284,9 @@ def format_scout_detail(response: dict[str, Any], **context: Any) -> str:
     query = response.get("query", "")
     created = _format_date(response.get("created_at"))
 
-    lines = [
-        f"Scout: {name}",
-        f"ID: {scout_id}",
-        f"URL: {_scout_platform_url(scout_id)}",
-        f"Status: {status}",
-    ]
+    lines = _scout_identity_lines(
+        name=name, scout_id=scout_id, status=status, name_label="Scout"
+    )
     _append_rejection_reason(lines, response.get("rejection_reason"))
     lines.extend(
         [
@@ -369,14 +398,8 @@ def format_scout_created(response: dict[str, Any], **context: Any) -> str:
     interval = _format_interval(response.get("output_interval"))
     next_run = _format_datetime(response.get("next_output_timestamp"))
 
-    lines = [
-        "Scout created successfully.",
-        "",
-        f"Name: {name}",
-        f"ID: {scout_id}",
-        f"URL: {_scout_platform_url(scout_id)}",
-        f"Status: {status}",
-    ]
+    lines = ["Scout created successfully.", ""]
+    lines.extend(_scout_identity_lines(name=name, scout_id=scout_id, status=status))
     _append_rejection_reason(lines, response.get("rejection_reason"))
     lines.extend(
         [
@@ -400,14 +423,8 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
         name = new.get("display_name") or new.get("query", "")[:40]
         scout_id = new.get("id", "")
         status = new.get("status", "unknown")
-        lines = [
-            "Scout updated successfully.",
-            "",
-            f"Name: {name}",
-            f"ID: {scout_id}",
-            f"URL: {_scout_platform_url(scout_id)}",
-            f"Status: {status}",
-        ]
+        lines = ["Scout updated successfully.", ""]
+        lines.extend(_scout_identity_lines(name=name, scout_id=scout_id, status=status))
         _append_rejection_reason(lines, new.get("rejection_reason"))
         lines.extend(["", "Use get_scout_detail(scout_id) for full details."])
         return "\n".join(lines)
@@ -416,15 +433,9 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
     name = new.get("display_name") or new.get("query", "")[:40]
     scout_id = new.get("id", "")
 
-    lines = [
-        "Scout updated successfully.",
-        "",
-        f"Name: {name}",
-        f"ID: {scout_id}",
-        f"URL: {_scout_platform_url(scout_id)}",
-        "",
-        "Changes applied:",
-    ]
+    lines = ["Scout updated successfully.", ""]
+    lines.extend(_scout_identity_lines(name=name, scout_id=scout_id))
+    lines.extend(["", "Changes applied:"])
 
     # Compare fields
     fields_to_compare = [
