@@ -11,6 +11,11 @@ def dict_to_markdown(obj: Any, level: int = 0) -> str:
     return "\n".join(_to_markdown_lines(obj, level))
 
 
+def _has_value(value: Any) -> bool:
+    """Return True when ``value`` is neither ``None`` nor an empty string."""
+    return value is not None and value != ""
+
+
 def _to_markdown_lines(obj: Any, level: int = 0) -> list[str]:
     """Recursively convert obj to markdown lines with indentation."""
     lines: list[str] = []
@@ -21,7 +26,7 @@ def _to_markdown_lines(obj: Any, level: int = 0) -> list[str]:
             if isinstance(val, (dict, list)) and val:
                 lines.append(f"{indent}{key}:")
                 lines.extend(_to_markdown_lines(val, level + 1))
-            elif val is not None and val != "":
+            elif _has_value(val):
                 lines.append(f"{indent}{key}: {val}")
     elif isinstance(obj, list):
         for item in obj:
@@ -32,13 +37,12 @@ def _to_markdown_lines(obj: Any, level: int = 0) -> list[str]:
                 lines.append(f"{indent}- {first_key}: {first_val}")
                 # Add remaining fields indented
                 for k, v in item.items():
-                    if k != first_key and v is not None and v != "":
+                    if k != first_key and _has_value(v):
                         lines.append(f"{indent}  {k}: {v}")
-            elif item is not None and item != "":
+            elif _has_value(item):
                 lines.append(f"{indent}- {item}")
-    else:
-        if obj is not None and obj != "":
-            lines.append(f"{indent}{obj}")
+    elif _has_value(obj):
+        lines.append(f"{indent}{obj}")
 
     return lines
 
