@@ -103,14 +103,24 @@ def _scout_platform_url(scout_id: str) -> str:
     return f"https://platform.yutori.com/scouting/tasks/{scout_id}"
 
 
+_STATUS_UNSET: Any = object()
+
+
 def _scout_identity_lines(
     *,
     name: str,
     scout_id: str,
-    status: str | None = None,
+    status: Any = _STATUS_UNSET,
     name_label: str = "Name",
 ) -> list[str]:
     """Build the shared `{name_label}: ...` / `ID: ...` / `URL: ...` (+ `Status: ...`) header block.
+
+    The ``Status:`` line is appended whenever the caller passes a ``status``
+    argument, including when the value is ``None`` — this preserves the
+    pre-refactor behavior where ``response.get("status", "unknown")`` returning
+    a literal ``None`` (explicit null) would still render as ``Status: None``.
+    Callers that want to omit the line entirely (e.g. the diff path of
+    ``format_scout_edited``) simply don't pass ``status``.
 
     Used by the top-level scout detail / created / edited formatters. The list-scouts
     formatter uses its own indented variant and doesn't call this helper.
@@ -120,7 +130,7 @@ def _scout_identity_lines(
         f"ID: {scout_id}",
         f"URL: {_scout_platform_url(scout_id)}",
     ]
-    if status is not None:
+    if status is not _STATUS_UNSET:
         lines.append(f"Status: {status}")
     return lines
 

@@ -226,6 +226,17 @@ class TestFormatScoutDetail:
         result = format_scout_detail(response)
         assert "Rejection reason: invalid_query" in result
 
+    def test_explicit_null_status_still_renders_status_line(self):
+        """An explicit ``"status": null`` in the payload still renders ``Status: None``.
+
+        Regression test: ``response.get("status", "unknown")`` returns ``None``
+        when the key is present with a null value (the default is only used
+        when the key is missing), and the pre-refactor inline code formatted
+        that as ``Status: None``.
+        """
+        response = {"id": "abc-123", "display_name": "n", "query": "q", "status": None}
+        assert "Status: None" in format_scout_detail(response)
+
 
 class TestFormatScoutCreated:
     def test_created_confirmation(self):
