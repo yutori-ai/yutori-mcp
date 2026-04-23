@@ -441,20 +441,8 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
     lines.extend(_scout_identity_lines(name=name, scout_id=scout_id))
     lines.extend(["", "Changes applied:"])
 
-    # Compare fields
-    fields_to_compare = [
-        ("status", "Status"),
-        ("query", "Query"),
-        ("output_interval", "Interval"),
-        ("webhook_url", "Webhook"),
-        ("skip_email", "Skip email"),
-        ("user_timezone", "Timezone"),
-        ("user_location", "Location"),
-        ("is_public", "Public"),
-    ]
-
     changes_found = False
-    for field, label in fields_to_compare:
+    for field, label in _SCOUT_EDIT_FIELDS:
         old_val = old.get(field)
         new_val = new.get(field)
         if old_val != new_val:
@@ -626,6 +614,19 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
 
     return "\n".join(lines)
 
+
+# Scout-edit field comparison list, used by format_scout_edited().
+# Defined at module scope so the tuple list is built once at import time.
+_SCOUT_EDIT_FIELDS = (
+    ("status", "Status"),
+    ("query", "Query"),
+    ("output_interval", "Interval"),
+    ("webhook_url", "Webhook"),
+    ("skip_email", "Skip email"),
+    ("user_timezone", "Timezone"),
+    ("user_location", "Location"),
+    ("is_public", "Public"),
+)
 
 # Tool-name -> formatter registry, referenced by format_response() above.
 # Defined at module scope (after all formatters) so the dict is built once at
