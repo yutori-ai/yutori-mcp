@@ -28,8 +28,9 @@ class YutoriAPIError(Exception):
 class MCPClientAdapter:
     """Adapter that delegates MCP tool calls to SDK client namespaces.
 
-    All methods filter out None-valued kwargs before forwarding to the SDK,
-    so callers can pass optional fields unconditionally.
+    _call() strips None-valued kwargs before forwarding to the SDK, so
+    callers can pass optional fields unconditionally and new methods
+    can't accidentally skip the filter.
     """
 
     def __init__(self) -> None:
@@ -52,36 +53,36 @@ class MCPClientAdapter:
     # -------------------------------------------------------------------------
 
     def get_usage(self, **kwargs: Any) -> dict[str, Any]:
-        return self._call(self._client.get_usage, **_strip_none(kwargs))
+        return self._call(self._client.get_usage, **kwargs)
 
     # -------------------------------------------------------------------------
     # Scout operations
     # -------------------------------------------------------------------------
 
     def list_scouts(self, **kwargs: Any) -> dict[str, Any]:
-        return self._call(self._client.scouts.list, **_strip_none(kwargs))
+        return self._call(self._client.scouts.list, **kwargs)
 
     def get_scout_detail(self, scout_id: str) -> dict[str, Any]:
         return self._call(self._client.scouts.get, scout_id)
 
     def create_scout(self, query: str, **kwargs: Any) -> dict[str, Any]:
-        return self._call(self._client.scouts.create, query, **_strip_none(kwargs))
+        return self._call(self._client.scouts.create, query, **kwargs)
 
     def edit_scout(self, scout_id: str, **kwargs: Any) -> dict[str, Any]:
-        return self._call(self._client.scouts.update, scout_id, **_strip_none(kwargs))
+        return self._call(self._client.scouts.update, scout_id, **kwargs)
 
     def delete_scout(self, scout_id: str) -> dict[str, Any]:
         return self._call(self._client.scouts.delete, scout_id)
 
     def get_scout_updates(self, scout_id: str, **kwargs: Any) -> dict[str, Any]:
-        return self._call(self._client.scouts.get_updates, scout_id, **_strip_none(kwargs))
+        return self._call(self._client.scouts.get_updates, scout_id, **kwargs)
 
     # -------------------------------------------------------------------------
     # Browsing operations
     # -------------------------------------------------------------------------
 
     def run_browsing_task(self, task: str, start_url: str, **kwargs: Any) -> dict[str, Any]:
-        return self._call(self._client.browsing.create, task, start_url, **_strip_none(kwargs))
+        return self._call(self._client.browsing.create, task, start_url, **kwargs)
 
     def get_browsing_task(self, task_id: str) -> dict[str, Any]:
         return self._call(self._client.browsing.get, task_id)
@@ -91,7 +92,7 @@ class MCPClientAdapter:
     # -------------------------------------------------------------------------
 
     def run_research_task(self, query: str, **kwargs: Any) -> dict[str, Any]:
-        return self._call(self._client.research.create, query, **_strip_none(kwargs))
+        return self._call(self._client.research.create, query, **kwargs)
 
     def get_research_task(self, task_id: str) -> dict[str, Any]:
         return self._call(self._client.research.get, task_id)
@@ -102,9 +103,13 @@ class MCPClientAdapter:
 
     @staticmethod
     def _call(fn: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        """Call an SDK method, converting SDK APIError to MCP YutoriAPIError."""
+        """Call an SDK method, converting SDK APIError to MCP YutoriAPIError.
+
+        Filters None-valued kwargs before forwarding so callers can pass
+        optional fields unconditionally without overriding SDK defaults.
+        """
         try:
-            return fn(*args, **kwargs)
+            return fn(*args, **_strip_none(kwargs))
         except AuthenticationError as e:
             raise YutoriAPIError(message=str(e), status_code=401) from e
         except APIError as e:
