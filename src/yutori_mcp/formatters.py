@@ -197,25 +197,27 @@ def format_usage(response: dict[str, Any], **context: Any) -> str:
             lines.append(f"  Remaining: {rate_limits.get('remaining_requests', 'N/A')}")
         lines.append(f"  Resets at: {rate_limits.get('reset_at', 'N/A')}")
 
-    # n1 rate limits
-    n1_limits = response.get("n1_rate_limits", {})
-    if n1_limits:
-        lines.append("\nn1 API Rate Limits:")
-        lines.append(f"  Requests today: {n1_limits.get('requests_today', 'N/A')}")
-        lines.append(f"  Daily limit: {n1_limits.get('daily_limit', 'N/A')}")
-        lines.append(f"  Remaining: {n1_limits.get('remaining_requests', 'N/A')}")
-        lines.append(f"  Per-second limit: {n1_limits.get('per_second_limit', 'N/A')}")
-        lines.append(f"  Resets at: {n1_limits.get('reset_at', 'N/A')}")
+    # Navigator rate limits (falls back to deprecated n1_rate_limits on older servers)
+    navigator_limits = response.get("navigator_rate_limits") or response.get("n1_rate_limits") or {}
+    if navigator_limits:
+        lines.append("\nNavigator API Rate Limits:")
+        lines.append(f"  Requests today: {navigator_limits.get('requests_today', 'N/A')}")
+        lines.append(f"  Daily limit: {navigator_limits.get('daily_limit', 'N/A')}")
+        lines.append(f"  Remaining: {navigator_limits.get('remaining_requests', 'N/A')}")
+        lines.append(f"  Per-second limit: {navigator_limits.get('per_second_limit', 'N/A')}")
+        lines.append(f"  Resets at: {navigator_limits.get('reset_at', 'N/A')}")
 
     # Activity
     activity = response.get("activity", {})
     if activity:
         period = activity.get("period", "24h")
+        # `navigator_calls` is the primary key; `n1_calls` is the deprecated alias.
+        navigator_calls = activity.get("navigator_calls", activity.get("n1_calls", 0))
         lines.append(f"\nActivity ({period}):")
         lines.append(f"  Scout runs: {activity.get('scout_runs', 0)}")
         lines.append(f"  Browsing tasks: {activity.get('browsing_tasks', 0)}")
         lines.append(f"  Research tasks: {activity.get('research_tasks', 0)}")
-        lines.append(f"  n1 API calls: {activity.get('n1_calls', 0)}")
+        lines.append(f"  Navigator API calls: {navigator_calls}")
 
     return "\n".join(lines)
 

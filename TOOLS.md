@@ -32,7 +32,7 @@ API Rate Limits (available):
   Remaining: 8750
   Resets at: 2026-03-04T00:00:00+00:00
 
-n1 API Rate Limits:
+Navigator API Rate Limits:
   Requests today: 342
   Daily limit: 50000
   Remaining: 49658
@@ -43,7 +43,7 @@ Activity (7d):
   Scout runs: 47
   Browsing tasks: 12
   Research tasks: 8
-  n1 API calls: 1523
+  Navigator API calls: 1523
 ```
 
 ## Scout Tools
