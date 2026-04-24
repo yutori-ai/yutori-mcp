@@ -288,14 +288,6 @@ class ResearchTaskInput(BaseModel):
         default=None,
         description="Location for contextual awareness. Format: 'city, region, country'. Default: 'San Francisco, CA, US'",
     )
-    browser: Literal["cloud", "local"] | None = Field(
-        default=None,
-        description=(
-            "Where to run the browser when research needs web interaction. 'cloud' (default) uses "
-            "Yutori's cloud browser. 'local' uses Yutori Local with the user's logged-in sessions "
-            "on the desktop. Requires the desktop app to be running."
-        ),
-    )
     output_fields: list[str] | None = Field(
         default=None,
         description=(

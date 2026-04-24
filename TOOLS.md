@@ -306,7 +306,6 @@ Execute a one-time deep web research task. The research agent searches, reads, a
 {
   "query": "What are the latest developments in quantum computing from the past week? Include company announcements, research papers, and product releases.",
   "user_timezone": "America/Los_Angeles",
-  "browser": "local",
   "webhook_url": "https://example.com/webhook",
   "output_fields": ["title", "summary", "source_url", "category"]
 }
@@ -329,7 +328,6 @@ Poll with get_research_task_result(task_id="ae27a17c-a4ed-4c69-8b2a-4bec330fc935
 | `query` | Yes | Natural language description of what to research |
 | `user_timezone` | No | Timezone for context. Default: 'America/Los_Angeles' |
 | `user_location` | No | Location for context. Default: 'San Francisco, CA, US' |
-| `browser` | No | `cloud` (default) or `local` to use Yutori Local with the user's logged-in desktop browser |
 | `output_fields` | No | List of field names for structured output as array of objects |
 | `webhook_url` | No | URL for completion notification |
 | `webhook_format` | No | `scout` (default), `slack`, or `zapier` |

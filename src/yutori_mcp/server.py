@@ -109,8 +109,7 @@ TOOLS = [
         description=(
             "Execute a one-time deep web research task. The research agent searches, "
             "reads, and synthesizes information from across the web. Returns a task_id for polling. "
-            "Example: 'latest AI startup funding announcements'. Set browser='local' "
-            "to use Yutori Local with the user's logged-in sessions."
+            "Example: 'latest AI startup funding announcements'."
         ),
         inputSchema=get_simplified_schema(ResearchTaskInput),
     ),
@@ -286,7 +285,6 @@ def _handle_run_research_task(
     params = ResearchTaskInput(**arguments)
     return client.run_research_task(**_scout_kwargs(params)), {
         "task_type": "Research",
-        "browser": params.browser,
     }
 
 
