@@ -9,6 +9,7 @@ from typing import Any
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
+from pydantic import BaseModel
 
 from . import __version__
 from .adapter import MCPClientAdapter, YutoriAPIError
@@ -170,6 +171,18 @@ def _handle_tool(
     return handler(client, arguments)
 
 
+def _scout_kwargs(params: BaseModel) -> dict[str, Any]:
+    """Convert a Pydantic input model into adapter kwargs.
+
+    Drops None fields (matches adapter._strip_none centralization) and
+    transforms `output_fields` into the API's `output_schema` format.
+    """
+    kwargs = params.model_dump(exclude={"output_fields"}, exclude_none=True)
+    if getattr(params, "output_fields", None) is not None:
+        kwargs["output_schema"] = output_fields_to_output_schema(params.output_fields)
+    return kwargs
+
+
 # -----------------------------------------------------------------------------
 # Per-tool handlers. Each handler parses arguments via its input schema, calls
 # the appropriate adapter method, and returns (result, context) for the
@@ -189,8 +202,7 @@ def _handle_list_scouts(
     client: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     params = ListScoutsInput(**arguments)
-    result = client.list_scouts(limit=params.limit, status=params.status)
-    return result, {}
+    return client.list_scouts(**_scout_kwargs(params)), {}
 
 
 def _handle_get_scout_detail(
@@ -204,31 +216,14 @@ def _handle_get_scout_updates(
     client: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     params = GetUpdatesInput(**arguments)
-    result = client.get_scout_updates(
-        scout_id=params.scout_id,
-        cursor=params.cursor,
-        limit=params.limit,
-    )
-    return result, {}
+    return client.get_scout_updates(**_scout_kwargs(params)), {}
 
 
 def _handle_create_scout(
     client: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     params = CreateScoutInput(**arguments)
-    result = client.create_scout(
-        query=params.query,
-        output_interval=params.output_interval,
-        webhook_url=params.webhook_url,
-        webhook_format=params.webhook_format,
-        output_schema=output_fields_to_output_schema(params.output_fields),
-        user_timezone=params.user_timezone,
-        skip_email=params.skip_email,
-        start_timestamp=params.start_timestamp,
-        user_location=params.user_location,
-        is_public=params.is_public,
-    )
-    return result, {}
+    return client.create_scout(**_scout_kwargs(params)), {}
 
 
 def _handle_edit_scout(
@@ -272,17 +267,10 @@ def _handle_run_browsing_task(
     client: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     params = BrowsingTaskInput(**arguments)
-    result = client.run_browsing_task(
-        task=params.task,
-        start_url=params.start_url,
-        max_steps=params.max_steps,
-        require_auth=params.require_auth,
-        browser=params.browser,
-        output_schema=output_fields_to_output_schema(params.output_fields),
-        webhook_url=params.webhook_url,
-        webhook_format=params.webhook_format,
-    )
-    return result, {"task_type": "Browsing", "browser": params.browser}
+    return client.run_browsing_task(**_scout_kwargs(params)), {
+        "task_type": "Browsing",
+        "browser": params.browser,
+    }
 
 
 def _handle_get_browsing_task_result(
@@ -296,16 +284,10 @@ def _handle_run_research_task(
     client: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     params = ResearchTaskInput(**arguments)
-    result = client.run_research_task(
-        query=params.query,
-        user_timezone=params.user_timezone,
-        user_location=params.user_location,
-        browser=params.browser,
-        output_schema=output_fields_to_output_schema(params.output_fields),
-        webhook_url=params.webhook_url,
-        webhook_format=params.webhook_format,
-    )
-    return result, {"task_type": "Research", "browser": params.browser}
+    return client.run_research_task(**_scout_kwargs(params)), {
+        "task_type": "Research",
+        "browser": params.browser,
+    }
 
 
 def _handle_get_research_task_result(
