@@ -210,9 +210,3 @@ class TestBrowsingAndResearchForwarding:
         assert kwargs["browser"] == "local"
         assert kwargs["webhook_format"] == "zapier"
 
-    def test_research_forwards_browser(self, adapter):
-        adapter._client.research.create = MagicMock(return_value={"task_id": "r1"})
-        adapter.run_research_task("Research a logged-in dashboard", browser="local")
-
-        _, kwargs = adapter._client.research.create.call_args
-        assert kwargs["browser"] == "local"

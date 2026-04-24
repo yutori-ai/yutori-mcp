@@ -334,7 +334,6 @@ class TestResearchTaskInput:
         assert data.query == "Research quantum computing developments"
         assert data.user_timezone is None
         assert data.user_location is None
-        assert data.browser is None
 
     def test_full_input(self):
         """All fields can be provided."""
@@ -342,14 +341,12 @@ class TestResearchTaskInput:
             query="Research quantum computing developments",
             user_timezone="America/New_York",
             user_location="New York, NY, US",
-            browser="local",
             output_fields=["title", "summary", "source_url"],
             webhook_url="https://example.com/webhook",
             webhook_format="slack",
         )
         assert data.user_timezone == "America/New_York"
         assert data.user_location == "New York, NY, US"
-        assert data.browser == "local"
         assert data.webhook_format == "slack"
         assert data.output_fields == ["title", "summary", "source_url"]
 
@@ -363,15 +360,6 @@ class TestResearchTaskInput:
         data = ResearchTaskInput(query="Research AI")
         assert data.output_fields is None
 
-    def test_local_browser_supported(self):
-        """Research can target the local desktop browser."""
-        data = ResearchTaskInput(
-            query="Research a logged-in dashboard",
-            browser="local",
-        )
-        assert data.browser == "local"
-
-
 class TestInvalidBrowserRejected:
     """Verify that invalid browser values are rejected."""
 
@@ -381,14 +369,6 @@ class TestInvalidBrowserRejected:
             BrowsingTaskInput(
                 task="Test task",
                 start_url="https://example.com",
-                browser="remote",
-            )
-
-    def test_research_task_rejects_invalid_browser(self):
-        """ResearchTaskInput rejects browser='remote'."""
-        with pytest.raises(ValidationError):
-            ResearchTaskInput(
-                query="Test query",
                 browser="remote",
             )
 
