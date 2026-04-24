@@ -171,13 +171,18 @@ def _handle_tool(
     return handler(client, arguments)
 
 
-def _scout_kwargs(params: BaseModel) -> dict[str, Any]:
+def _scout_kwargs(
+    params: BaseModel, extra_exclude: set[str] | None = None
+) -> dict[str, Any]:
     """Convert a Pydantic input model into adapter kwargs.
 
     Drops None fields (matches adapter._strip_none centralization) and
     transforms `output_fields` into the API's `output_schema` format.
+    Callers can pass `extra_exclude` to drop additional fields (e.g. control
+    fields that are not part of the scout config payload).
     """
-    kwargs = params.model_dump(exclude={"output_fields"}, exclude_none=True)
+    exclude = {"output_fields"} | (extra_exclude or set())
+    kwargs = params.model_dump(exclude=exclude, exclude_none=True)
     if getattr(params, "output_fields", None) is not None:
         kwargs["output_schema"] = output_fields_to_output_schema(params.output_fields)
     return kwargs
@@ -234,14 +239,9 @@ def _handle_edit_scout(
     # Fetch current state for diff (also validates scout exists)
     old_scout = client.get_scout_detail(params.scout_id)
 
-    # Build config kwargs, excluding control fields and None values
-    config_kwargs = params.model_dump(
-        exclude={"scout_id", "status", "output_fields"},
-        exclude_none=True,
-    )
-    # output_fields needs transformation to the API's output_schema format
-    if params.output_fields is not None:
-        config_kwargs["output_schema"] = output_fields_to_output_schema(params.output_fields)
+    # Build config kwargs, excluding control fields (scout_id is passed
+    # explicitly below; status is applied separately after config updates).
+    config_kwargs = _scout_kwargs(params, extra_exclude={"scout_id", "status"})
 
     if config_kwargs:
         client.edit_scout(scout_id=params.scout_id, **config_kwargs)
