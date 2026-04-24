@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from mcp.server import Server
@@ -149,120 +150,187 @@ def create_server() -> Server:
     return server
 
 
-def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Route tool calls to the appropriate client method.
+# Signature for tool handlers registered in _TOOL_HANDLERS.
+ToolHandler = Callable[
+    [MCPClientAdapter, dict[str, Any]], tuple[dict[str, Any], dict[str, Any]]
+]
+
+
+def _handle_tool(
+    client: MCPClientAdapter, name: str, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Route tool calls to the appropriate handler.
 
     Returns:
         Tuple of (result, context) where context contains extra info for formatting.
     """
-    match name:
-        # Usage
-        case "list_api_usage":
-            params = UsageInput(**arguments)
-            result = client.get_usage(period=params.period)
-            return result, {}
+    handler = _TOOL_HANDLERS.get(name)
+    if handler is None:
+        raise ValueError(f"Unknown tool: {name}")
+    return handler(client, arguments)
 
-        # Read operations
-        case "list_scouts":
-            params = ListScoutsInput(**arguments)
-            result = client.list_scouts(limit=params.limit, status=params.status)
-            return result, {}
-        case "get_scout_detail":
-            params = ScoutIdInput(**arguments)
-            return client.get_scout_detail(params.scout_id), {}
-        case "get_scout_updates":
-            params = GetUpdatesInput(**arguments)
-            result = client.get_scout_updates(
-                scout_id=params.scout_id,
-                cursor=params.cursor,
-                limit=params.limit,
-            )
-            return result, {}
 
-        # Scout lifecycle
-        case "create_scout":
-            params = CreateScoutInput(**arguments)
-            result = client.create_scout(
-                query=params.query,
-                output_interval=params.output_interval,
-                webhook_url=params.webhook_url,
-                webhook_format=params.webhook_format,
-                output_schema=output_fields_to_output_schema(params.output_fields),
-                user_timezone=params.user_timezone,
-                skip_email=params.skip_email,
-                start_timestamp=params.start_timestamp,
-                user_location=params.user_location,
-                is_public=params.is_public,
-            )
-            return result, {}
+# -----------------------------------------------------------------------------
+# Per-tool handlers. Each handler parses arguments via its input schema, calls
+# the appropriate adapter method, and returns (result, context) for the
+# formatter registry in formatters.py.
+# -----------------------------------------------------------------------------
 
-        case "edit_scout":
-            params = EditScoutInput(**arguments)
 
-            # Fetch current state for diff (also validates scout exists)
-            old_scout = client.get_scout_detail(params.scout_id)
+def _handle_list_api_usage(
+    client: MCPClientAdapter, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    params = UsageInput(**arguments)
+    result = client.get_usage(period=params.period)
+    return result, {}
 
-            # Build config kwargs, excluding control fields and None values
-            config_kwargs = params.model_dump(
-                exclude={"scout_id", "status", "output_fields"},
-                exclude_none=True,
-            )
-            # output_fields needs transformation to the API's output_schema format
-            if params.output_fields is not None:
-                config_kwargs["output_schema"] = output_fields_to_output_schema(params.output_fields)
 
-            if config_kwargs:
-                client.edit_scout(scout_id=params.scout_id, **config_kwargs)
+def _handle_list_scouts(
+    client: MCPClientAdapter, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    params = ListScoutsInput(**arguments)
+    result = client.list_scouts(limit=params.limit, status=params.status)
+    return result, {}
 
-            # Apply status change after config updates
-            if params.status is not None:
-                client.edit_scout(scout_id=params.scout_id, status=params.status)
 
-            # Return old and new state for diff
-            new_scout = client.get_scout_detail(params.scout_id)
-            return {"old": old_scout, "new": new_scout}, {}
-        case "delete_scout":
-            params = ScoutIdInput(**arguments)
-            result = client.delete_scout(params.scout_id)
-            return result, {"scout_id": params.scout_id}
+def _handle_get_scout_detail(
+    client: MCPClientAdapter, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    params = ScoutIdInput(**arguments)
+    return client.get_scout_detail(params.scout_id), {}
 
-        # Browsing operations
-        case "run_browsing_task":
-            params = BrowsingTaskInput(**arguments)
-            result = client.run_browsing_task(
-                task=params.task,
-                start_url=params.start_url,
-                max_steps=params.max_steps,
-                require_auth=params.require_auth,
-                browser=params.browser,
-                output_schema=output_fields_to_output_schema(params.output_fields),
-                webhook_url=params.webhook_url,
-                webhook_format=params.webhook_format,
-            )
-            return result, {"task_type": "Browsing", "browser": params.browser}
-        case "get_browsing_task_result":
-            params = TaskIdInput(**arguments)
-            return client.get_browsing_task(params.task_id), {"task_type": "Browsing"}
 
-        # Research operations
-        case "run_research_task":
-            params = ResearchTaskInput(**arguments)
-            result = client.run_research_task(
-                query=params.query,
-                user_timezone=params.user_timezone,
-                user_location=params.user_location,
-                browser=params.browser,
-                output_schema=output_fields_to_output_schema(params.output_fields),
-                webhook_url=params.webhook_url,
-                webhook_format=params.webhook_format,
-            )
-            return result, {"task_type": "Research", "browser": params.browser}
-        case "get_research_task_result":
-            params = TaskIdInput(**arguments)
-            return client.get_research_task(params.task_id), {"task_type": "Research"}
+def _handle_get_scout_updates(
+    client: MCPClientAdapter, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    params = GetUpdatesInput(**arguments)
+    result = client.get_scout_updates(
+        scout_id=params.scout_id,
+        cursor=params.cursor,
+        limit=params.limit,
+    )
+    return result, {}
 
-        case _:
-            raise ValueError(f"Unknown tool: {name}")
+
+def _handle_create_scout(
+    client: MCPClientAdapter, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    params = CreateScoutInput(**arguments)
+    result = client.create_scout(
+        query=params.query,
+        output_interval=params.output_interval,
+        webhook_url=params.webhook_url,
+        webhook_format=params.webhook_format,
+        output_schema=output_fields_to_output_schema(params.output_fields),
+        user_timezone=params.user_timezone,
+        skip_email=params.skip_email,
+        start_timestamp=params.start_timestamp,
+        user_location=params.user_location,
+        is_public=params.is_public,
+    )
+    return result, {}
+
+
+def _handle_edit_scout(
+    client: MCPClientAdapter, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    params = EditScoutInput(**arguments)
+
+    # Fetch current state for diff (also validates scout exists)
+    old_scout = client.get_scout_detail(params.scout_id)
+
+    # Build config kwargs, excluding control fields and None values
+    config_kwargs = params.model_dump(
+        exclude={"scout_id", "status", "output_fields"},
+        exclude_none=True,
+    )
+    # output_fields needs transformation to the API's output_schema format
+    if params.output_fields is not None:
+        config_kwargs["output_schema"] = output_fields_to_output_schema(params.output_fields)
+
+    if config_kwargs:
+        client.edit_scout(scout_id=params.scout_id, **config_kwargs)
+
+    # Apply status change after config updates
+    if params.status is not None:
+        client.edit_scout(scout_id=params.scout_id, status=params.status)
+
+    # Return old and new state for diff
+    new_scout = client.get_scout_detail(params.scout_id)
+    return {"old": old_scout, "new": new_scout}, {}
+
+
+def _handle_delete_scout(
+    client: MCPClientAdapter, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    params = ScoutIdInput(**arguments)
+    result = client.delete_scout(params.scout_id)
+    return result, {"scout_id": params.scout_id}
+
+
+def _handle_run_browsing_task(
+    client: MCPClientAdapter, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    params = BrowsingTaskInput(**arguments)
+    result = client.run_browsing_task(
+        task=params.task,
+        start_url=params.start_url,
+        max_steps=params.max_steps,
+        require_auth=params.require_auth,
+        browser=params.browser,
+        output_schema=output_fields_to_output_schema(params.output_fields),
+        webhook_url=params.webhook_url,
+        webhook_format=params.webhook_format,
+    )
+    return result, {"task_type": "Browsing", "browser": params.browser}
+
+
+def _handle_get_browsing_task_result(
+    client: MCPClientAdapter, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    params = TaskIdInput(**arguments)
+    return client.get_browsing_task(params.task_id), {"task_type": "Browsing"}
+
+
+def _handle_run_research_task(
+    client: MCPClientAdapter, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    params = ResearchTaskInput(**arguments)
+    result = client.run_research_task(
+        query=params.query,
+        user_timezone=params.user_timezone,
+        user_location=params.user_location,
+        browser=params.browser,
+        output_schema=output_fields_to_output_schema(params.output_fields),
+        webhook_url=params.webhook_url,
+        webhook_format=params.webhook_format,
+    )
+    return result, {"task_type": "Research", "browser": params.browser}
+
+
+def _handle_get_research_task_result(
+    client: MCPClientAdapter, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    params = TaskIdInput(**arguments)
+    return client.get_research_task(params.task_id), {"task_type": "Research"}
+
+
+# Tool-name -> handler registry, consulted by _handle_tool() above. Mirrors
+# the _TOOL_FORMATTERS registry in formatters.py so the parse/dispatch side
+# of the MCP tool lifecycle is structured the same way as the format side.
+_TOOL_HANDLERS: dict[str, ToolHandler] = {
+    "list_api_usage": _handle_list_api_usage,
+    "list_scouts": _handle_list_scouts,
+    "get_scout_detail": _handle_get_scout_detail,
+    "get_scout_updates": _handle_get_scout_updates,
+    "create_scout": _handle_create_scout,
+    "edit_scout": _handle_edit_scout,
+    "delete_scout": _handle_delete_scout,
+    "run_browsing_task": _handle_run_browsing_task,
+    "get_browsing_task_result": _handle_get_browsing_task_result,
+    "run_research_task": _handle_run_research_task,
+    "get_research_task_result": _handle_get_research_task_result,
+}
 
 
 async def run_server() -> None:
