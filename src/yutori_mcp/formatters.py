@@ -102,6 +102,21 @@ def _truncate(text: str, max_len: int = 60) -> str:
     return text[: max_len - 3] + "..."
 
 
+def _format_yes_no(value: Any) -> str:
+    """Render a boolean-ish value as ``yes``/``no`` for diff display."""
+    return "yes" if value else "no"
+
+
+def _format_query_diff(value: Any) -> str:
+    """Render a query string truncated and wrapped in quotes for diff display."""
+    return f'"{_truncate(value or "", 40)}"'
+
+
+def _format_or_unset(value: Any) -> Any:
+    """Render any value, falling back to ``(not set)`` when missing/empty."""
+    return value or "(not set)"
+
+
 def _scout_platform_url(scout_id: str) -> str:
     """Build the platform URL for viewing a scout."""
     return f"https://platform.yutori.com/scouting/tasks/{scout_id}"
@@ -444,24 +459,12 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
     lines.extend(["", "Changes applied:"])
 
     changes_found = False
-    for field, label in _SCOUT_EDIT_FIELDS:
+    for field, label, fmt in _SCOUT_EDIT_FIELDS:
         old_val = old.get(field)
         new_val = new.get(field)
         if old_val != new_val:
             changes_found = True
-            if field == "output_interval":
-                old_display = _format_interval(old_val)
-                new_display = _format_interval(new_val)
-            elif field in ("skip_email", "is_public"):
-                old_display = "yes" if old_val else "no"
-                new_display = "yes" if new_val else "no"
-            elif field == "query":
-                old_display = f'"{_truncate(old_val or "", 40)}"'
-                new_display = f'"{_truncate(new_val or "", 40)}"'
-            else:
-                old_display = old_val or "(not set)"
-                new_display = new_val or "(not set)"
-            lines.append(f"  • {label}: {old_display} → {new_display}")
+            lines.append(f"  • {label}: {fmt(old_val)} → {fmt(new_val)}")
 
     if not changes_found:
         lines.append("  (no changes detected)")
@@ -618,16 +621,18 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
 
 
 # Scout-edit field comparison list, used by format_scout_edited().
-# Defined at module scope so the tuple list is built once at import time.
+# Each tuple is (response_field, display_label, value_formatter). The formatter
+# is called on both old and new values to produce the per-side diff string, so
+# adding a new editable field is a single append here — no branching in the loop.
 _SCOUT_EDIT_FIELDS = (
-    ("status", "Status"),
-    ("query", "Query"),
-    ("output_interval", "Interval"),
-    ("webhook_url", "Webhook"),
-    ("skip_email", "Skip email"),
-    ("user_timezone", "Timezone"),
-    ("user_location", "Location"),
-    ("is_public", "Public"),
+    ("status", "Status", _format_or_unset),
+    ("query", "Query", _format_query_diff),
+    ("output_interval", "Interval", _format_interval),
+    ("webhook_url", "Webhook", _format_or_unset),
+    ("skip_email", "Skip email", _format_yes_no),
+    ("user_timezone", "Timezone", _format_or_unset),
+    ("user_location", "Location", _format_or_unset),
+    ("is_public", "Public", _format_yes_no),
 )
 
 # Tool-name -> formatter registry, referenced by format_response() above.
