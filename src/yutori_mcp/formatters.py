@@ -192,6 +192,24 @@ def _format_sources(
 # -----------------------------------------------------------------------------
 
 
+def _append_rate_limits(
+    lines: list[str],
+    limits: dict[str, Any],
+    extra_fields: tuple[tuple[str, str], ...] = (),
+) -> None:
+    """Append common rate-limit fields to *lines*.
+
+    Appends requests_today, daily_limit, remaining_requests, any
+    *extra_fields* (each a ``(key, label)`` pair), and reset_at.
+    """
+    lines.append(f"  Requests today: {limits.get('requests_today', 'N/A')}")
+    lines.append(f"  Daily limit: {limits.get('daily_limit', 'N/A')}")
+    lines.append(f"  Remaining: {limits.get('remaining_requests', 'N/A')}")
+    for key, label in extra_fields:
+        lines.append(f"  {label}: {limits.get(key, 'N/A')}")
+    lines.append(f"  Resets at: {limits.get('reset_at', 'N/A')}")
+
+
 def format_usage(response: dict[str, Any], **context: Any) -> str:
     """Format list_api_usage response as readable text."""
     num_active = response.get("num_active_scouts", 0)
@@ -211,20 +229,17 @@ def format_usage(response: dict[str, Any], **context: Any) -> str:
         status = rate_limits.get("status", "unknown")
         lines.append(f"\nAPI Rate Limits ({status}):")
         if status == "available":
-            lines.append(f"  Requests today: {rate_limits.get('requests_today', 'N/A')}")
-            lines.append(f"  Daily limit: {rate_limits.get('daily_limit', 'N/A')}")
-            lines.append(f"  Remaining: {rate_limits.get('remaining_requests', 'N/A')}")
-        lines.append(f"  Resets at: {rate_limits.get('reset_at', 'N/A')}")
+            _append_rate_limits(lines, rate_limits)
+        else:
+            lines.append(f"  Resets at: {rate_limits.get('reset_at', 'N/A')}")
 
     # Navigator rate limits (falls back to deprecated n1_rate_limits on older servers)
     navigator_limits = response.get("navigator_rate_limits") or response.get("n1_rate_limits") or {}
     if navigator_limits:
         lines.append("\nNavigator API Rate Limits:")
-        lines.append(f"  Requests today: {navigator_limits.get('requests_today', 'N/A')}")
-        lines.append(f"  Daily limit: {navigator_limits.get('daily_limit', 'N/A')}")
-        lines.append(f"  Remaining: {navigator_limits.get('remaining_requests', 'N/A')}")
-        lines.append(f"  Per-second limit: {navigator_limits.get('per_second_limit', 'N/A')}")
-        lines.append(f"  Resets at: {navigator_limits.get('reset_at', 'N/A')}")
+        _append_rate_limits(
+            lines, navigator_limits, extra_fields=(("per_second_limit", "Per-second limit"),)
+        )
 
     # Activity
     activity = response.get("activity", {})
@@ -333,7 +348,7 @@ def format_scout_detail(response: dict[str, Any], **context: Any) -> str:
     lines.append(f"  Email notifications: {'disabled' if skip_email else 'enabled'}")
 
     is_public = response.get("is_public", False)
-    lines.append(f"  Public: {'yes' if is_public else 'no'}")
+    lines.append(f"  Public: {_format_yes_no(is_public)}")
 
     if response.get("user_location"):
         lines.append(f"  Location: {response['user_location']}")
@@ -629,6 +644,7 @@ _SCOUT_EDIT_FIELDS = (
     ("query", "Query", _format_query_diff),
     ("output_interval", "Interval", _format_interval),
     ("webhook_url", "Webhook", _format_or_unset),
+    ("webhook_format", "Webhook format", _format_or_unset),
     ("skip_email", "Skip email", _format_yes_no),
     ("user_timezone", "Timezone", _format_or_unset),
     ("user_location", "Location", _format_or_unset),
