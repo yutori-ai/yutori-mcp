@@ -192,6 +192,15 @@ def _format_sources(
 # -----------------------------------------------------------------------------
 
 
+def _format_request_count_lines(limits: dict[str, Any]) -> list[str]:
+    """Format the shared `requests_today / daily_limit / remaining` triplet."""
+    return [
+        f"  Requests today: {limits.get('requests_today', 'N/A')}",
+        f"  Daily limit: {limits.get('daily_limit', 'N/A')}",
+        f"  Remaining: {limits.get('remaining_requests', 'N/A')}",
+    ]
+
+
 def format_usage(response: dict[str, Any], **context: Any) -> str:
     """Format list_api_usage response as readable text."""
     num_active = response.get("num_active_scouts", 0)
@@ -211,18 +220,14 @@ def format_usage(response: dict[str, Any], **context: Any) -> str:
         status = rate_limits.get("status", "unknown")
         lines.append(f"\nAPI Rate Limits ({status}):")
         if status == "available":
-            lines.append(f"  Requests today: {rate_limits.get('requests_today', 'N/A')}")
-            lines.append(f"  Daily limit: {rate_limits.get('daily_limit', 'N/A')}")
-            lines.append(f"  Remaining: {rate_limits.get('remaining_requests', 'N/A')}")
+            lines.extend(_format_request_count_lines(rate_limits))
         lines.append(f"  Resets at: {rate_limits.get('reset_at', 'N/A')}")
 
     # Navigator rate limits (falls back to deprecated n1_rate_limits on older servers)
     navigator_limits = response.get("navigator_rate_limits") or response.get("n1_rate_limits") or {}
     if navigator_limits:
         lines.append("\nNavigator API Rate Limits:")
-        lines.append(f"  Requests today: {navigator_limits.get('requests_today', 'N/A')}")
-        lines.append(f"  Daily limit: {navigator_limits.get('daily_limit', 'N/A')}")
-        lines.append(f"  Remaining: {navigator_limits.get('remaining_requests', 'N/A')}")
+        lines.extend(_format_request_count_lines(navigator_limits))
         lines.append(f"  Per-second limit: {navigator_limits.get('per_second_limit', 'N/A')}")
         lines.append(f"  Resets at: {navigator_limits.get('reset_at', 'N/A')}")
 
