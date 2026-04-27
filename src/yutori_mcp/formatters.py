@@ -503,20 +503,17 @@ def format_scout_deleted(response: dict[str, Any], **context: Any) -> str:
 
 
 def format_task_started(response: dict[str, Any], **context: Any) -> str:
-    """Format run_*_task response showing task ID and next steps."""
+    """Format run_*_task response showing task ID and next steps.
+
+    ``task_type`` (``"Browsing"`` or ``"Research"``) must be supplied via
+    ``context``. The public ``_TOOL_FORMATTERS`` registry only routes the
+    ``run_browsing_task`` / ``run_research_task`` tools to this formatter,
+    and both server handlers stamp the field explicitly.
+    """
     task_id = response.get("task_id", "")
     status = response.get("status", "queued")
     view_url = response.get("view_url", "")
-
-    # Determine task type from context or response
-    task_type = context.get("task_type", "")
-    if not task_type:
-        if "query" in response:
-            task_type = "Research"
-        elif "task" in response or "start_url" in response:
-            task_type = "Browsing"
-        else:
-            task_type = "Task"
+    task_type = context["task_type"]
 
     browser = context.get("browser")
     browser_note = " (using local desktop browser)" if browser == "local" else ""
@@ -545,16 +542,9 @@ def format_task_started(response: dict[str, Any], **context: Any) -> str:
         lines.append(f"View progress: {view_url}")
 
     lines.append("")
-
-    # Determine the right poll function
-    if task_type == "Research":
-        poll_fn = "get_research_task_result"
-    elif task_type == "Browsing":
-        poll_fn = "get_browsing_task_result"
-    else:
-        poll_fn = "get_task_result"
-
-    lines.append(f'Poll with {poll_fn}(task_id="{task_id}") to check status.')
+    lines.append(
+        f'Poll with {_TASK_POLL_FNS[task_type]}(task_id="{task_id}") to check status.'
+    )
 
     return "\n".join(lines)
 
@@ -639,6 +629,14 @@ _SCOUT_EDIT_FIELDS = (
     ("user_location", "Location", _format_or_unset),
     ("is_public", "Public", _format_yes_no),
 )
+
+# Map task_type (as stamped by run_browsing_task / run_research_task handlers
+# in server.py) to the polling tool name surfaced in the user-facing hint
+# emitted by format_task_started().
+_TASK_POLL_FNS: dict[str, str] = {
+    "Research": "get_research_task_result",
+    "Browsing": "get_browsing_task_result",
+}
 
 # Tool-name -> formatter registry, referenced by format_response() above.
 # Defined at module scope (after all formatters) so the dict is built once at
