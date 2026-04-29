@@ -57,6 +57,15 @@ def format_response(tool_name: str, response: dict[str, Any], **context: Any) ->
     return dict_to_markdown(response)
 
 
+def _format_scout_name(scout: dict[str, Any], *, fallback: str = "") -> str:
+    """Return ``display_name`` if set, else ``query[:40]``.
+
+    ``fallback`` is used only when the ``query`` key is missing from ``scout``,
+    matching the historical pattern ``scout.get("display_name") or scout.get("query", fallback)[:40]``.
+    """
+    return scout.get("display_name") or scout.get("query", fallback)[:40]
+
+
 def _format_interval(seconds: int | None) -> str:
     """Convert interval in seconds to human-readable string."""
     if seconds is None:
@@ -278,7 +287,7 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
 
     # Format each scout
     for i, scout in enumerate(scouts, 1):
-        name = scout.get("display_name") or scout.get("query", "Untitled")[:40]
+        name = _format_scout_name(scout, fallback="Untitled")
         status = scout.get("status", "unknown")
         query = scout.get("query", "")
         scout_id = scout.get("id", "")
@@ -417,7 +426,7 @@ def format_scout_updates(response: dict[str, Any], **context: Any) -> str:
 
 def format_scout_created(response: dict[str, Any], **context: Any) -> str:
     """Format create_scout response as confirmation."""
-    name = response.get("display_name") or response.get("query", "")[:40]
+    name = _format_scout_name(response)
     scout_id = response.get("id", "")
     status = response.get("status", "active")
     query = response.get("query", "")
@@ -446,7 +455,7 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
 
     # If we don't have old state, just show current state
     if not old:
-        name = new.get("display_name") or new.get("query", "")[:40]
+        name = _format_scout_name(new)
         scout_id = new.get("id", "")
         status = new.get("status", "unknown")
         lines = ["Scout updated successfully.", ""]
@@ -456,7 +465,7 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
         return "\n".join(lines)
 
     # Show diff
-    name = new.get("display_name") or new.get("query", "")[:40]
+    name = _format_scout_name(new)
     scout_id = new.get("id", "")
 
     lines = ["Scout updated successfully.", ""]
