@@ -16,6 +16,8 @@ def _check_webhook_https(v: str | None) -> str | None:
 
 HttpsWebhookUrl = Annotated[str | None, AfterValidator(_check_webhook_https)]
 
+WebhookFormat = Literal["scout", "slack", "zapier"] | None
+
 
 class UsageInput(BaseModel):
     """Input for retrieving API usage statistics."""
@@ -57,7 +59,7 @@ class CreateScoutInput(BaseModel):
             "Must use https://. Confirm the URL with the user before setting."
         ),
     )
-    webhook_format: Literal["scout", "slack", "zapier"] | None = Field(
+    webhook_format: WebhookFormat = Field(
         default=None,
         description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
     )
@@ -117,7 +119,7 @@ class EditScoutInput(BaseModel):
         default=None,
         description="Updated HTTPS webhook URL. Must use https://. Confirm the URL with the user before setting.",
     )
-    webhook_format: Literal["scout", "slack", "zapier"] | None = Field(
+    webhook_format: WebhookFormat = Field(
         default=None,
         description="Updated webhook format: 'scout', 'slack', or 'zapier'",
     )
@@ -248,7 +250,7 @@ class BrowsingTaskInput(BaseModel):
         default=None,
         description="HTTPS URL to receive webhook notification when task completes. Must use https://.",
     )
-    webhook_format: Literal["scout", "slack", "zapier"] | None = Field(
+    webhook_format: WebhookFormat = Field(
         default=None,
         description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
     )
@@ -302,7 +304,7 @@ class ResearchTaskInput(BaseModel):
         default=None,
         description="HTTPS URL to receive webhook notification when research completes. Must use https://.",
     )
-    webhook_format: Literal["scout", "slack", "zapier"] | None = Field(
+    webhook_format: WebhookFormat = Field(
         default=None,
         description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
     )
