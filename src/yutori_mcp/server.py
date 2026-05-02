@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NoReturn
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -331,11 +331,13 @@ _AUTH_SUBCOMMANDS: dict[str, str] = {
 }
 
 
-def _handle_auth_command(command: str) -> None:
+def _handle_auth_command(command: str) -> NoReturn:
     """Run an auth subcommand (login/logout/status) and exit.
 
     Imports ``yutori.auth`` lazily so the default ``yutori-mcp`` server-startup
-    path does not pay the auth-flow import cost.
+    path does not pay the auth-flow import cost. Always raises ``SystemExit``;
+    the ``NoReturn`` annotation lets ``main()`` rely on that contract instead
+    of guarding the call with a ``return``.
     """
     from yutori.auth import clear_config, get_auth_status, run_login_flow
 
@@ -354,18 +356,22 @@ def _handle_auth_command(command: str) -> None:
         print("Logged out successfully.")
         raise SystemExit(0)
 
-    # status
-    status = get_auth_status()
-    if status.authenticated:
-        print(f"Authenticated (API key: {status.masked_key})")
-        if status.source == "config_file":
-            print(f"  Source: {status.config_path}")
-        elif status.source == "env_var":
-            print("  Source: YUTORI_API_KEY environment variable")
-    else:
-        print("Not authenticated. Run 'uvx yutori-mcp login' to authenticate.")
-        raise SystemExit(1)
-    raise SystemExit(0)
+    if command == "status":
+        status = get_auth_status()
+        if status.authenticated:
+            print(f"Authenticated (API key: {status.masked_key})")
+            if status.source == "config_file":
+                print(f"  Source: {status.config_path}")
+            elif status.source == "env_var":
+                print("  Source: YUTORI_API_KEY environment variable")
+        else:
+            print("Not authenticated. Run 'uvx yutori-mcp login' to authenticate.")
+            raise SystemExit(1)
+        raise SystemExit(0)
+
+    # Defensive: every name in _AUTH_SUBCOMMANDS must have a branch above.
+    # Reaching here means the dispatch table and this helper drifted apart.
+    raise ValueError(f"Unhandled auth subcommand: {command!r}")
 
 
 def main() -> None:
