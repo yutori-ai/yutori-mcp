@@ -22,6 +22,21 @@ def _has_value(value: Any) -> bool:
     return value is not None and value != ""
 
 
+def _get_first(obj: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    """Return the first truthy value from ``obj`` for ``keys``, else ``default``.
+
+    Equivalent to ``obj.get(k1) or obj.get(k2) or ... or default``, but
+    expresses the "try these keys in order" intent more clearly. Used to
+    handle field-name aliases as the API evolves (e.g. ``navigator_*`` keys
+    superseding deprecated ``n1_*`` keys).
+    """
+    for key in keys:
+        value = obj.get(key)
+        if value:
+            return value
+    return default
+
+
 def _to_markdown_lines(obj: Any, level: int = 0) -> list[str]:
     """Recursively convert obj to markdown lines with indentation."""
     lines: list[str] = []
@@ -185,7 +200,7 @@ def _format_sources(
     Checks for both "sources" and "citations" keys. Each source can be
     a dict with url/title keys or a plain string.
     """
-    sources = response.get("sources") or response.get("citations")
+    sources = _get_first(response, "sources", "citations")
     if not sources:
         return []
 
@@ -239,7 +254,7 @@ def format_usage(response: dict[str, Any], **context: Any) -> str:
         lines.append(f"  Resets at: {rate_limits.get('reset_at', 'N/A')}")
 
     # Navigator rate limits (falls back to deprecated n1_rate_limits on older servers)
-    navigator_limits = response.get("navigator_rate_limits") or response.get("n1_rate_limits") or {}
+    navigator_limits = _get_first(response, "navigator_rate_limits", "n1_rate_limits", default={})
     if navigator_limits:
         lines.append("\nNavigator API Rate Limits:")
         lines.extend(_format_request_count_lines(navigator_limits))
@@ -381,17 +396,11 @@ def format_scout_updates(response: dict[str, Any], **context: Any) -> str:
         lines.append("")
         lines.append(f"--- Update #{i} ---")
 
-        timestamp = _format_datetime(
-            update.get("created_at") or update.get("timestamp")
-        )
+        timestamp = _format_datetime(_get_first(update, "created_at", "timestamp"))
         lines.append(f"Date: {timestamp}")
 
         # Handle different update formats
-        content = (
-            update.get("content")
-            or update.get("formatted_output")
-            or update.get("report")
-        )
+        content = _get_first(update, "content", "formatted_output", "report")
         if content:
             lines.append("")
             lines.append(_EXTERNAL_CONTENT_START)
@@ -596,7 +605,7 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
 
     # Handle failed state
     if status == "failed":
-        error = response.get("error") or response.get("message") or "Unknown error"
+        error = _get_first(response, "error", "message", default="Unknown error")
         lines = _task_status_lines(
             "Task failed.",
             task_id=task_id,
@@ -613,7 +622,7 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
     )
 
     # Add result content
-    result = response.get("result") or response.get("output") or response.get("content")
+    result = _get_first(response, "result", "output", "content")
     if result:
         lines.append("")
         lines.append("Result:")
