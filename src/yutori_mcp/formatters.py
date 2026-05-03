@@ -649,11 +649,17 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
 # Each tuple is (response_field, display_label, value_formatter). The formatter
 # is called on both old and new values to produce the per-side diff string, so
 # adding a new editable field is a single append here — no branching in the loop.
+#
+# This table must stay in sync with the editable fields of
+# ``yutori_mcp.schemas.EditScoutInput`` (excluding ``scout_id``). The drift
+# guard test in ``tests/test_schemas.py`` enforces that invariant.
 _SCOUT_EDIT_FIELDS = (
     ("status", "Status", _format_or_unset),
     ("query", "Query", _format_query_diff),
     ("output_interval", "Interval", _format_interval),
     ("webhook_url", "Webhook", _format_or_unset),
+    ("webhook_format", "Webhook format", _format_or_unset),
+    ("output_fields", "Output fields", _format_or_unset),
     ("skip_email", "Skip email", _format_yes_no),
     ("user_timezone", "Timezone", _format_or_unset),
     ("user_location", "Location", _format_or_unset),

@@ -3,6 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
+from yutori_mcp.formatters import _SCOUT_EDIT_FIELDS
 from yutori_mcp.schemas import (
     BrowsingTaskInput,
     CreateScoutInput,
@@ -184,6 +185,22 @@ class TestEditScoutInput:
             output_fields=["title", "description"],
         )
         assert data.output_fields == ["title", "description"]
+
+    def test_diff_fields_match_schema(self):
+        """_SCOUT_EDIT_FIELDS must list every editable field on EditScoutInput.
+
+        Drift guard: when a new field is added to EditScoutInput, it must
+        also be added to _SCOUT_EDIT_FIELDS in formatters.py so that edits
+        to it appear in the per-field diff that format_scout_edited returns
+        to the LLM client. Otherwise the change is silently invisible.
+        """
+        diff_fields = {field for field, _label, _fmt in _SCOUT_EDIT_FIELDS}
+        editable_fields = set(EditScoutInput.model_fields) - {"scout_id"}
+        assert diff_fields == editable_fields, (
+            "Mismatch between _SCOUT_EDIT_FIELDS and EditScoutInput. "
+            f"Missing from _SCOUT_EDIT_FIELDS: {editable_fields - diff_fields}. "
+            f"Extra in _SCOUT_EDIT_FIELDS: {diff_fields - editable_fields}."
+        )
 
 
 class TestBrowsingTaskInput:
