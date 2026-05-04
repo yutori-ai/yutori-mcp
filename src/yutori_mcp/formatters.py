@@ -433,7 +433,7 @@ def format_scout_updates(response: dict[str, Any], **context: Any) -> str:
             lines.append(_EXTERNAL_CONTENT_START)
             for finding in findings[:5]:  # Limit to 5
                 if isinstance(finding, dict):
-                    title = finding.get("title") or finding.get("summary", "")
+                    title = _get_first(finding, "title", "summary", default="")
                     lines.append(f"  • {_truncate(title, 80)}")
                 else:
                     lines.append(f"  • {_truncate(str(finding), 80)}")
