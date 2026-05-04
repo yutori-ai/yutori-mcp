@@ -132,6 +132,21 @@ def _truncate(text: str, max_len: int = 60) -> str:
     return text[: max_len - 3] + "..."
 
 
+def _append_more_indicator(
+    lines: list[str], total: int, shown: int, *, indent: str = "  "
+) -> None:
+    """Append a ``{indent}... and N more`` line when ``total`` exceeds ``shown``.
+
+    Centralizes the "iterate first N items, then summarize the remainder"
+    truncation message used by ``_format_sources``, ``format_usage``'s active
+    scout list, and ``format_scout_updates``'s findings block. No-op when
+    nothing was truncated.
+    """
+    remaining = total - shown
+    if remaining > 0:
+        lines.append(f"{indent}... and {remaining} more")
+
+
 def _format_yes_no(value: Any) -> str:
     """Render a boolean-ish value as ``yes``/``no`` for diff display."""
     return "yes" if value else "no"
@@ -212,8 +227,7 @@ def _format_sources(
             lines.append(f"{indent}- {title}: {url}")
         else:
             lines.append(f"{indent}- {source}")
-    if len(sources) > max_items:
-        lines.append(f"{indent}... and {len(sources) - max_items} more")
+    _append_more_indicator(lines, len(sources), max_items, indent=indent)
     return lines
 
 
@@ -241,8 +255,7 @@ def format_usage(response: dict[str, Any], **context: Any) -> str:
     if active_ids:
         for sid in active_ids[:5]:
             lines.append(f"  - {sid}")
-        if len(active_ids) > 5:
-            lines.append(f"  ... and {len(active_ids) - 5} more")
+        _append_more_indicator(lines, len(active_ids), 5)
 
     # Rate limits
     rate_limits = response.get("rate_limits", {})
@@ -424,8 +437,7 @@ def format_scout_updates(response: dict[str, Any], **context: Any) -> str:
                     lines.append(f"  • {_truncate(title, 80)}")
                 else:
                     lines.append(f"  • {_truncate(str(finding), 80)}")
-            if len(findings) > 5:
-                lines.append(f"  ... and {len(findings) - 5} more")
+            _append_more_indicator(lines, len(findings), 5)
             lines.append(_EXTERNAL_CONTENT_END)
 
         lines.extend(_format_sources(update))
