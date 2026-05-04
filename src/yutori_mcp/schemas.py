@@ -18,6 +18,8 @@ HttpsWebhookUrl = Annotated[str | None, AfterValidator(_check_webhook_https)]
 
 WebhookFormat = Literal["scout", "slack", "zapier"] | None
 
+ScoutStatus = Literal["active", "paused", "done"] | None
+
 
 class UsageInput(BaseModel):
     """Input for retrieving API usage statistics."""
@@ -99,7 +101,7 @@ class EditScoutInput(BaseModel):
     """Input for editing an existing scout or changing its status."""
 
     scout_id: str = Field(..., description="The scout's unique identifier (UUID)")
-    status: Literal["active", "paused", "done"] | None = Field(
+    status: ScoutStatus = Field(
         default=None,
         description=(
             "Change scout status: 'active' (resume monitoring), "
@@ -172,7 +174,7 @@ class ListScoutsInput(BaseModel):
         le=100,
         description="Maximum number of scouts to return (1-100). Default: 10",
     )
-    status: Literal["active", "paused", "done"] | None = Field(
+    status: ScoutStatus = Field(
         default=None,
         description="Filter by status: 'active', 'paused', or 'done'",
     )
