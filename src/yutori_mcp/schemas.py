@@ -20,6 +20,13 @@ WebhookFormat = Literal["scout", "slack", "zapier"] | None
 
 ScoutStatus = Literal["active", "paused", "done"] | None
 
+# Shared field descriptions. Defined once so the three CreateScout/Browsing/Research
+# (and 3x ScoutId) call sites cannot drift out of sync as the schemas evolve.
+_SCOUT_ID_DESCRIPTION = "The scout's unique identifier (UUID)"
+_WEBHOOK_FORMAT_DESCRIPTION = (
+    "Webhook payload format: 'scout' (default), 'slack', or 'zapier'"
+)
+
 
 class UsageInput(BaseModel):
     """Input for retrieving API usage statistics."""
@@ -63,7 +70,7 @@ class CreateScoutInput(BaseModel):
     )
     webhook_format: WebhookFormat = Field(
         default=None,
-        description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
+        description=_WEBHOOK_FORMAT_DESCRIPTION,
     )
     output_fields: list[str] | None = Field(
         default=None,
@@ -100,7 +107,7 @@ class CreateScoutInput(BaseModel):
 class EditScoutInput(BaseModel):
     """Input for editing an existing scout or changing its status."""
 
-    scout_id: str = Field(..., description="The scout's unique identifier (UUID)")
+    scout_id: str = Field(..., description=_SCOUT_ID_DESCRIPTION)
     status: ScoutStatus = Field(
         default=None,
         description=(
@@ -162,7 +169,7 @@ class EditScoutInput(BaseModel):
 class ScoutIdInput(BaseModel):
     """Input for operations on a specific scout."""
 
-    scout_id: str = Field(..., description="The scout's unique identifier (UUID)")
+    scout_id: str = Field(..., description=_SCOUT_ID_DESCRIPTION)
 
 
 class ListScoutsInput(BaseModel):
@@ -183,7 +190,7 @@ class ListScoutsInput(BaseModel):
 class GetUpdatesInput(BaseModel):
     """Input for retrieving scout updates."""
 
-    scout_id: str = Field(..., description="The scout's unique identifier (UUID)")
+    scout_id: str = Field(..., description=_SCOUT_ID_DESCRIPTION)
     cursor: str | None = Field(
         default=None,
         description="Pagination cursor from a previous response",
@@ -254,7 +261,7 @@ class BrowsingTaskInput(BaseModel):
     )
     webhook_format: WebhookFormat = Field(
         default=None,
-        description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
+        description=_WEBHOOK_FORMAT_DESCRIPTION,
     )
 
 
@@ -308,5 +315,5 @@ class ResearchTaskInput(BaseModel):
     )
     webhook_format: WebhookFormat = Field(
         default=None,
-        description="Webhook payload format: 'scout' (default), 'slack', or 'zapier'",
+        description=_WEBHOOK_FORMAT_DESCRIPTION,
     )
