@@ -26,6 +26,7 @@ _SCOUT_ID_DESCRIPTION = "The scout's unique identifier (UUID)"
 _WEBHOOK_FORMAT_DESCRIPTION = (
     "Webhook payload format: 'scout' (default), 'slack', or 'zapier'"
 )
+_IS_PUBLIC_DESCRIPTION = "Whether scout results are publicly accessible"
 
 
 class UsageInput(BaseModel):
@@ -100,7 +101,7 @@ class CreateScoutInput(BaseModel):
     )
     is_public: bool | None = Field(
         default=None,
-        description="Whether scout results are publicly accessible",
+        description=_IS_PUBLIC_DESCRIPTION,
     )
 
 
@@ -155,7 +156,7 @@ class EditScoutInput(BaseModel):
     )
     is_public: bool | None = Field(
         default=None,
-        description="Whether scout results are publicly accessible",
+        description=_IS_PUBLIC_DESCRIPTION,
     )
 
     @model_validator(mode="after")
