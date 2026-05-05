@@ -272,13 +272,6 @@ def _handle_run_browsing_task(
     }
 
 
-def _handle_get_browsing_task_result(
-    client: MCPClientAdapter, arguments: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    params = TaskIdInput(**arguments)
-    return client.get_browsing_task(params.task_id), {"task_type": "Browsing"}
-
-
 def _handle_run_research_task(
     client: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -288,11 +281,23 @@ def _handle_run_research_task(
     }
 
 
-def _handle_get_research_task_result(
-    client: MCPClientAdapter, arguments: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    params = TaskIdInput(**arguments)
-    return client.get_research_task(params.task_id), {"task_type": "Research"}
+def _make_get_task_result_handler(task_type: str, client_method: str) -> ToolHandler:
+    """Build a ``get_*_task_result`` handler that defers only by adapter method + task_type.
+
+    The browsing and research variants previously had two near-identical
+    handlers; both parse :class:`TaskIdInput`, call a single-argument
+    adapter method, and stamp the matching ``task_type`` into the formatter
+    context. Generating both from one factory keeps the registry as the
+    single place that pairs the tool name with its task type.
+    """
+
+    def handler(
+        client: MCPClientAdapter, arguments: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        params = TaskIdInput(**arguments)
+        return getattr(client, client_method)(params.task_id), {"task_type": task_type}
+
+    return handler
 
 
 # Tool-name -> handler registry, consulted by _handle_tool() above. Mirrors
@@ -307,9 +312,9 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
     "edit_scout": _handle_edit_scout,
     "delete_scout": _handle_delete_scout,
     "run_browsing_task": _handle_run_browsing_task,
-    "get_browsing_task_result": _handle_get_browsing_task_result,
+    "get_browsing_task_result": _make_get_task_result_handler("Browsing", "get_browsing_task"),
     "run_research_task": _handle_run_research_task,
-    "get_research_task_result": _handle_get_research_task_result,
+    "get_research_task_result": _make_get_task_result_handler("Research", "get_research_task"),
 }
 
 
