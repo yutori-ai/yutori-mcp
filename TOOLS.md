@@ -234,7 +234,7 @@ Changes applied:
 | `output_fields` | No | List of field names for structured output |
 | `user_timezone` | No | Timezone for scheduling |
 | `user_location` | No | Location for geo-relevant searches |
-| `is_public` | No | Whether results are public |
+| `is_public` | No | Whether scout results are publicly accessible |
 | `skip_email` | No | Skip email notifications |
 
 ### delete_scout
