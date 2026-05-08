@@ -29,6 +29,30 @@ _WEBHOOK_FORMAT_DESCRIPTION = (
 _IS_PUBLIC_DESCRIPTION = "Whether scout results are publicly accessible"
 
 
+def _output_fields_description(example: list[str], docs_slug: str | None = None) -> str:
+    """Build the shared `output_fields` field description.
+
+    Four input schemas (CreateScout, EditScout, BrowsingTask, ResearchTask)
+    expose the same `output_fields` shape with the same boilerplate prose;
+    only the example field names and the optional docs link differ. This
+    helper keeps the wording in one place so the four call sites cannot
+    drift as we tweak the description over time.
+
+    `docs_slug` is the per-tool fragment after `https://docs.yutori.com/reference/`.
+    Pass ``None`` to omit the trailing "(see example at: ...)" link, matching
+    the existing EditScoutInput description which has no docs link today.
+    """
+    base = (
+        "Optional: Extract structured data as an array of objects with these field names. "
+        f"Example: {example!r}. "
+        "If omitted, returns human-readable text. "
+        "For complex schemas, call the Yutori REST API directly"
+    )
+    if docs_slug is None:
+        return base
+    return base + f" (see example at: https://docs.yutori.com/reference/{docs_slug})."
+
+
 class UsageInput(BaseModel):
     """Input for retrieving API usage statistics."""
 
@@ -75,12 +99,9 @@ class CreateScoutInput(BaseModel):
     )
     output_fields: list[str] | None = Field(
         default=None,
-        description=(
-            "Optional: Extract structured data as an array of objects with these field names. "
-            "Example: ['headline', 'summary', 'url']. "
-            "If omitted, returns human-readable text. "
-            "For complex schemas, call the Yutori REST API directly (see example at: "
-            "https://docs.yutori.com/reference/scouts-create#using-scheduling-webhooks-and-a-structured-output-schema)."
+        description=_output_fields_description(
+            ["headline", "summary", "url"],
+            docs_slug="scouts-create#using-scheduling-webhooks-and-a-structured-output-schema",
         ),
     )
     user_timezone: str | None = Field(
@@ -135,12 +156,7 @@ class EditScoutInput(BaseModel):
     )
     output_fields: list[str] | None = Field(
         default=None,
-        description=(
-            "Optional: Extract structured data as an array of objects with these field names. "
-            "Example: ['headline', 'summary', 'url']. "
-            "If omitted, returns human-readable text. "
-            "For complex schemas, call the Yutori REST API directly"
-        ),
+        description=_output_fields_description(["headline", "summary", "url"]),
     )
     skip_email: bool | None = Field(
         default=None,
@@ -248,12 +264,9 @@ class BrowsingTaskInput(BaseModel):
     )
     output_fields: list[str] | None = Field(
         default=None,
-        description=(
-            "Optional: Extract structured data as an array of objects with these field names. "
-            "Example: ['name', 'title', 'email']. "
-            "If omitted, returns human-readable text. "
-            "For complex schemas, call the Yutori REST API directly (see example at: "
-            "https://docs.yutori.com/reference/browsing-create#using-webhooks-and-a-structured-output-schema)."
+        description=_output_fields_description(
+            ["name", "title", "email"],
+            docs_slug="browsing-create#using-webhooks-and-a-structured-output-schema",
         ),
     )
     webhook_url: HttpsWebhookUrl = Field(
@@ -302,12 +315,9 @@ class ResearchTaskInput(BaseModel):
     )
     output_fields: list[str] | None = Field(
         default=None,
-        description=(
-            "Optional: Extract structured data as an array of objects with these field names. "
-            "Example: ['title', 'summary', 'source_url']. "
-            "If omitted, returns human-readable text. "
-            "For complex schemas, call the Yutori REST API directly (see example at: "
-            "https://docs.yutori.com/reference/research-create#using-webhooks-and-a-structured-output-schema)."
+        description=_output_fields_description(
+            ["title", "summary", "source_url"],
+            docs_slug="research-create#using-webhooks-and-a-structured-output-schema",
         ),
     )
     webhook_url: HttpsWebhookUrl = Field(
