@@ -14,6 +14,7 @@ from yutori_mcp.schemas import (
     ScoutIdInput,
     TaskIdInput,
     UsageInput,
+    _output_fields_description,
 )
 
 
@@ -377,13 +378,12 @@ class TestResearchTaskInput:
         data = ResearchTaskInput(query="Research AI")
         assert data.output_fields is None
 
+
 class TestOutputFieldsDescription:
     """Tests for the _output_fields_description helper extracted in PR #94."""
 
     def test_without_docs_slug(self):
         """Output omits the trailing docs link when docs_slug is None."""
-        from yutori_mcp.schemas import _output_fields_description
-
         result = _output_fields_description(["headline", "summary", "url"])
         assert "Optional: Extract structured data" in result
         assert "['headline', 'summary', 'url']" in result
@@ -392,8 +392,6 @@ class TestOutputFieldsDescription:
 
     def test_with_docs_slug(self):
         """Output includes the full docs URL when docs_slug is provided."""
-        from yutori_mcp.schemas import _output_fields_description
-
         result = _output_fields_description(
             ["name", "title", "email"],
             docs_slug="browsing-create#using-webhooks-and-a-structured-output-schema",
@@ -407,14 +405,6 @@ class TestOutputFieldsDescription:
 
     def test_all_schemas_use_helper(self):
         """All four output_fields descriptions are produced by the helper."""
-        from yutori_mcp.schemas import (
-            BrowsingTaskInput,
-            CreateScoutInput,
-            EditScoutInput,
-            ResearchTaskInput,
-            _output_fields_description,
-        )
-
         for model_cls in (CreateScoutInput, EditScoutInput, BrowsingTaskInput, ResearchTaskInput):
             desc = model_cls.model_fields["output_fields"].description
             assert desc is not None

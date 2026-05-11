@@ -152,7 +152,7 @@ class EditScoutInput(BaseModel):
     )
     webhook_format: WebhookFormat = Field(
         default=None,
-        description="Updated webhook format: 'scout', 'slack', or 'zapier'",
+        description=_WEBHOOK_FORMAT_DESCRIPTION,
     )
     output_fields: list[str] | None = Field(
         default=None,
