@@ -279,6 +279,8 @@ def format_usage(response: dict[str, Any], **context: Any) -> str:
     if activity:
         period = activity.get("period", "24h")
         # `navigator_calls` is the primary key; `n1_calls` is the deprecated alias.
+        # Not routed through _get_first() because zero is a valid count and
+        # _get_first()'s truthiness check would skip it.
         navigator_calls = activity.get("navigator_calls", activity.get("n1_calls", 0))
         lines.append(f"\nActivity ({period}):")
         lines.append(f"  Scout runs: {activity.get('scout_runs', 0)}")
