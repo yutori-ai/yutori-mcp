@@ -262,23 +262,32 @@ def _handle_delete_scout(
     return result, {"scout_id": params.scout_id}
 
 
-def _handle_run_browsing_task(
-    client: MCPClientAdapter, arguments: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    params = BrowsingTaskInput(**arguments)
-    return client.run_browsing_task(**_scout_kwargs(params)), {
-        "task_type": "Browsing",
-        "browser": params.browser,
-    }
+def _make_run_task_handler(
+    task_type: str,
+    input_class: type[BaseModel],
+    client_method: str,
+    include_browser: bool = False,
+) -> ToolHandler:
+    """Build a ``run_*_task`` handler that defers only by input schema + adapter method + task_type.
 
+    The browsing and research variants previously had two near-identical
+    handlers; both parse a task-input schema, call ``_scout_kwargs(params)``
+    on the adapter, and stamp the matching ``task_type`` into the formatter
+    context. ``include_browser=True`` additionally surfaces ``params.browser``
+    so ``format_task_started`` can annotate the local/cloud distinction
+    (research has no browser knob, so it omits the field).
+    """
 
-def _handle_run_research_task(
-    client: MCPClientAdapter, arguments: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    params = ResearchTaskInput(**arguments)
-    return client.run_research_task(**_scout_kwargs(params)), {
-        "task_type": "Research",
-    }
+    def handler(
+        client: MCPClientAdapter, arguments: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        params = input_class(**arguments)
+        context: dict[str, Any] = {"task_type": task_type}
+        if include_browser:
+            context["browser"] = params.browser  # type: ignore[attr-defined]
+        return getattr(client, client_method)(**_scout_kwargs(params)), context
+
+    return handler
 
 
 def _make_get_task_result_handler(task_type: str, client_method: str) -> ToolHandler:
@@ -311,9 +320,13 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
     "create_scout": _handle_create_scout,
     "edit_scout": _handle_edit_scout,
     "delete_scout": _handle_delete_scout,
-    "run_browsing_task": _handle_run_browsing_task,
+    "run_browsing_task": _make_run_task_handler(
+        "Browsing", BrowsingTaskInput, "run_browsing_task", include_browser=True
+    ),
     "get_browsing_task_result": _make_get_task_result_handler("Browsing", "get_browsing_task"),
-    "run_research_task": _handle_run_research_task,
+    "run_research_task": _make_run_task_handler(
+        "Research", ResearchTaskInput, "run_research_task"
+    ),
     "get_research_task_result": _make_get_task_result_handler("Research", "get_research_task"),
 }
 
