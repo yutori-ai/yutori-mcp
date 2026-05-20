@@ -202,11 +202,24 @@ def _handle_list_api_usage(
     return result, {}
 
 
-def _handle_list_scouts(
-    client: MCPClientAdapter, arguments: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    params = ListScoutsInput(**arguments)
-    return client.list_scouts(**_scout_kwargs(params)), {}
+def _make_scout_kwargs_handler(
+    input_class: type[BaseModel], client_method: str
+) -> ToolHandler:
+    """Build a handler that parses an input schema and forwards it as scout kwargs.
+
+    Used for tools whose handler body is the one-liner
+    ``client.METHOD(**_scout_kwargs(params))``. Generating these from one
+    factory keeps the registry as the single place that pairs the tool name
+    with its input schema and adapter method.
+    """
+
+    def handler(
+        client: MCPClientAdapter, arguments: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        params = input_class(**arguments)
+        return getattr(client, client_method)(**_scout_kwargs(params)), {}
+
+    return handler
 
 
 def _handle_get_scout_detail(
@@ -214,20 +227,6 @@ def _handle_get_scout_detail(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     params = ScoutIdInput(**arguments)
     return client.get_scout_detail(params.scout_id), {}
-
-
-def _handle_get_scout_updates(
-    client: MCPClientAdapter, arguments: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    params = GetUpdatesInput(**arguments)
-    return client.get_scout_updates(**_scout_kwargs(params)), {}
-
-
-def _handle_create_scout(
-    client: MCPClientAdapter, arguments: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    params = CreateScoutInput(**arguments)
-    return client.create_scout(**_scout_kwargs(params)), {}
 
 
 def _handle_edit_scout(
@@ -314,10 +313,10 @@ def _make_get_task_result_handler(task_type: str, client_method: str) -> ToolHan
 # of the MCP tool lifecycle is structured the same way as the format side.
 _TOOL_HANDLERS: dict[str, ToolHandler] = {
     "list_api_usage": _handle_list_api_usage,
-    "list_scouts": _handle_list_scouts,
+    "list_scouts": _make_scout_kwargs_handler(ListScoutsInput, "list_scouts"),
     "get_scout_detail": _handle_get_scout_detail,
-    "get_scout_updates": _handle_get_scout_updates,
-    "create_scout": _handle_create_scout,
+    "get_scout_updates": _make_scout_kwargs_handler(GetUpdatesInput, "get_scout_updates"),
+    "create_scout": _make_scout_kwargs_handler(CreateScoutInput, "create_scout"),
     "edit_scout": _handle_edit_scout,
     "delete_scout": _handle_delete_scout,
     "run_browsing_task": _make_run_task_handler(
