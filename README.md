@@ -40,7 +40,7 @@ Python 3.10 or higher is required (`uv` manages this automatically for most inst
 For the quickstart below, Node.js is also required (for `npx`).
 </details>
 
-### AI Agent Quickstart
+### AI Agent Quickstart (recommended)
 
 Paste this into Claude Code, Codex, Cursor, Windsurf, or another coding agent:
 
@@ -48,7 +48,7 @@ Paste this into Claude Code, Codex, Cursor, Windsurf, or another coding agent:
 Use https://yutori.com/api/llms.txt and set up Yutori for me.
 ```
 
-### Quick install (recommended)
+### Manual quick install
 
 ![MCP server installation](assets/mcp-server-install.gif)
 
