@@ -4,14 +4,6 @@ MCP tools and skills for web monitoring, deep research, and browser automation â
 
 You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and other MCP hosts.
 
-## AI Agent Quickstart
-
-Paste this into Claude Code, Codex, Cursor, Windsurf, or another coding agent:
-
-```text
-Use https://yutori.com/api/llms.txt to set up Yutori for this project: install the CLI, authenticate through Yutori Platform, install the Yutori MCP server and workflow skills, then show me one Scout, Research, and Browsing demo.
-```
-
 ## Features
 
 **Capabilities:**
@@ -47,6 +39,14 @@ Python 3.10 or higher is required (`uv` manages this automatically for most inst
 
 For the quickstart below, Node.js is also required (for `npx`).
 </details>
+
+### AI Agent Quickstart
+
+Paste this into Claude Code, Codex, Cursor, Windsurf, or another coding agent:
+
+```text
+Use https://yutori.com/api/llms.txt and set up Yutori for me.
+```
 
 ### Quick install (recommended)
 
