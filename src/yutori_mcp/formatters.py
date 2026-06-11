@@ -79,12 +79,11 @@ def format_response(tool_name: str, response: dict[str, Any], **context: Any) ->
 
 
 def _format_scout_name(scout: dict[str, Any], *, fallback: str = "") -> str:
-    """Return ``display_name`` if set, else ``query[:40]``.
+    """Return ``display_name`` if set, else ``query[:40]``, else ``fallback[:40]``.
 
-    ``fallback`` is used only when the ``query`` key is missing from ``scout``,
-    matching the historical pattern ``scout.get("display_name") or scout.get("query", fallback)[:40]``.
+    Falls back to ``fallback`` whenever ``query`` is missing, null, or empty.
     """
-    return scout.get("display_name") or scout.get("query", fallback)[:40]
+    return scout.get("display_name") or (scout.get("query") or fallback)[:40]
 
 
 def _format_interval(seconds: int | None) -> str:
@@ -102,23 +101,33 @@ def _format_interval(seconds: int | None) -> str:
     return f"every {days} days"
 
 
-def _format_date(iso_string: str | None) -> str:
-    """Format ISO date string to readable format."""
-    if not iso_string:
+def _timestamp_to_utc(timestamp: int | float) -> datetime:
+    """Convert a Unix timestamp in seconds or milliseconds to a UTC datetime.
+
+    Values >= 1e12 are treated as milliseconds (1e12 seconds is the year
+    33658, while 1e12 ms is September 2001 — well before any Yutori data).
+    """
+    if timestamp >= 1_000_000_000_000:
+        timestamp /= 1000
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+
+
+def _format_date(value: str | int | float | None) -> str:
+    """Format an ISO date string or Unix timestamp (s or ms) as YYYY-MM-DD."""
+    if not value:
         return "not set"
+    if isinstance(value, (int, float)):
+        return _timestamp_to_utc(value).strftime("%Y-%m-%d")
     # Extract date portion (YYYY-MM-DD)
-    return iso_string[:10] if len(iso_string) >= 10 else iso_string
+    return value[:10] if len(value) >= 10 else value
 
 
-def _format_datetime(timestamp: str | int | None) -> str:
-    """Format timestamp to readable format. Accepts ISO string or Unix timestamp (ms)."""
+def _format_datetime(timestamp: str | int | float | None) -> str:
+    """Format an ISO datetime string or Unix timestamp (s or ms) as readable UTC."""
     if not timestamp:
         return "not set"
-    # Handle Unix timestamp in milliseconds (integer)
-    if isinstance(timestamp, int):
-        # Convert milliseconds to seconds
-        dt = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
-        return dt.strftime("%Y-%m-%d %H:%M UTC")
+    if isinstance(timestamp, (int, float)):
+        return _timestamp_to_utc(timestamp).strftime("%Y-%m-%d %H:%M UTC")
     # Handle ISO datetime string
     if len(timestamp) >= 16:
         return f"{timestamp[:10]} {timestamp[11:16]} UTC"
@@ -162,6 +171,26 @@ def _format_or_unset(value: Any) -> Any:
     return value or "(not set)"
 
 
+def _format_output_fields_diff(value: Any) -> Any:
+    """Render an ``output_schema`` dict as its field names for diff display.
+
+    Lists the property names for array-of-objects schemas (the shape
+    ``output_fields_to_output_schema`` produces) and top-level object
+    schemas. The API accepts any JSON Schema dict, so anything else — set
+    via the REST API directly — is summarized as ``(custom schema)`` rather
+    than crashing or rendering as unset.
+    """
+    if isinstance(value, dict):
+        items = value.get("items")
+        container = items if isinstance(items, dict) else value
+        properties = container.get("properties")
+        if isinstance(properties, dict) and properties:
+            value = ", ".join(properties)
+        else:
+            value = "(custom schema)"
+    return _format_or_unset(value)
+
+
 def _scout_platform_url(scout_id: str) -> str:
     """Build the platform URL for viewing a scout."""
     return f"https://platform.yutori.com/scouting/tasks/{scout_id}"
@@ -180,11 +209,10 @@ def _scout_identity_lines(
     """Build the shared `{name_label}: ...` / `ID: ...` / `URL: ...` (+ `Status: ...`) header block.
 
     The ``Status:`` line is appended whenever the caller passes a ``status``
-    argument, including when the value is ``None`` — this preserves the
-    pre-refactor behavior where ``response.get("status", "unknown")`` returning
-    a literal ``None`` (explicit null) would still render as ``Status: None``.
-    Callers that want to omit the line entirely (e.g. the diff path of
-    ``format_scout_edited``) simply don't pass ``status``.
+    argument, including when the value is ``None`` — an explicit null in the
+    payload still renders as ``Status: None``. Callers that want to omit the
+    line entirely (e.g. the diff path of ``format_scout_edited``) simply
+    don't pass ``status``.
 
     Used by the top-level scout detail / created / edited formatters. The list-scouts
     formatter uses its own indented variant and doesn't call this helper.
@@ -213,13 +241,15 @@ def _format_sources(
     """Format sources/citations from a response dict.
 
     Checks for both "sources" and "citations" keys. Each source can be
-    a dict with url/title keys or a plain string.
+    a dict with url/title keys or a plain string. Source titles and URLs
+    come from the open web, so the entries are wrapped in the same
+    external-content markers as result bodies.
     """
     sources = _get_first(response, "sources", "citations")
     if not sources:
         return []
 
-    lines = ["", "Sources:"]
+    lines = ["", "Sources:", _EXTERNAL_CONTENT_START]
     for source in sources[:max_items]:
         if isinstance(source, dict):
             url = source.get("url", "")
@@ -228,6 +258,7 @@ def _format_sources(
         else:
             lines.append(f"{indent}- {source}")
     _append_more_indicator(lines, len(sources), max_items, indent=indent)
+    lines.append(_EXTERNAL_CONTENT_END)
     return lines
 
 
@@ -325,7 +356,7 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
     for i, scout in enumerate(scouts, 1):
         name = _format_scout_name(scout, fallback="Untitled")
         status = scout.get("status", "unknown")
-        query = scout.get("query", "")
+        query = scout.get("query") or ""
         scout_id = scout.get("id", "")
         interval = _format_interval(scout.get("output_interval"))
         next_run = _format_date(scout.get("next_output_timestamp"))
@@ -352,7 +383,7 @@ def format_scout_detail(response: dict[str, Any], **context: Any) -> str:
     name = response.get("display_name") or "Untitled"
     scout_id = response.get("id", "")
     status = response.get("status", "unknown")
-    query = response.get("query", "")
+    query = response.get("query") or ""
     created = _format_date(response.get("created_at"))
 
     lines = _scout_identity_lines(
@@ -458,7 +489,7 @@ def format_scout_created(response: dict[str, Any], **context: Any) -> str:
     name = _format_scout_name(response)
     scout_id = response.get("id", "")
     status = response.get("status", "active")
-    query = response.get("query", "")
+    query = response.get("query") or ""
     interval = _format_interval(response.get("output_interval"))
     next_run = _format_datetime(response.get("next_output_timestamp"))
 
@@ -480,25 +511,39 @@ def format_scout_created(response: dict[str, Any], **context: Any) -> str:
 def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
     """Format edit_scout response showing changes."""
     old = response.get("old", {})
-    new = response.get("new", response)  # Fallback to response if no old/new structure
+    new = response.get("new") or {}
+    if not old:
+        # Legacy shape: the scout fields sit at the top level of the response.
+        new = new or response
+
+    subject = new or old
+    lines = ["Scout updated successfully.", ""]
+    identity = {"name": _format_scout_name(subject), "scout_id": subject.get("id", "")}
 
     # If we don't have old state, just show current state
     if not old:
-        name = _format_scout_name(new)
-        scout_id = new.get("id", "")
-        status = new.get("status", "unknown")
-        lines = ["Scout updated successfully.", ""]
-        lines.extend(_scout_identity_lines(name=name, scout_id=scout_id, status=status))
+        lines.extend(
+            _scout_identity_lines(**identity, status=new.get("status", "unknown"))
+        )
         _append_rejection_reason(lines, new.get("rejection_reason"))
         lines.extend(["", "Use get_scout_detail(scout_id) for full details."])
         return "\n".join(lines)
 
-    # Show diff
-    name = _format_scout_name(new)
-    scout_id = new.get("id", "")
+    # Edit succeeded but the post-edit read-back failed: report success
+    # without a diff rather than implying the edit itself failed.
+    if not new:
+        lines.extend(_scout_identity_lines(**identity))
+        lines.extend(
+            [
+                "",
+                "Could not fetch the updated scout state to show what changed.",
+                "Use get_scout_detail(scout_id) to verify the changes.",
+            ]
+        )
+        return "\n".join(lines)
 
-    lines = ["Scout updated successfully.", ""]
-    lines.extend(_scout_identity_lines(name=name, scout_id=scout_id))
+    # Show diff
+    lines.extend(_scout_identity_lines(**identity))
     lines.extend(["", "Changes applied:"])
 
     changes_found = False
@@ -629,13 +674,32 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
         return "\n".join(lines)
 
     # Handle completed state
+    if status in ("succeeded", "completed"):
+        lines = _task_status_lines(
+            "Task completed.",
+            task_id=task_id,
+            footer=f"Status: {status}",
+        )
+        _append_result_content(lines, response)
+        return "\n".join(lines)
+
+    # Unrecognized status (e.g. cancelled, expired, or a new API status):
+    # don't claim completion, but surface whatever the response carried.
     lines = _task_status_lines(
-        "Task completed.",
+        f"Task ended with unrecognized status '{status}' (not completed).",
         task_id=task_id,
         footer=f"Status: {status}",
     )
+    _append_rejection_reason(lines, response.get("rejection_reason"))
+    error = _get_first(response, "error", "message")
+    if error:
+        lines.append(f"Error: {error}")
+    _append_result_content(lines, response)
+    return "\n".join(lines)
 
-    # Add result content
+
+def _append_result_content(lines: list[str], response: dict[str, Any]) -> None:
+    """Append the task's result body (marker-wrapped) and sources, if any."""
     result = _get_first(response, "result", "output", "content")
     if result:
         lines.append("")
@@ -656,8 +720,6 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
 
     lines.extend(_format_sources(response, indent=""))
 
-    return "\n".join(lines)
-
 
 # Scout-edit field comparison list, used by format_scout_edited().
 # Each tuple is (response_field, display_label, value_formatter). The formatter
@@ -673,7 +735,12 @@ _SCOUT_EDIT_FIELDS = (
     ("output_interval", "Interval", _format_interval),
     ("webhook_url", "Webhook", _format_or_unset),
     ("webhook_format", "Webhook format", _format_or_unset),
-    ("output_fields", "Output fields", _format_or_unset),
+    # output_schema is the response-side name of the output_fields input: the
+    # MCP exposes `output_fields` (a list of names) as a simplified input, and
+    # the API stores and returns it as `output_schema`. Requires API versions
+    # that surface top-level `output_schema` on scout detail responses; older
+    # servers omit the key and the diff line is skipped.
+    ("output_schema", "Output fields", _format_output_fields_diff),
     ("skip_email", "Skip email", _format_yes_no),
     ("user_timezone", "Timezone", _format_or_unset),
     ("user_location", "Location", _format_or_unset),
