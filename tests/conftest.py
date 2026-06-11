@@ -1,12 +1,7 @@
 """Pytest configuration for yutori-mcp tests.
 
-This file exists to prevent pytest from loading the root-level conftest.py
-which contains fixtures for the full Yutori project (e.g., PostgresContainer).
+Import paths are configured in pyproject.toml via
+``tool.pytest.ini_options.pythonpath = ["src"]``, so the suite runs from a
+source checkout without installing the package. This file is kept as a
+placeholder for future shared fixtures.
 """
-
-import sys
-from pathlib import Path
-
-# Add src to path for imports
-src_path = Path(__file__).parent.parent / "src"
-sys.path.insert(0, str(src_path))

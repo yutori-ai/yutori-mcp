@@ -1,17 +1,17 @@
 """Tests for the MCP adapter error mapping and argument forwarding."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from yutori.exceptions import APIError, AuthenticationError
+from yutori.exceptions import APIConnectionError, APIError, AuthenticationError
 from yutori_mcp.adapter import MCPClientAdapter, YutoriAPIError, _strip_none
 
 
 @pytest.fixture()
 def adapter():
     with patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-test-key"), \
-         patch("yutori_mcp.adapter.YutoriClient"):
+         patch("yutori_mcp.adapter.AsyncYutoriClient"):
         return MCPClientAdapter()
 
 
@@ -23,56 +23,56 @@ def adapter():
 class TestErrorMapping:
     """Ensure SDK errors are mapped to stable MCP YutoriAPIError shape."""
 
-    def test_api_error_maps_to_yutori_api_error(self, adapter):
+    async def test_api_error_maps_to_yutori_api_error(self, adapter):
         sdk_error = APIError(message="Scout not found", status_code=404)
-        adapter._client.scouts.get = MagicMock(side_effect=sdk_error)
+        adapter._client.scouts.get = AsyncMock(side_effect=sdk_error)
 
         with pytest.raises(YutoriAPIError) as exc_info:
-            adapter.get_scout_detail("nonexistent-id")
+            await adapter.get_scout_detail("nonexistent-id")
 
         assert exc_info.value.status_code == 404
         assert exc_info.value.message == "Scout not found"
 
-    def test_authentication_error_maps_to_401(self, adapter):
+    async def test_authentication_error_maps_to_401(self, adapter):
         sdk_error = AuthenticationError("Invalid API key")
-        adapter._client.scouts.list = MagicMock(side_effect=sdk_error)
+        adapter._client.scouts.list = AsyncMock(side_effect=sdk_error)
 
         with pytest.raises(YutoriAPIError) as exc_info:
-            adapter.list_scouts()
+            await adapter.list_scouts()
 
         assert exc_info.value.status_code == 401
         assert "Invalid API key" in exc_info.value.message
 
-    def test_authentication_handler_preferred_if_auth_error_becomes_api_subclass(self):
+    async def test_authentication_handler_preferred_if_auth_error_becomes_api_subclass(self):
         class AuthAsApiError(APIError):
             pass
 
-        def raise_auth_as_api_error():
+        async def raise_auth_as_api_error():
             raise AuthAsApiError("Invalid API key", status_code=403)
 
         with patch("yutori_mcp.adapter.AuthenticationError", AuthAsApiError):
             with pytest.raises(YutoriAPIError) as exc_info:
-                MCPClientAdapter._call(raise_auth_as_api_error)
+                await MCPClientAdapter._call(raise_auth_as_api_error)
 
         assert exc_info.value.status_code == 401
         assert "Invalid API key" in exc_info.value.message
 
-    def test_api_error_preserves_status_code(self, adapter):
+    async def test_api_error_preserves_status_code(self, adapter):
         for code in [400, 403, 429, 500, 503]:
             sdk_error = APIError(message=f"Error {code}", status_code=code)
-            adapter._client.scouts.list = MagicMock(side_effect=sdk_error)
+            adapter._client.scouts.list = AsyncMock(side_effect=sdk_error)
 
             with pytest.raises(YutoriAPIError) as exc_info:
-                adapter.list_scouts()
+                await adapter.list_scouts()
 
             assert exc_info.value.status_code == code
 
-    def test_api_error_chains_original_exception(self, adapter):
+    async def test_api_error_chains_original_exception(self, adapter):
         sdk_error = APIError(message="Rate limited", status_code=429)
-        adapter._client.scouts.list = MagicMock(side_effect=sdk_error)
+        adapter._client.scouts.list = AsyncMock(side_effect=sdk_error)
 
         with pytest.raises(YutoriAPIError) as exc_info:
-            adapter.list_scouts()
+            await adapter.list_scouts()
 
         assert exc_info.value.__cause__ is sdk_error
 
@@ -104,9 +104,15 @@ class TestAdapterInit:
 
     def test_creates_client_with_resolved_key(self):
         with patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-key"), \
-             patch("yutori_mcp.adapter.YutoriClient") as mock_client_cls:
+             patch("yutori_mcp.adapter.AsyncYutoriClient") as mock_client_cls:
             MCPClientAdapter()
             mock_client_cls.assert_called_once_with(api_key="yt-key")
+
+    async def test_context_manager_closes_client(self, adapter):
+        adapter._client.close = AsyncMock()
+        async with adapter:
+            pass
+        adapter._client.close.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -136,16 +142,16 @@ class TestStripNone:
 class TestGetUsageForwarding:
     """get_usage must forward period and strip None values."""
 
-    def test_period_forwarded(self, adapter):
-        adapter._client.get_usage = MagicMock(return_value={"num_active_scouts": 1})
-        adapter.get_usage(period="7d")
+    async def test_period_forwarded(self, adapter):
+        adapter._client.get_usage = AsyncMock(return_value={"num_active_scouts": 1})
+        await adapter.get_usage(period="7d")
 
         _, kwargs = adapter._client.get_usage.call_args
         assert kwargs["period"] == "7d"
 
-    def test_none_period_not_forwarded(self, adapter):
-        adapter._client.get_usage = MagicMock(return_value={"num_active_scouts": 0})
-        adapter.get_usage(period=None)
+    async def test_none_period_not_forwarded(self, adapter):
+        adapter._client.get_usage = AsyncMock(return_value={"num_active_scouts": 0})
+        await adapter.get_usage(period=None)
 
         _, kwargs = adapter._client.get_usage.call_args
         assert "period" not in kwargs
@@ -154,17 +160,17 @@ class TestGetUsageForwarding:
 class TestCreateScoutForwarding:
     """create_scout must not send None for optional fields (SDK has non-optional defaults)."""
 
-    def test_none_output_interval_not_forwarded(self, adapter):
-        adapter._client.scouts.create = MagicMock(return_value={"id": "s1"})
-        adapter.create_scout("test query", output_interval=None, webhook_url=None)
+    async def test_none_output_interval_not_forwarded(self, adapter):
+        adapter._client.scouts.create = AsyncMock(return_value={"id": "s1"})
+        await adapter.create_scout("test query", output_interval=None, webhook_url=None)
 
         _, kwargs = adapter._client.scouts.create.call_args
         assert "output_interval" not in kwargs
         assert "webhook_url" not in kwargs
 
-    def test_set_values_are_forwarded(self, adapter):
-        adapter._client.scouts.create = MagicMock(return_value={"id": "s1"})
-        adapter.create_scout("test query", output_interval=3600, webhook_url="https://example.com")
+    async def test_set_values_are_forwarded(self, adapter):
+        adapter._client.scouts.create = AsyncMock(return_value={"id": "s1"})
+        await adapter.create_scout("test query", output_interval=3600, webhook_url="https://example.com")
 
         _, kwargs = adapter._client.scouts.create.call_args
         assert kwargs["output_interval"] == 3600
@@ -174,30 +180,37 @@ class TestCreateScoutForwarding:
 class TestEditScoutForwarding:
     """edit_scout must filter None kwargs and not forward unsupported fields."""
 
-    def test_none_values_not_forwarded(self, adapter):
-        adapter._client.scouts.update = MagicMock(return_value={"id": "s1"})
-        adapter.edit_scout("s1", query=None, output_interval=None, status="paused")
+    async def test_none_values_not_forwarded(self, adapter):
+        adapter._client.scouts.update = AsyncMock(return_value={"id": "s1"})
+        await adapter.edit_scout("s1", query=None, output_interval=None, status="paused")
 
         _, kwargs = adapter._client.scouts.update.call_args
         assert "query" not in kwargs
         assert "output_interval" not in kwargs
         assert kwargs["status"] == "paused"
 
-    def test_config_values_forwarded(self, adapter):
-        adapter._client.scouts.update = MagicMock(return_value={"id": "s1"})
-        adapter.edit_scout("s1", query="updated query", skip_email=True)
+    async def test_config_values_forwarded(self, adapter):
+        adapter._client.scouts.update = AsyncMock(return_value={"id": "s1"})
+        await adapter.edit_scout("s1", query="updated query", skip_email=True)
 
         _, kwargs = adapter._client.scouts.update.call_args
         assert kwargs["query"] == "updated query"
         assert kwargs["skip_email"] is True
 
+    async def test_is_public_forwarded(self, adapter):
+        adapter._client.scouts.update = AsyncMock(return_value={"id": "s1"})
+        await adapter.edit_scout("s1", is_public=False)
+
+        _, kwargs = adapter._client.scouts.update.call_args
+        assert kwargs["is_public"] is False
+
 
 class TestBrowsingAndResearchForwarding:
     """Browsing and research should forward newly supported developer API fields."""
 
-    def test_browsing_forwards_require_auth_browser_and_zapier(self, adapter):
-        adapter._client.browsing.create = MagicMock(return_value={"task_id": "t1"})
-        adapter.run_browsing_task(
+    async def test_browsing_forwards_require_auth_browser_and_zapier(self, adapter):
+        adapter._client.browsing.create = AsyncMock(return_value={"task_id": "t1"})
+        await adapter.run_browsing_task(
             "Log in and export data",
             "https://example.com/login",
             require_auth=True,
@@ -210,3 +223,45 @@ class TestBrowsingAndResearchForwarding:
         assert kwargs["browser"] == "local"
         assert kwargs["webhook_format"] == "zapier"
 
+
+class TestContextManagerErrorPaths:
+    """__aexit__ must close the client on error paths without masking the
+    in-flight exception."""
+
+    async def test_client_closed_when_body_raises(self, adapter):
+        adapter._client.close = AsyncMock()
+        with pytest.raises(YutoriAPIError):
+            async with adapter:
+                raise YutoriAPIError(message="boom", status_code=500)
+        adapter._client.close.assert_awaited_once()
+
+    async def test_close_failure_does_not_mask_handler_error(self, adapter):
+        adapter._client.close = AsyncMock(side_effect=RuntimeError("close failed"))
+        with pytest.raises(YutoriAPIError, match="boom"):
+            async with adapter:
+                raise YutoriAPIError(message="boom", status_code=500)
+
+    async def test_close_failure_on_clean_exit_propagates(self, adapter):
+        adapter._client.close = AsyncMock(side_effect=RuntimeError("close failed"))
+        with pytest.raises(RuntimeError, match="close failed"):
+            async with adapter:
+                pass
+
+
+class TestTransportErrorMapping:
+    """SDK APIConnectionError (transport failures) maps to YutoriAPIError(503).
+
+    The SDK guarantees the message is never blank (it always includes the
+    underlying httpx exception type); the adapter only adds the status code.
+    """
+
+    async def test_connection_error_mapped(self, adapter):
+        adapter._client.scouts.list = AsyncMock(
+            side_effect=APIConnectionError(
+                "Network error calling the Yutori API (ConnectError): connection refused"
+            )
+        )
+        with pytest.raises(YutoriAPIError) as exc_info:
+            await adapter.list_scouts()
+        assert exc_info.value.status_code == 503
+        assert "ConnectError" in exc_info.value.message

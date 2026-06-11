@@ -1,6 +1,11 @@
 """Tests for output formatters."""
 
 from yutori_mcp.formatters import (
+    _EXTERNAL_CONTENT_END,
+    _EXTERNAL_CONTENT_START,
+    _format_date,
+    _format_datetime,
+    _format_output_fields_diff,
     _format_sources,
     dict_to_markdown,
     format_list_scouts,
@@ -537,3 +542,144 @@ class TestFormatSources:
         result = format_task_result(response)
         assert "Sources:" in result
         assert "- Src: https://src.com" in result
+
+
+class TestFormatterNullSafety:
+    """Regression tests for present-but-null fields in API responses."""
+
+    def test_list_scouts_with_explicit_null_query(self):
+        response = {
+            "scouts": [{"id": "abc", "query": None, "status": "active"}],
+            "total": 1,
+            "summary": {"active": 1, "paused": 0, "done": 0},
+        }
+        result = format_list_scouts(response)
+        assert "Untitled" in result
+
+    def test_scout_created_with_explicit_null_query(self):
+        response = {"id": "s1", "query": None, "status": "active"}
+        result = format_scout_created(response)
+        assert "Scout created successfully" in result
+
+
+class TestTimestampFormatting:
+    """_format_date/_format_datetime accept ISO strings and Unix s/ms ints."""
+
+    def test_list_scouts_with_unix_ms_next_run(self):
+        assert _format_date(1769997854699) == "2026-02-02"
+        response = {
+            "scouts": [
+                {
+                    "id": "abc",
+                    "query": "q",
+                    "status": "active",
+                    "next_output_timestamp": 1769997854699,
+                }
+            ],
+            "total": 1,
+            "summary": {"active": 1, "paused": 0, "done": 0},
+        }
+        result = format_list_scouts(response)
+        assert "Next: 2026-02-02" in result
+
+    def test_format_datetime_unix_seconds(self):
+        # Same instant as the millisecond value used elsewhere in this suite.
+        assert _format_datetime(1769997854) == "2026-02-02 02:04 UTC"
+
+    def test_format_datetime_unix_milliseconds(self):
+        assert _format_datetime(1769997854699) == "2026-02-02 02:04 UTC"
+
+
+class TestFormatTaskResultUnrecognizedStatus:
+    """Statuses outside the known set must not be reported as completed."""
+
+    def test_cancelled_not_reported_completed(self):
+        response = {"task_id": "t1", "status": "cancelled"}
+        result = format_task_result(response)
+        assert "Task completed" not in result
+        assert "unrecognized status 'cancelled'" in result
+
+    def test_unrecognized_status_still_surfaces_result(self):
+        response = {"task_id": "t1", "status": "cancelled", "result": "partial data"}
+        result = format_task_result(response)
+        assert "Task completed" not in result
+        assert "partial data" in result
+
+
+class TestSourcesExternalContentMarkers:
+    """Source titles/URLs are web-derived and must sit inside the markers."""
+
+    def test_sources_wrapped_in_markers(self):
+        lines = _format_sources(
+            {"sources": [{"url": "https://x.com", "title": "Injected Title"}]}
+        )
+        start = lines.index(_EXTERNAL_CONTENT_START)
+        end = lines.index(_EXTERNAL_CONTENT_END)
+        assert start < lines.index("  - Injected Title: https://x.com") < end
+
+
+class TestFormatScoutEditedOutputFields:
+    """output_fields edits are echoed back by the API as output_schema."""
+
+    @staticmethod
+    def _schema(fields):
+        return {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {f: {"type": "string"} for f in fields},
+            },
+        }
+
+    def test_output_schema_change_appears_in_diff(self):
+        response = {
+            "old": {"id": "s1", "query": "q", "output_schema": self._schema(["headline"])},
+            "new": {"id": "s1", "query": "q", "output_schema": self._schema(["headline", "url"])},
+        }
+        result = format_scout_edited(response)
+        assert "Output fields: headline → headline, url" in result
+        assert "no changes detected" not in result
+
+
+class TestFormatTaskResultUnrecognizedStatusDetails:
+    """The unrecognized-status branch surfaces all diagnostic fields."""
+
+    def test_rejection_reason_and_error_shown(self):
+        response = {
+            "task_id": "t1",
+            "status": "expired",
+            "rejection_reason": "billing_limit_reached",
+            "error": "task expired after 24h",
+        }
+        result = format_task_result(response)
+        assert "unrecognized status 'expired'" in result
+        assert "Rejection reason: billing_limit_reached" in result
+        assert "Error: task expired after 24h" in result
+
+    def test_message_key_used_as_error_fallback(self):
+        response = {"task_id": "t1", "status": "expired", "message": "gone"}
+        result = format_task_result(response)
+        assert "Error: gone" in result
+
+
+class TestFormatOutputFieldsDiffShapes:
+    """The diff formatter tolerates schemas not produced by this MCP."""
+
+    def test_unset_to_schema_transition(self):
+        schema = {
+            "type": "array",
+            "items": {"type": "object", "properties": {"headline": {"type": "string"}}},
+        }
+        response = {
+            "old": {"id": "s1", "query": "q"},
+            "new": {"id": "s1", "query": "q", "output_schema": schema},
+        }
+        result = format_scout_edited(response)
+        assert "Output fields: (not set) → headline" in result
+
+    def test_custom_schema_shapes_do_not_crash(self):
+        # JSON Schema tuple-form items (a list, not a dict)
+        assert _format_output_fields_diff({"items": [{"type": "string"}]}) == "(custom schema)"
+        # Object-form schema without items
+        assert _format_output_fields_diff({"type": "object", "properties": {}}) == "(custom schema)"
+        assert _format_output_fields_diff(None) == "(not set)"
