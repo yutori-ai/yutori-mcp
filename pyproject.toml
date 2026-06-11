@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.2.9"
+version = "0.3.0"
 description = "MCP server for Yutori - web monitoring, deep research, and browser automation"
 readme = "README.md"
 license = "Apache-2.0"
@@ -21,11 +21,14 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
     "mcp>=1.0.0",
     "pydantic>=2.0.0",
-    "yutori>=0.4.0",
+    # 0.8.0 adds scouts.update(is_public=...) on both sync and async clients
+    "yutori>=0.8.0",
 ]
 
 [project.optional-dependencies]
@@ -48,3 +51,4 @@ packages = ["src/yutori_mcp"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+asyncio_mode = "auto"

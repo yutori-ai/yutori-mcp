@@ -197,6 +197,9 @@ class TestEditScoutInput:
         """
         diff_fields = {field for field, _label, _fmt in _SCOUT_EDIT_FIELDS}
         editable_fields = set(EditScoutInput.model_fields) - {"scout_id"}
+        # The output_fields input is sent to (and returned by) the API as
+        # output_schema; the diff table uses the response-side name.
+        editable_fields = (editable_fields - {"output_fields"}) | {"output_schema"}
         assert diff_fields == editable_fields, (
             "Mismatch between _SCOUT_EDIT_FIELDS and EditScoutInput. "
             f"Missing from _SCOUT_EDIT_FIELDS: {editable_fields - diff_fields}. "
@@ -460,4 +463,69 @@ class TestInvalidWebhookFormatRejected:
             EditScoutInput(
                 scout_id="abc-123",
                 webhook_format="discord",
+            )
+
+
+class TestExtraFieldsRejected:
+    """Unknown arguments must fail validation instead of being silently dropped."""
+
+    def test_create_scout_rejects_unknown_field(self):
+        with pytest.raises(ValidationError):
+            CreateScoutInput(query="Test", frequency="daily")
+
+    def test_schema_marks_additional_properties_false(self):
+        from yutori_mcp.schema_utils import get_simplified_schema
+
+        schema = get_simplified_schema(EditScoutInput)
+        assert schema["additionalProperties"] is False
+
+
+class TestOutputFieldsMinLength:
+    """An empty output_fields list would produce a degenerate output schema."""
+
+    def test_empty_rejected_create_scout(self):
+        with pytest.raises(ValidationError):
+            CreateScoutInput(query="Test", output_fields=[])
+
+    def test_empty_rejected_edit_scout(self):
+        with pytest.raises(ValidationError):
+            EditScoutInput(scout_id="abc-123", output_fields=[])
+
+    def test_empty_rejected_browsing_task(self):
+        with pytest.raises(ValidationError):
+            BrowsingTaskInput(task="Test", start_url="https://example.com", output_fields=[])
+
+    def test_empty_rejected_research_task(self):
+        with pytest.raises(ValidationError):
+            ResearchTaskInput(query="Test", output_fields=[])
+
+
+class TestWebhookUrlRequiresHost:
+    def test_https_without_host_rejected(self):
+        with pytest.raises(ValidationError, match="webhook_url must use HTTPS"):
+            CreateScoutInput(query="Test", webhook_url="https://")
+
+    def test_https_with_host_accepted(self):
+        data = CreateScoutInput(query="Test", webhook_url="https://example.com")
+        assert data.webhook_url == "https://example.com"
+
+
+class TestEditScoutIsPublic:
+    def test_is_public_accepted(self):
+        """is_public is editable (SDK >=0.8.0 forwards it to the PATCH route)."""
+        data = EditScoutInput(scout_id="abc-123", is_public=False)
+        assert data.is_public is False
+
+
+class TestSimplifiedSchemaConstraints:
+    """Constraints must survive simplify_schema into the published inputSchema."""
+
+    def test_min_items_survives_simplification(self):
+        from yutori_mcp.schema_utils import get_simplified_schema
+
+        for model_cls in (CreateScoutInput, EditScoutInput, BrowsingTaskInput, ResearchTaskInput):
+            schema = get_simplified_schema(model_cls)
+            field = schema["properties"]["output_fields"]
+            assert field.get("minItems") == 1, (
+                f"{model_cls.__name__}.output_fields lost minItems in the simplified schema"
             )

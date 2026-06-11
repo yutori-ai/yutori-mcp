@@ -67,6 +67,8 @@ def output_fields_to_output_schema(
     """
     if output_fields is None:
         return None
+    if not output_fields:
+        raise ValueError("output_fields must contain at least one field name")
 
     properties = {field: {"type": "string"} for field in output_fields}
 

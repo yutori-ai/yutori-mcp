@@ -1,13 +1,17 @@
 """Tests for server helper functions."""
 
-from unittest.mock import patch
+from contextlib import contextmanager
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from mcp.types import CallToolRequest, CallToolRequestParams
 
 from yutori.auth.types import AuthStatus, LoginResult
 from yutori_mcp import __version__
+from yutori_mcp.adapter import YutoriAPIError
+from yutori_mcp.formatters import format_scout_edited
 from yutori_mcp.schema_utils import output_fields_to_output_schema, simplify_schema, get_simplified_schema
-from yutori_mcp.server import main
+from yutori_mcp.server import _handle_edit_scout, create_server, main
 from yutori_mcp.schemas import ListScoutsInput, CreateScoutInput
 
 
@@ -146,16 +150,10 @@ class TestOutputFieldsToOutputSchema:
         """None input returns None."""
         assert output_fields_to_output_schema(None) is None
 
-    def test_empty_list(self):
-        """Empty list produces empty properties."""
-        result = output_fields_to_output_schema([])
-        assert result == {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {},
-            },
-        }
+    def test_empty_list_rejected(self):
+        """Empty list would produce a degenerate schema, so reject it."""
+        with pytest.raises(ValueError, match="at least one field"):
+            output_fields_to_output_schema([])
 
     def test_single_field(self):
         """Single field is converted correctly."""
@@ -247,3 +245,112 @@ class TestMainVersionFlag:
             assert exc_info.value.code == 0
         output = capsys.readouterr().out.strip()
         assert output == f"yutori-mcp {__version__}"
+
+
+class TestEditScoutPartialFailure:
+    """The API needs separate config/status calls, so a mid-sequence failure
+    must report that the config portion was already applied."""
+
+    async def test_status_failure_after_config_update_reports_partial_application(self):
+        client = AsyncMock()
+        client.get_scout_detail.return_value = {"id": "s1", "status": "active", "query": "q"}
+        client.edit_scout.side_effect = [
+            {"id": "s1"},  # config update succeeds
+            YutoriAPIError(message="server error", status_code=500),  # status fails
+        ]
+
+        with pytest.raises(YutoriAPIError) as exc_info:
+            await _handle_edit_scout(client, {"scout_id": "s1", "query": "new q", "status": "paused"})
+
+        assert "config changes were applied" in exc_info.value.message.lower()
+        assert "server error" in exc_info.value.message
+        assert exc_info.value.status_code == 500
+
+    async def test_status_only_failure_propagates_unwrapped(self):
+        client = AsyncMock()
+        client.get_scout_detail.return_value = {"id": "s1", "status": "active"}
+        client.edit_scout.side_effect = YutoriAPIError(message="server error", status_code=500)
+
+        with pytest.raises(YutoriAPIError) as exc_info:
+            await _handle_edit_scout(client, {"scout_id": "s1", "status": "paused"})
+
+        assert exc_info.value.message == "server error"
+
+
+def _call_tool_handler():
+    """Return the registered tools/call request handler from a fresh server."""
+    return create_server().request_handlers[CallToolRequest]
+
+
+def _call_tool_request(name, arguments):
+    return CallToolRequest(
+        method="tools/call",
+        params=CallToolRequestParams(name=name, arguments=arguments),
+    )
+
+
+@contextmanager
+def _patched_adapter():
+    """Patch MCPClientAdapter and yield the mock used as the async-with client."""
+    with patch("yutori_mcp.server.MCPClientAdapter") as adapter_cls:
+        instance = AsyncMock()
+        adapter_cls.return_value = instance
+        instance.__aenter__.return_value = instance
+        yield instance
+
+
+class TestCallToolErrorContract:
+    """The MCP framework converts exceptions raised from call_tool into
+    CallToolResult(isError=True, content=[str(exception)]). These tests pin
+    that contract end-to-end through the registered request handler."""
+
+    async def test_api_error_returns_iserror_with_formatted_message(self):
+        handler = _call_tool_handler()
+        with _patched_adapter() as client:
+            client.list_scouts.side_effect = YutoriAPIError(message="boom", status_code=500)
+            result = await handler(_call_tool_request("list_scouts", {}))
+
+        assert result.root.isError is True
+        assert result.root.content[0].text == "API Error (500): boom"
+
+    async def test_success_returns_formatted_text_without_error_flag(self):
+        handler = _call_tool_handler()
+        with _patched_adapter() as client:
+            client.list_scouts.return_value = {
+                "scouts": [],
+                "total": 0,
+                "summary": {"active": 0, "paused": 0, "done": 0},
+            }
+            result = await handler(_call_tool_request("list_scouts", {}))
+
+        assert result.root.isError is False
+        assert "Found 0 scouts" in result.root.content[0].text
+
+    async def test_unknown_argument_rejected_before_handler_runs(self):
+        # No adapter patch: additionalProperties=false must fail jsonschema
+        # validation in the framework before any handler/API code runs.
+        result = await _call_tool_handler()(_call_tool_request("list_scouts", {"bogus": 1}))
+
+        assert result.root.isError is True
+        assert "Input validation error" in result.root.content[0].text
+
+
+class TestEditScoutReadBackFailure:
+    """A failed post-edit state fetch must not report the edit as failed."""
+
+    async def test_read_back_failure_returns_success_without_diff(self):
+        client = AsyncMock()
+        client.get_scout_detail.side_effect = [
+            {"id": "s1", "status": "active", "query": "q"},  # pre-edit fetch
+            YutoriAPIError(message="rate limited", status_code=429),  # read-back
+        ]
+        client.edit_scout.return_value = {"id": "s1"}
+
+        result, context = await _handle_edit_scout(
+            client, {"scout_id": "s1", "query": "new q"}
+        )
+        assert result["new"] == {}
+
+        rendered = format_scout_edited(result, **context)
+        assert "Scout updated successfully" in rendered
+        assert "Could not fetch the updated scout state" in rendered

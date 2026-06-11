@@ -3,25 +3,43 @@
 from __future__ import annotations
 
 from typing import Annotated, Literal
+from urllib.parse import urlparse
 
-from pydantic import AfterValidator, BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 
 def _check_webhook_https(v: str | None) -> str | None:
-    """Validate that webhook_url uses HTTPS."""
-    if v is not None and not v.startswith("https://"):
-        raise ValueError("webhook_url must use HTTPS (https://)")
+    """Validate that webhook_url is an HTTPS URL with a host."""
+    if v is None:
+        return v
+    parsed = urlparse(v)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ValueError("webhook_url must use HTTPS (https://) and include a host")
     return v
 
 
 HttpsWebhookUrl = Annotated[str | None, AfterValidator(_check_webhook_https)]
 
+
+class ToolInput(BaseModel):
+    """Base class for all tool input schemas.
+
+    Forbids unknown fields so a misspelled or unsupported argument fails with
+    a clear validation error instead of being silently dropped. This also
+    emits ``additionalProperties: false`` in the generated JSON Schema, so
+    the MCP server framework's input validation (and any client that
+    pre-validates) rejects bad arguments before they reach the handler.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
 WebhookFormat = Literal["scout", "slack", "zapier"] | None
 
 ScoutStatus = Literal["active", "paused", "done"] | None
 
-# Shared field descriptions. Defined once so the three CreateScout/Browsing/Research
-# (and 3x ScoutId) call sites cannot drift out of sync as the schemas evolve.
+# Shared field descriptions, defined once so the call sites cannot drift out
+# of sync as the schemas evolve.
 _SCOUT_ID_DESCRIPTION = "The scout's unique identifier (UUID)"
 _WEBHOOK_FORMAT_DESCRIPTION = (
     "Webhook payload format: 'scout' (default), 'slack', or 'zapier'"
@@ -53,7 +71,7 @@ def _output_fields_description(example: list[str], docs_slug: str | None = None)
     return base + f" (see example at: https://docs.yutori.com/reference/{docs_slug})."
 
 
-class UsageInput(BaseModel):
+class UsageInput(ToolInput):
     """Input for retrieving API usage statistics."""
 
     period: Literal["24h", "7d", "30d", "90d"] | None = Field(
@@ -62,7 +80,7 @@ class UsageInput(BaseModel):
     )
 
 
-class CreateScoutInput(BaseModel):
+class CreateScoutInput(ToolInput):
     """Input for creating a new monitoring scout.
 
     Scouts enable continuous monitoring of the web at a configurable schedule
@@ -99,6 +117,7 @@ class CreateScoutInput(BaseModel):
     )
     output_fields: list[str] | None = Field(
         default=None,
+        min_length=1,
         description=_output_fields_description(
             ["headline", "summary", "url"],
             docs_slug="scouts-create#using-scheduling-webhooks-and-a-structured-output-schema",
@@ -126,7 +145,7 @@ class CreateScoutInput(BaseModel):
     )
 
 
-class EditScoutInput(BaseModel):
+class EditScoutInput(ToolInput):
     """Input for editing an existing scout or changing its status."""
 
     scout_id: str = Field(..., description=_SCOUT_ID_DESCRIPTION)
@@ -156,6 +175,7 @@ class EditScoutInput(BaseModel):
     )
     output_fields: list[str] | None = Field(
         default=None,
+        min_length=1,
         description=_output_fields_description(["headline", "summary", "url"]),
     )
     skip_email: bool | None = Field(
@@ -183,13 +203,13 @@ class EditScoutInput(BaseModel):
         return self
 
 
-class ScoutIdInput(BaseModel):
+class ScoutIdInput(ToolInput):
     """Input for operations on a specific scout."""
 
     scout_id: str = Field(..., description=_SCOUT_ID_DESCRIPTION)
 
 
-class ListScoutsInput(BaseModel):
+class ListScoutsInput(ToolInput):
     """Input for listing scouts with optional limit and filtering."""
 
     limit: int | None = Field(
@@ -204,7 +224,7 @@ class ListScoutsInput(BaseModel):
     )
 
 
-class GetUpdatesInput(BaseModel):
+class GetUpdatesInput(ToolInput):
     """Input for retrieving scout updates."""
 
     scout_id: str = Field(..., description=_SCOUT_ID_DESCRIPTION)
@@ -220,7 +240,7 @@ class GetUpdatesInput(BaseModel):
     )
 
 
-class BrowsingTaskInput(BaseModel):
+class BrowsingTaskInput(ToolInput):
     """Input for running a one-time browsing task.
 
     The Browsing API enables automation of browser-based workflows.
@@ -264,6 +284,7 @@ class BrowsingTaskInput(BaseModel):
     )
     output_fields: list[str] | None = Field(
         default=None,
+        min_length=1,
         description=_output_fields_description(
             ["name", "title", "email"],
             docs_slug="browsing-create#using-webhooks-and-a-structured-output-schema",
@@ -279,13 +300,13 @@ class BrowsingTaskInput(BaseModel):
     )
 
 
-class TaskIdInput(BaseModel):
+class TaskIdInput(ToolInput):
     """Input for retrieving a browsing or research task result."""
 
     task_id: str = Field(..., description="The task's unique identifier")
 
 
-class ResearchTaskInput(BaseModel):
+class ResearchTaskInput(ToolInput):
     """Input for running a one-time research task.
 
     The Research API executes deep web research on any topic.
@@ -315,6 +336,7 @@ class ResearchTaskInput(BaseModel):
     )
     output_fields: list[str] | None = Field(
         default=None,
+        min_length=1,
         description=_output_fields_description(
             ["title", "summary", "source_url"],
             docs_slug="research-create#using-webhooks-and-a-structured-output-schema",

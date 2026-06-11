@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, NoReturn
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from . import __version__
 from .adapter import MCPClientAdapter, YutoriAPIError
@@ -132,31 +132,34 @@ def create_server() -> Server:
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+        # Errors are raised (not returned as text) so the MCP framework marks
+        # the result with isError=True; it uses str(exception) as the message.
         try:
-            with MCPClientAdapter() as client:
-                result, context = _handle_tool(client, name, arguments)
-                formatted = format_response(name, result, **context)
-                return [TextContent(type="text", text=formatted)]
+            async with MCPClientAdapter() as client:
+                result, context = await _handle_tool(client, name, arguments)
+            formatted = format_response(name, result, **context)
+            return [TextContent(type="text", text=formatted)]
         except YutoriAPIError as e:
-            return [
-                TextContent(
-                    type="text", text=f"API Error ({e.status_code}): {e.message}"
-                )
-            ]
-        except Exception as e:
+            raise RuntimeError(f"API Error ({e.status_code}): {e.message}") from e
+        except ValidationError:
+            # Routine bad-arguments case; str(e) is already actionable for the
+            # client. Don't pollute logs with an ERROR-level traceback.
+            raise
+        except Exception:
             logger.exception(f"Error handling tool {name}")
-            return [TextContent(type="text", text=f"Error: {e!s}")]
+            raise
 
     return server
 
 
 # Signature for tool handlers registered in _TOOL_HANDLERS.
 ToolHandler = Callable[
-    [MCPClientAdapter, dict[str, Any]], tuple[dict[str, Any], dict[str, Any]]
+    [MCPClientAdapter, dict[str, Any]],
+    Awaitable[tuple[dict[str, Any], dict[str, Any]]],
 ]
 
 
-def _handle_tool(
+async def _handle_tool(
     client: MCPClientAdapter, name: str, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Route tool calls to the appropriate handler.
@@ -167,7 +170,7 @@ def _handle_tool(
     handler = _TOOL_HANDLERS.get(name)
     if handler is None:
         raise ValueError(f"Unknown tool: {name}")
-    return handler(client, arguments)
+    return await handler(client, arguments)
 
 
 def _scout_kwargs(
@@ -175,7 +178,8 @@ def _scout_kwargs(
 ) -> dict[str, Any]:
     """Convert a Pydantic input model into adapter kwargs.
 
-    Drops None fields (matches adapter._strip_none centralization) and
+    Drops None fields — _handle_edit_scout relies on the result being empty
+    when no config fields were provided — and
     transforms `output_fields` into the API's `output_schema` format.
     Callers can pass `extra_exclude` to drop additional fields (e.g. control
     fields that are not part of the scout config payload).
@@ -194,11 +198,11 @@ def _scout_kwargs(
 # -----------------------------------------------------------------------------
 
 
-def _handle_list_api_usage(
+async def _handle_list_api_usage(
     client: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     params = UsageInput(**arguments)
-    result = client.get_usage(period=params.period)
+    result = await client.get_usage(period=params.period)
     return result, {}
 
 
@@ -213,51 +217,71 @@ def _make_scout_kwargs_handler(
     with its input schema and adapter method.
     """
 
-    def handler(
+    async def handler(
         client: MCPClientAdapter, arguments: dict[str, Any]
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         params = input_class(**arguments)
-        return getattr(client, client_method)(**_scout_kwargs(params)), {}
+        return await getattr(client, client_method)(**_scout_kwargs(params)), {}
 
     return handler
 
 
-def _handle_get_scout_detail(
+async def _handle_get_scout_detail(
     client: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     params = ScoutIdInput(**arguments)
-    return client.get_scout_detail(params.scout_id), {}
+    return await client.get_scout_detail(params.scout_id), {}
 
 
-def _handle_edit_scout(
+async def _handle_edit_scout(
     client: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     params = EditScoutInput(**arguments)
 
     # Fetch current state for diff (also validates scout exists)
-    old_scout = client.get_scout_detail(params.scout_id)
+    old_scout = await client.get_scout_detail(params.scout_id)
 
     # Build config kwargs, excluding control fields (scout_id is passed
     # explicitly below; status is applied separately after config updates).
     config_kwargs = _scout_kwargs(params, extra_exclude={"scout_id", "status"})
 
     if config_kwargs:
-        client.edit_scout(scout_id=params.scout_id, **config_kwargs)
+        await client.edit_scout(scout_id=params.scout_id, **config_kwargs)
 
-    # Apply status change after config updates
+    # Apply status change after config updates. The API requires status and
+    # config to be updated in separate calls, so the operation is not atomic:
+    # if the status call fails after a config update succeeded, say so
+    # explicitly instead of reporting a plain failure.
     if params.status is not None:
-        client.edit_scout(scout_id=params.scout_id, status=params.status)
+        try:
+            await client.edit_scout(scout_id=params.scout_id, status=params.status)
+        except YutoriAPIError as e:
+            if config_kwargs:
+                raise YutoriAPIError(
+                    message=(
+                        "Scout config changes were applied, but the status "
+                        f"change to '{params.status}' failed: {e.message}. "
+                        "Retry with edit_scout(scout_id, status=...) only."
+                    ),
+                    status_code=e.status_code,
+                ) from e
+            raise
 
-    # Return old and new state for diff
-    new_scout = client.get_scout_detail(params.scout_id)
+    # Return old and new state for diff. Every mutation already succeeded at
+    # this point, so a failed read-back must not surface as a failed edit —
+    # the formatter renders a success message without the diff instead.
+    try:
+        new_scout = await client.get_scout_detail(params.scout_id)
+    except YutoriAPIError:
+        new_scout = {}
     return {"old": old_scout, "new": new_scout}, {}
 
 
-def _handle_delete_scout(
+async def _handle_delete_scout(
     client: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     params = ScoutIdInput(**arguments)
-    result = client.delete_scout(params.scout_id)
+    result = await client.delete_scout(params.scout_id)
     return result, {"scout_id": params.scout_id}
 
 
@@ -267,43 +291,43 @@ def _make_run_task_handler(
     client_method: str,
     include_browser: bool = False,
 ) -> ToolHandler:
-    """Build a ``run_*_task`` handler that defers only by input schema + adapter method + task_type.
+    """Build a ``run_*_task`` handler that differs only by input schema + adapter method + task_type.
 
-    The browsing and research variants previously had two near-identical
-    handlers; both parse a task-input schema, call ``_scout_kwargs(params)``
-    on the adapter, and stamp the matching ``task_type`` into the formatter
-    context. ``include_browser=True`` additionally surfaces ``params.browser``
-    so ``format_task_started`` can annotate the local/cloud distinction
+    The browsing and research variants share one shape: parse a task-input
+    schema, call the adapter method with ``_scout_kwargs(params)``, and stamp
+    the matching ``task_type`` into the formatter context.
+    ``include_browser=True`` additionally surfaces ``params.browser`` so
+    ``format_task_started`` can annotate the local/cloud distinction
     (research has no browser knob, so it omits the field).
     """
 
-    def handler(
+    async def handler(
         client: MCPClientAdapter, arguments: dict[str, Any]
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         params = input_class(**arguments)
         context: dict[str, Any] = {"task_type": task_type}
         if include_browser:
             context["browser"] = params.browser  # type: ignore[attr-defined]
-        return getattr(client, client_method)(**_scout_kwargs(params)), context
+        return await getattr(client, client_method)(**_scout_kwargs(params)), context
 
     return handler
 
 
 def _make_get_task_result_handler(task_type: str, client_method: str) -> ToolHandler:
-    """Build a ``get_*_task_result`` handler that defers only by adapter method + task_type.
+    """Build a ``get_*_task_result`` handler that differs only by adapter method + task_type.
 
-    The browsing and research variants previously had two near-identical
-    handlers; both parse :class:`TaskIdInput`, call a single-argument
-    adapter method, and stamp the matching ``task_type`` into the formatter
-    context. Generating both from one factory keeps the registry as the
-    single place that pairs the tool name with its task type.
+    The browsing and research variants share one shape: parse
+    :class:`TaskIdInput`, call a single-argument adapter method, and stamp
+    the matching ``task_type`` into the formatter context. Generating both
+    from one factory keeps the registry as the single place that pairs the
+    tool name with its task type.
     """
 
-    def handler(
+    async def handler(
         client: MCPClientAdapter, arguments: dict[str, Any]
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         params = TaskIdInput(**arguments)
-        return getattr(client, client_method)(params.task_id), {"task_type": task_type}
+        return await getattr(client, client_method)(params.task_id), {"task_type": task_type}
 
     return handler
 
