@@ -2,6 +2,8 @@
 
 All tool outputs are formatted as human-readable text optimized for LLM consumption.
 
+All tool inputs enforce strict validation: unknown fields are rejected, webhook URLs must use HTTPS, and `output_fields` (where supported) must contain at least one entry.
+
 ## Usage
 
 ### list_api_usage
@@ -167,7 +169,7 @@ First run: 2026-01-07 03:10 UTC
 |-----------|----------|-------------|
 | `query` | Yes | Natural language description of what to monitor |
 | `output_interval` | No | Seconds between runs (min: 1800). Default: 86400 |
-| `webhook_url` | No | URL for webhook notifications |
+| `webhook_url` | No | HTTPS URL for webhook notifications |
 | `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
 | `output_fields` | No | List of field names for structured output as array of objects |
 | `user_timezone` | No | Timezone for scheduling |
@@ -229,7 +231,7 @@ Changes applied:
 | `status` | No | `active` (resume), `paused` (pause), or `done` (archive) |
 | `query` | No | Updated monitoring query |
 | `output_interval` | No | Seconds between runs (min 1800) |
-| `webhook_url` | No | Webhook notification URL |
+| `webhook_url` | No | HTTPS URL for webhook notifications |
 | `webhook_format` | No | `scout`, `slack`, or `zapier` |
 | `output_fields` | No | List of field names for structured output |
 | `user_timezone` | No | Timezone for scheduling |
@@ -267,6 +269,12 @@ Get paginated updates from a scout.
   "limit": 2
 }
 ```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `scout_id` | Yes | The scout's unique identifier (UUID) |
+| `cursor` | No | Pagination cursor from a previous response |
+| `limit` | No | Maximum number of updates to return (1-100) |
 
 Example response:
 
@@ -329,7 +337,7 @@ Poll with get_research_task_result(task_id="ae27a17c-a4ed-4c69-8b2a-4bec330fc935
 | `user_timezone` | No | Timezone for context. Default: 'America/Los_Angeles' |
 | `user_location` | No | Location for context. Default: 'San Francisco, CA, US' |
 | `output_fields` | No | List of field names for structured output as array of objects |
-| `webhook_url` | No | URL for completion notification |
+| `webhook_url` | No | HTTPS URL for completion notification |
 | `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
 
 ### get_research_task_result
@@ -421,7 +429,7 @@ Poll with get_browsing_task_result(task_id="54fb19fd-277e-4098-ab72-5a9f8a4347fc
 | `require_auth` | No | If true, use an auth-optimized cloud browser provider for login flows. Only applies when browser is `cloud` (default) |
 | `browser` | No | `cloud` (default) or `local` to use Yutori Local with the user's logged-in desktop browser |
 | `output_fields` | No | List of field names for structured output as array of objects |
-| `webhook_url` | No | URL for completion notification |
+| `webhook_url` | No | HTTPS URL for completion notification |
 | `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
 
 ### get_browsing_task_result
