@@ -17,6 +17,20 @@ from yutori_mcp.schemas import (
     _output_fields_description,
 )
 
+# Minimal required kwargs for each input class that supports webhook/output_fields.
+# Used by parametrized cross-class validation tests — add a row here when a new
+# input class is introduced that shares these shared validators.
+_ALL_INPUT_CLASSES = [
+    pytest.param(CreateScoutInput, {"query": "Test"}, id="CreateScoutInput"),
+    pytest.param(EditScoutInput, {"scout_id": "abc-123"}, id="EditScoutInput"),
+    pytest.param(
+        BrowsingTaskInput,
+        {"task": "Test", "start_url": "https://example.com"},
+        id="BrowsingTaskInput",
+    ),
+    pytest.param(ResearchTaskInput, {"query": "Test"}, id="ResearchTaskInput"),
+]
+
 
 class TestUsageInput:
     def test_default_period(self):
@@ -39,29 +53,11 @@ class TestUsageInput:
 class TestWebhookUrlValidation:
     """Tests for the shared _check_webhook_https validator across all schemas."""
 
-    def test_http_url_rejected_create_scout(self):
-        """CreateScoutInput rejects non-HTTPS webhook URLs."""
+    @pytest.mark.parametrize("cls,required_kwargs", _ALL_INPUT_CLASSES)
+    def test_http_url_rejected(self, cls, required_kwargs):
+        """Every input class rejects non-HTTPS webhook URLs."""
         with pytest.raises(ValidationError, match="webhook_url must use HTTPS"):
-            CreateScoutInput(query="Test", webhook_url="http://example.com/webhook")
-
-    def test_http_url_rejected_edit_scout(self):
-        """EditScoutInput rejects non-HTTPS webhook URLs."""
-        with pytest.raises(ValidationError, match="webhook_url must use HTTPS"):
-            EditScoutInput(scout_id="abc-123", webhook_url="http://example.com/webhook")
-
-    def test_http_url_rejected_browsing_task(self):
-        """BrowsingTaskInput rejects non-HTTPS webhook URLs."""
-        with pytest.raises(ValidationError, match="webhook_url must use HTTPS"):
-            BrowsingTaskInput(
-                task="Test",
-                start_url="https://example.com",
-                webhook_url="http://example.com/webhook",
-            )
-
-    def test_http_url_rejected_research_task(self):
-        """ResearchTaskInput rejects non-HTTPS webhook URLs."""
-        with pytest.raises(ValidationError, match="webhook_url must use HTTPS"):
-            ResearchTaskInput(query="Test", webhook_url="http://example.com/webhook")
+            cls(**required_kwargs, webhook_url="http://example.com/webhook")
 
     def test_https_url_accepted(self):
         """HTTPS webhook URLs are accepted across all schemas."""
@@ -429,41 +425,11 @@ class TestInvalidBrowserRejected:
             )
 
 
-class TestInvalidWebhookFormatRejected:
-    """Verify that invalid webhook_format values are rejected."""
-
-    def test_browsing_task_rejects_invalid_webhook_format(self):
-        """BrowsingTaskInput rejects webhook_format='discord'."""
-        with pytest.raises(ValidationError):
-            BrowsingTaskInput(
-                task="Test task",
-                start_url="https://example.com",
-                webhook_format="discord",
-            )
-
-    def test_research_task_rejects_invalid_webhook_format(self):
-        """ResearchTaskInput rejects webhook_format='discord'."""
-        with pytest.raises(ValidationError):
-            ResearchTaskInput(
-                query="Test query",
-                webhook_format="discord",
-            )
-
-    def test_create_scout_rejects_invalid_webhook_format(self):
-        """CreateScoutInput rejects webhook_format='discord'."""
-        with pytest.raises(ValidationError):
-            CreateScoutInput(
-                query="Test query",
-                webhook_format="discord",
-            )
-
-    def test_edit_scout_rejects_invalid_webhook_format(self):
-        """EditScoutInput rejects webhook_format='discord'."""
-        with pytest.raises(ValidationError):
-            EditScoutInput(
-                scout_id="abc-123",
-                webhook_format="discord",
-            )
+@pytest.mark.parametrize("cls,required_kwargs", _ALL_INPUT_CLASSES)
+def test_invalid_webhook_format_rejected(cls, required_kwargs):
+    """Every input class rejects invalid webhook_format values."""
+    with pytest.raises(ValidationError):
+        cls(**required_kwargs, webhook_format="discord")
 
 
 class TestExtraFieldsRejected:
@@ -480,24 +446,11 @@ class TestExtraFieldsRejected:
         assert schema["additionalProperties"] is False
 
 
-class TestOutputFieldsMinLength:
+@pytest.mark.parametrize("cls,required_kwargs", _ALL_INPUT_CLASSES)
+def test_empty_output_fields_rejected(cls, required_kwargs):
     """An empty output_fields list would produce a degenerate output schema."""
-
-    def test_empty_rejected_create_scout(self):
-        with pytest.raises(ValidationError):
-            CreateScoutInput(query="Test", output_fields=[])
-
-    def test_empty_rejected_edit_scout(self):
-        with pytest.raises(ValidationError):
-            EditScoutInput(scout_id="abc-123", output_fields=[])
-
-    def test_empty_rejected_browsing_task(self):
-        with pytest.raises(ValidationError):
-            BrowsingTaskInput(task="Test", start_url="https://example.com", output_fields=[])
-
-    def test_empty_rejected_research_task(self):
-        with pytest.raises(ValidationError):
-            ResearchTaskInput(query="Test", output_fields=[])
+    with pytest.raises(ValidationError):
+        cls(**required_kwargs, output_fields=[])
 
 
 class TestWebhookUrlRequiresHost:
