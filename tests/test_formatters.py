@@ -15,6 +15,7 @@ from yutori_mcp.formatters import (
     format_scout_detail,
     format_scout_edited,
     format_scout_updates,
+    format_task_list,
     format_task_result,
     format_task_started,
     format_usage,
@@ -100,7 +101,9 @@ class TestFormatUsage:
 
     def test_navigator_rate_limits_fallback_to_deprecated_n1_key(self):
         """If only the deprecated n1_rate_limits field is present, still render the section."""
-        response = {k: v for k, v in self.USAGE_RESPONSE.items() if k != "navigator_rate_limits"}
+        response = {
+            k: v for k, v in self.USAGE_RESPONSE.items() if k != "navigator_rate_limits"
+        }
         result = format_usage(response)
         assert "Navigator API Rate Limits" in result
         assert "Requests today: 100" in result
@@ -165,7 +168,11 @@ class TestFormatUsage:
 class TestFormatListScouts:
     def test_empty_list(self):
         """Empty scouts list shows appropriate message."""
-        response = {"scouts": [], "total": 0, "summary": {"active": 0, "paused": 0, "done": 0}}
+        response = {
+            "scouts": [],
+            "total": 0,
+            "summary": {"active": 0, "paused": 0, "done": 0},
+        }
         result = format_list_scouts(response)
         assert "Found 0 scouts" in result
         assert "No scouts to display" in result
@@ -203,6 +210,18 @@ class TestFormatListScouts:
         }
         result = format_list_scouts(response)
         assert "limit=50" in result
+
+    def test_cursor_hint_when_next_cursor_present(self):
+        """has_more with a next_cursor surfaces a cursor-pagination hint."""
+        response = {
+            "scouts": [{"id": "abc", "query": "test", "status": "active"}],
+            "total": 50,
+            "summary": {"active": 50, "paused": 0, "done": 0},
+            "has_more": True,
+            "next_cursor": "scout-cur-2",
+        }
+        result = format_list_scouts(response)
+        assert 'list_scouts(cursor="scout-cur-2")' in result
 
     def test_shows_rejection_reason(self):
         """Scout list includes rejection reason when present."""
@@ -290,8 +309,18 @@ class TestFormatScoutEdited:
     def test_with_diff(self):
         """Shows changes when old and new state provided."""
         response = {
-            "old": {"id": "abc", "status": "active", "query": "old query", "output_interval": 86400},
-            "new": {"id": "abc", "status": "paused", "query": "new query", "output_interval": 86400},
+            "old": {
+                "id": "abc",
+                "status": "active",
+                "query": "old query",
+                "output_interval": 86400,
+            },
+            "new": {
+                "id": "abc",
+                "status": "paused",
+                "query": "new query",
+                "output_interval": 86400,
+            },
         }
         result = format_scout_edited(response)
         assert "Scout updated successfully" in result
@@ -365,7 +394,11 @@ class TestFormatTaskStarted:
 
     def test_browsing_task(self):
         """Browsing task shows ID and poll hint."""
-        response = {"task_id": "task-xyz", "status": "queued", "view_url": "https://yutori.com/tasks/xyz"}
+        response = {
+            "task_id": "task-xyz",
+            "status": "queued",
+            "view_url": "https://yutori.com/tasks/xyz",
+        }
         result = format_task_started(response, task_type="Browsing")
         assert "Browsing task started" in result
         assert "task-xyz" in result
@@ -385,6 +418,135 @@ class TestFormatTaskStarted:
         assert "Poll with" not in result
 
 
+class TestFormatTaskList:
+    def test_empty_browsing_task_list(self):
+        """Empty browsing task lists show the summary and empty message."""
+        response = {
+            "tasks": [],
+            "total": 0,
+            "filtered_total": 0,
+            "summary": {"running": 0, "succeeded": 0, "failed": 0},
+        }
+        result = format_task_list(response, task_type="Browsing")
+
+        assert "Found 0 browsing tasks" in result
+        assert "No browsing tasks to display" in result
+
+    def test_research_task_list_with_pagination(self):
+        """Research task lists include task metadata and cursor hint."""
+        response = {
+            "tasks": [
+                {
+                    "task_id": "task-1",
+                    "query": "Research GPU pricing",
+                    "status": "succeeded",
+                    "created_at": "2026-06-25T12:00:00Z",
+                    "view_url": "https://platform.yutori.com/research/tasks/task-1",
+                }
+            ],
+            "total": 12,
+            "filtered_total": 8,
+            "summary": {"running": 2, "succeeded": 8, "failed": 2},
+            "has_more": True,
+            "next_cursor": "cursor-2",
+        }
+        result = format_task_list(response, task_type="Research")
+
+        assert "Found 12 research tasks: 2 running, 8 succeeded, 2 failed." in result
+        assert "Showing 1 of 8 matching tasks (12 total):" in result
+        assert "Research GPU pricing" in result
+        assert "task-1" in result
+        assert "https://platform.yutori.com/research/tasks/task-1" in result
+        assert 'list_research_tasks(cursor="cursor-2")' in result
+        assert 'list_research_tasks(status="succeeded")' in result
+        assert "get_research_task_result(task_id)" in result
+
+    def test_task_list_shows_rejection_reason(self):
+        """Failed task list entries include rejection reason when available."""
+        response = {
+            "tasks": [
+                {
+                    "task_id": "task-2",
+                    "query": "Export invoice",
+                    "status": "failed",
+                    "created_at": "2026-06-25T12:00:00Z",
+                    "rejection_reason": "insufficient_prepaid_balance",
+                }
+            ],
+            "total": 1,
+            "summary": {"running": 0, "succeeded": 0, "failed": 1},
+        }
+        result = format_task_list(response, task_type="Browsing")
+
+        assert "Rejection reason: insufficient_prepaid_balance" in result
+
+    def test_showing_all_when_complete(self):
+        """No filter and no more pages -> 'Showing all N' with no pagination hint."""
+        response = {
+            "tasks": [
+                {"task_id": "t1", "query": "a", "status": "succeeded"},
+                {"task_id": "t2", "query": "b", "status": "succeeded"},
+            ],
+            "total": 2,
+            "filtered_total": 2,
+            "summary": {"running": 0, "succeeded": 2, "failed": 0},
+            "has_more": False,
+        }
+        result = format_task_list(response, task_type="Browsing")
+
+        assert "Showing all 2:" in result
+        assert "More tasks available" not in result
+
+    def test_has_more_without_filter(self):
+        """has_more with filtered_total == total -> unfiltered 'Showing N of T' + cursor hint."""
+        response = {
+            "tasks": [{"task_id": "t1", "query": "a", "status": "running"}],
+            "total": 20,
+            "filtered_total": 20,
+            "summary": {"running": 20, "succeeded": 0, "failed": 0},
+            "has_more": True,
+            "next_cursor": "cursor-2",
+        }
+        result = format_task_list(response, task_type="Browsing")
+
+        assert "Showing 1 of 20:" in result
+        assert "matching tasks" not in result
+        assert 'list_browsing_tasks(cursor="cursor-2")' in result
+
+    def test_no_cursor_hint_when_next_cursor_missing(self):
+        """has_more but no next_cursor -> no 'More tasks available' line (avoid cursor='None')."""
+        response = {
+            "tasks": [{"task_id": "t1", "query": "a", "status": "running"}],
+            "total": 5,
+            "filtered_total": 5,
+            "summary": {"running": 5, "succeeded": 0, "failed": 0},
+            "has_more": True,
+        }
+        result = format_task_list(response, task_type="Research")
+
+        assert "More tasks available" not in result
+        # Static hints are still present.
+        assert 'list_research_tasks(status="succeeded")' in result
+        assert "get_research_task_result(task_id)" in result
+
+    def test_minimal_response_without_total_or_summary(self):
+        """A payload with only `tasks` renders without crashing and omits a zeroed breakdown."""
+        response = {"tasks": [{"task_id": "t1", "query": "q", "status": "succeeded"}]}
+        result = format_task_list(response, task_type="Browsing")
+
+        # No summary -> count only, not a misleading "0 running, 0 succeeded, 0 failed".
+        assert "Found 1 browsing tasks." in result
+        assert "0 succeeded" not in result
+        assert "Showing all 1:" in result
+
+    def test_null_summary_does_not_crash(self):
+        """An explicit `summary: null` must not raise (regression guard for `or {}`)."""
+        response = {"tasks": [{"task_id": "t1", "query": "q", "status": "succeeded"}], "summary": None}
+        result = format_task_list(response, task_type="Research")
+
+        assert "Found 1 research tasks." in result
+
+
 class TestFormatTaskResult:
     def test_in_progress(self):
         """In-progress task shows status and poll hint."""
@@ -396,7 +558,11 @@ class TestFormatTaskResult:
 
     def test_completed(self):
         """Completed task shows result."""
-        response = {"task_id": "task-abc", "status": "succeeded", "result": "Here are the findings..."}
+        response = {
+            "task_id": "task-abc",
+            "status": "succeeded",
+            "result": "Here are the findings...",
+        }
         result = format_task_result(response)
         assert "Task completed" in result
         assert "succeeded" in result
@@ -416,7 +582,11 @@ class TestFormatTaskResult:
 
     def test_failed(self):
         """Failed task shows error."""
-        response = {"task_id": "task-abc", "status": "failed", "error": "Something went wrong"}
+        response = {
+            "task_id": "task-abc",
+            "status": "failed",
+            "error": "Something went wrong",
+        }
         result = format_task_result(response)
         assert "Task failed" in result
         assert "Something went wrong" in result
@@ -426,7 +596,11 @@ class TestFormatResponse:
     def test_routes_to_correct_formatter(self):
         """format_response routes to the right formatter."""
         # Test list_scouts routing
-        response = {"scouts": [], "total": 0, "summary": {"active": 0, "paused": 0, "done": 0}}
+        response = {
+            "scouts": [],
+            "total": 0,
+            "summary": {"active": 0, "paused": 0, "done": 0},
+        }
         result = format_response("list_scouts", response)
         assert "Found 0 scouts" in result
 
@@ -479,11 +653,15 @@ class TestFormatSources:
 
     def test_truncation_at_max_items(self):
         """Sources beyond max_items are truncated with count."""
-        response = {"sources": [{"url": f"https://{i}.com", "title": f"S{i}"} for i in range(15)]}
+        response = {
+            "sources": [
+                {"url": f"https://{i}.com", "title": f"S{i}"} for i in range(15)
+            ]
+        }
         lines = _format_sources(response, max_items=10)
         assert "  ... and 5 more" in lines
         # Should have header + 10 items + truncation line + blank line prefix
-        source_lines = [l for l in lines if l.startswith("  - ")]
+        source_lines = [line for line in lines if line.startswith("  - ")]
         assert len(source_lines) == 10
 
     def test_custom_indent(self):
@@ -633,8 +811,16 @@ class TestFormatScoutEditedOutputFields:
 
     def test_output_schema_change_appears_in_diff(self):
         response = {
-            "old": {"id": "s1", "query": "q", "output_schema": self._schema(["headline"])},
-            "new": {"id": "s1", "query": "q", "output_schema": self._schema(["headline", "url"])},
+            "old": {
+                "id": "s1",
+                "query": "q",
+                "output_schema": self._schema(["headline"]),
+            },
+            "new": {
+                "id": "s1",
+                "query": "q",
+                "output_schema": self._schema(["headline", "url"]),
+            },
         }
         result = format_scout_edited(response)
         assert "Output fields: headline → headline, url" in result
@@ -679,7 +865,13 @@ class TestFormatOutputFieldsDiffShapes:
 
     def test_custom_schema_shapes_do_not_crash(self):
         # JSON Schema tuple-form items (a list, not a dict)
-        assert _format_output_fields_diff({"items": [{"type": "string"}]}) == "(custom schema)"
+        assert (
+            _format_output_fields_diff({"items": [{"type": "string"}]})
+            == "(custom schema)"
+        )
         # Object-form schema without items
-        assert _format_output_fields_diff({"type": "object", "properties": {}}) == "(custom schema)"
+        assert (
+            _format_output_fields_diff({"type": "object", "properties": {}})
+            == "(custom schema)"
+        )
         assert _format_output_fields_diff(None) == "(not set)"

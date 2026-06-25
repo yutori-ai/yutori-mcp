@@ -92,7 +92,12 @@ class MCPClientAdapter:
     # Browsing operations
     # -------------------------------------------------------------------------
 
-    async def run_browsing_task(self, task: str, start_url: str, **kwargs: Any) -> dict[str, Any]:
+    async def list_browsing_tasks(self, **kwargs: Any) -> dict[str, Any]:
+        return await self._call(self._client.browsing.list, **kwargs)
+
+    async def run_browsing_task(
+        self, task: str, start_url: str, **kwargs: Any
+    ) -> dict[str, Any]:
         return await self._call(self._client.browsing.create, task, start_url, **kwargs)
 
     async def get_browsing_task(self, task_id: str) -> dict[str, Any]:
@@ -101,6 +106,9 @@ class MCPClientAdapter:
     # -------------------------------------------------------------------------
     # Research operations
     # -------------------------------------------------------------------------
+
+    async def list_research_tasks(self, **kwargs: Any) -> dict[str, Any]:
+        return await self._call(self._client.research.list, **kwargs)
 
     async def run_research_task(self, query: str, **kwargs: Any) -> dict[str, Any]:
         return await self._call(self._client.research.create, query, **kwargs)

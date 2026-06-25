@@ -10,6 +10,7 @@ from yutori_mcp.schemas import (
     EditScoutInput,
     GetUpdatesInput,
     ListScoutsInput,
+    ListTasksInput,
     ResearchTaskInput,
     ScoutIdInput,
     TaskIdInput,
@@ -319,6 +320,47 @@ class TestListScoutsInput:
         assert data.limit == 20
         assert data.status == "active"
 
+    def test_cursor_defaults_none_and_is_settable(self):
+        """Cursor defaults to None and accepts a pagination token."""
+        assert ListScoutsInput().cursor is None
+        assert ListScoutsInput(cursor="next-page").cursor == "next-page"
+
+
+class TestListTasksInput:
+    def test_default_values(self):
+        """Default limit is 10, status and cursor are None."""
+        data = ListTasksInput()
+        assert data.limit == 10
+        assert data.status is None
+        assert data.cursor is None
+
+    def test_custom_limit_and_cursor(self):
+        """Limit and cursor can be set together."""
+        data = ListTasksInput(limit=50, cursor="next-page")
+        assert data.limit == 50
+        assert data.cursor == "next-page"
+
+    def test_limit_range(self):
+        """Limit must be between 1 and 100."""
+        assert ListTasksInput(limit=1).limit == 1
+        assert ListTasksInput(limit=100).limit == 100
+
+        with pytest.raises(ValidationError):
+            ListTasksInput(limit=0)
+
+        with pytest.raises(ValidationError):
+            ListTasksInput(limit=101)
+
+    def test_status_filter(self):
+        """Status filter accepts the task-list statuses from the REST API."""
+        for status in ("running", "succeeded", "failed"):
+            assert ListTasksInput(status=status).status == status
+
+    def test_status_invalid(self):
+        """Detail-only statuses are rejected for list filters."""
+        with pytest.raises(ValidationError):
+            ListTasksInput(status="queued")
+
 
 class TestTaskIdInput:
     def test_task_id_required(self):
@@ -404,7 +446,12 @@ class TestOutputFieldsDescription:
 
     def test_all_schemas_use_helper(self):
         """All four output_fields descriptions are produced by the helper."""
-        for model_cls in (CreateScoutInput, EditScoutInput, BrowsingTaskInput, ResearchTaskInput):
+        for model_cls in (
+            CreateScoutInput,
+            EditScoutInput,
+            BrowsingTaskInput,
+            ResearchTaskInput,
+        ):
             desc = model_cls.model_fields["output_fields"].description
             assert desc is not None
             assert "Optional: Extract structured data" in desc, (
@@ -476,7 +523,12 @@ class TestSimplifiedSchemaConstraints:
     def test_min_items_survives_simplification(self):
         from yutori_mcp.schema_utils import get_simplified_schema
 
-        for model_cls in (CreateScoutInput, EditScoutInput, BrowsingTaskInput, ResearchTaskInput):
+        for model_cls in (
+            CreateScoutInput,
+            EditScoutInput,
+            BrowsingTaskInput,
+            ResearchTaskInput,
+        ):
             schema = get_simplified_schema(model_cls)
             field = schema["properties"]["output_fields"]
             assert field.get("minItems") == 1, (

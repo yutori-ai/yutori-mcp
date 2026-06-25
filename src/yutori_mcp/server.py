@@ -21,6 +21,7 @@ from .schemas import (
     EditScoutInput,
     GetUpdatesInput,
     ListScoutsInput,
+    ListTasksInput,
     ResearchTaskInput,
     ScoutIdInput,
     TaskIdInput,
@@ -98,6 +99,17 @@ TOOLS = [
         inputSchema=get_simplified_schema(BrowsingTaskInput),
     ),
     Tool(
+        name="list_browsing_tasks",
+        description=(
+            "List one-time browsing tasks for the authenticated user. "
+            "Supports cursor pagination and status filtering. List status is approximate "
+            "(running also covers queued and not-yet-reconciled tasks); call "
+            "get_browsing_task_result for a task's authoritative status."
+        ),
+        inputSchema=get_simplified_schema(ListTasksInput),
+        annotations={"readOnlyHint": True},
+    ),
+    Tool(
         name="get_browsing_task_result",
         description="Poll for browsing task status and result. Call until status is 'succeeded' or 'failed'.",
         inputSchema=get_simplified_schema(TaskIdInput),
@@ -112,6 +124,17 @@ TOOLS = [
             "Example: 'latest AI startup funding announcements'."
         ),
         inputSchema=get_simplified_schema(ResearchTaskInput),
+    ),
+    Tool(
+        name="list_research_tasks",
+        description=(
+            "List one-time research tasks for the authenticated user. "
+            "Supports cursor pagination and status filtering. List status is approximate "
+            "(running also covers queued and not-yet-reconciled tasks); call "
+            "get_research_task_result for a task's authoritative status."
+        ),
+        inputSchema=get_simplified_schema(ListTasksInput),
+        annotations={"readOnlyHint": True},
     ),
     Tool(
         name="get_research_task_result",
@@ -226,6 +249,27 @@ def _make_scout_kwargs_handler(
     return handler
 
 
+def _make_model_kwargs_handler(
+    input_class: type[BaseModel], client_method: str, context: dict[str, Any] | None = None
+) -> ToolHandler:
+    """Build a handler that forwards a simple input model as keyword arguments.
+
+    ``context`` is the formatter context stamped onto the result (e.g.
+    ``{"task_type": "Browsing"}`` for the list_*_tasks tools); it defaults to
+    an empty context for tools whose formatter needs none.
+    """
+
+    async def handler(
+        client: MCPClientAdapter, arguments: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        params = input_class(**arguments)
+        return await getattr(client, client_method)(
+            **params.model_dump(exclude_none=True)
+        ), context or {}
+
+    return handler
+
+
 async def _handle_get_scout_detail(
     client: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -327,7 +371,9 @@ def _make_get_task_result_handler(task_type: str, client_method: str) -> ToolHan
         client: MCPClientAdapter, arguments: dict[str, Any]
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         params = TaskIdInput(**arguments)
-        return await getattr(client, client_method)(params.task_id), {"task_type": task_type}
+        return await getattr(client, client_method)(params.task_id), {
+            "task_type": task_type
+        }
 
     return handler
 
@@ -337,20 +383,32 @@ def _make_get_task_result_handler(task_type: str, client_method: str) -> ToolHan
 # of the MCP tool lifecycle is structured the same way as the format side.
 _TOOL_HANDLERS: dict[str, ToolHandler] = {
     "list_api_usage": _handle_list_api_usage,
-    "list_scouts": _make_scout_kwargs_handler(ListScoutsInput, "list_scouts"),
+    "list_scouts": _make_model_kwargs_handler(ListScoutsInput, "list_scouts"),
     "get_scout_detail": _handle_get_scout_detail,
-    "get_scout_updates": _make_scout_kwargs_handler(GetUpdatesInput, "get_scout_updates"),
+    "get_scout_updates": _make_model_kwargs_handler(
+        GetUpdatesInput, "get_scout_updates"
+    ),
     "create_scout": _make_scout_kwargs_handler(CreateScoutInput, "create_scout"),
     "edit_scout": _handle_edit_scout,
     "delete_scout": _handle_delete_scout,
+    "list_browsing_tasks": _make_model_kwargs_handler(
+        ListTasksInput, "list_browsing_tasks", {"task_type": "Browsing"}
+    ),
     "run_browsing_task": _make_run_task_handler(
         "Browsing", BrowsingTaskInput, "run_browsing_task", include_browser=True
     ),
-    "get_browsing_task_result": _make_get_task_result_handler("Browsing", "get_browsing_task"),
+    "get_browsing_task_result": _make_get_task_result_handler(
+        "Browsing", "get_browsing_task"
+    ),
+    "list_research_tasks": _make_model_kwargs_handler(
+        ListTasksInput, "list_research_tasks", {"task_type": "Research"}
+    ),
     "run_research_task": _make_run_task_handler(
         "Research", ResearchTaskInput, "run_research_task"
     ),
-    "get_research_task_result": _make_get_task_result_handler("Research", "get_research_task"),
+    "get_research_task_result": _make_get_task_result_handler(
+        "Research", "get_research_task"
+    ),
 }
 
 
