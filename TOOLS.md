@@ -65,6 +65,7 @@ List scouts for the user with optional filtering.
 |-----------|----------|-------------|
 | `limit` | No | Max scouts to return (1-100). Default: 10 |
 | `status` | No | Filter by `active`, `paused`, or `done` |
+| `cursor` | No | Pagination cursor from a previous response's `next_cursor` |
 
 Example response:
 
@@ -296,6 +297,40 @@ No new findings since last update.
 
 ## Research Tools
 
+### list_research_tasks
+
+List one-time research tasks for the user with optional filtering and cursor pagination.
+
+```json
+{
+  "limit": 10,
+  "status": "succeeded"
+}
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `limit` | No | Max tasks to return (1-100). Default: 10 |
+| `status` | No | Filter by `running`, `succeeded`, or `failed` |
+| `cursor` | No | Cursor from a previous response |
+
+Example response:
+
+```
+Found 248 research tasks: 0 running, 245 succeeded, 3 failed.
+
+Showing 10 of 245 matching tasks (248 total):
+
+1. Competitive landscape for AI code assistants (succeeded)
+   ID: ae27a17c-a4ed-4c69-8b2a-4bec330fc935
+   URL: https://platform.yutori.com/research/tasks/ae27a17c-a4ed-4c69-8b2a-4bec330fc935
+   Created: 2026-06-25
+
+More tasks available. Use list_research_tasks(cursor="eyJjcmVhdGVkX2F0...") to load more.
+Use list_research_tasks(status="succeeded") to list tasks with retrievable results.
+Use get_research_task_result(task_id) for full details.
+```
+
 ### run_research_task
 
 Execute a one-time deep web research task. The research agent searches, reads, and synthesizes information from across the web.
@@ -382,6 +417,40 @@ and an industry appearance from January 12–19, 2026.
 ```
 
 ## Browsing Tools
+
+### list_browsing_tasks
+
+List one-time browsing tasks for the user with optional filtering and cursor pagination.
+
+```json
+{
+  "limit": 10,
+  "status": "succeeded"
+}
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `limit` | No | Max tasks to return (1-100). Default: 10 |
+| `status` | No | Filter by `running`, `succeeded`, or `failed` |
+| `cursor` | No | Cursor from a previous response |
+
+Example response:
+
+```
+Found 42 browsing tasks: 1 running, 39 succeeded, 2 failed.
+
+Showing 10 of 39 matching tasks (42 total):
+
+1. Give me a list of all employees of Yutori. (succeeded)
+   ID: 54fb19fd-277e-4098-ab72-5a9f8a4347fc
+   URL: https://platform.yutori.com/browsing/tasks/54fb19fd-277e-4098-ab72-5a9f8a4347fc
+   Created: 2026-06-25
+
+More tasks available. Use list_browsing_tasks(cursor="eyJjcmVhdGVkX2F0...") to load more.
+Use list_browsing_tasks(status="succeeded") to list tasks with retrievable results.
+Use get_browsing_task_result(task_id) for full details.
+```
 
 ### run_browsing_task
 
@@ -488,6 +557,6 @@ Tools include hints for client behavior:
 
 | Tool | Annotation |
 |------|------------|
-| `list_api_usage`, `list_scouts`, `get_scout_detail`, `get_scout_updates`, `get_browsing_task_result`, `get_research_task_result` | `readOnlyHint: true` |
+| `list_api_usage`, `list_scouts`, `get_scout_detail`, `get_scout_updates`, `list_browsing_tasks`, `get_browsing_task_result`, `list_research_tasks`, `get_research_task_result` | `readOnlyHint: true` |
 | `edit_scout` | `idempotentHint: true` |
 | `delete_scout` | `destructiveHint: true` |

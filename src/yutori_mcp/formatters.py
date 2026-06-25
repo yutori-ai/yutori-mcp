@@ -298,11 +298,15 @@ def format_usage(response: dict[str, Any], **context: Any) -> str:
         lines.append(f"  Resets at: {rate_limits.get('reset_at', 'N/A')}")
 
     # Navigator rate limits (falls back to deprecated n1_rate_limits on older servers)
-    navigator_limits = _get_first(response, "navigator_rate_limits", "n1_rate_limits", default={})
+    navigator_limits = _get_first(
+        response, "navigator_rate_limits", "n1_rate_limits", default={}
+    )
     if navigator_limits:
         lines.append("\nNavigator API Rate Limits:")
         lines.extend(_format_request_count_lines(navigator_limits))
-        lines.append(f"  Per-second limit: {navigator_limits.get('per_second_limit', 'N/A')}")
+        lines.append(
+            f"  Per-second limit: {navigator_limits.get('per_second_limit', 'N/A')}"
+        )
         lines.append(f"  Resets at: {navigator_limits.get('reset_at', 'N/A')}")
 
     # Activity
@@ -331,7 +335,8 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
     """Format list_scouts response as readable text."""
     scouts = response.get("scouts", [])
     total = response.get("total", len(scouts))
-    summary = response.get("summary", {})
+    # `or {}` guards an explicit `summary: null` (a missing key already defaults).
+    summary = response.get("summary") or {}
     has_more = response.get("has_more", False)
 
     # Build summary line
@@ -370,7 +375,10 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
 
     # Add hints
     lines.append("")
-    if has_more:
+    next_cursor = response.get("next_cursor")
+    if has_more and next_cursor:
+        lines.append(f'Use list_scouts(cursor="{next_cursor}") to see more.')
+    elif has_more:
         lines.append("Use list_scouts(limit=50) to see more.")
     lines.append('Use list_scouts(status="active") to filter by status.')
     lines.append("Use get_scout_detail(scout_id) for full details.")
@@ -698,6 +706,79 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
     return "\n".join(lines)
 
 
+def format_task_list(response: dict[str, Any], **context: Any) -> str:
+    """Format list_*_tasks response as readable text.
+
+    The list endpoints always return total/summary, but this tolerates their
+    absence (older/partial payloads): fall back to the task count and drop the
+    per-status breakdown rather than printing "0 running, 0 succeeded, 0 failed"
+    over real rows. ``summary or {}`` also keeps an explicit ``summary: null``
+    (the field is nullable) from crashing the .get() calls below; total/
+    filtered_total are non-nullable ints, so a plain default suffices.
+    """
+    task_type = context["task_type"]
+    task_label = task_type.lower()
+    tasks = response.get("tasks", [])
+    total = response.get("total", len(tasks))
+    filtered_total = response.get("filtered_total", total)
+    summary = response.get("summary") or {}
+    has_more = response.get("has_more", False)
+    next_cursor = response.get("next_cursor")
+    list_tool, get_tool = _TASK_LIST_TOOLS[task_type]
+
+    if summary:
+        lines = [
+            f"Found {total} {task_label} tasks: "
+            f"{summary.get('running', 0)} running, "
+            f"{summary.get('succeeded', 0)} succeeded, "
+            f"{summary.get('failed', 0)} failed."
+        ]
+    else:
+        lines = [f"Found {total} {task_label} tasks."]
+
+    if not tasks:
+        lines.append(f"\nNo {task_label} tasks to display.")
+        return "\n".join(lines)
+
+    showing = len(tasks)
+    if filtered_total != total:
+        lines.append(
+            f"\nShowing {showing} of {filtered_total} matching tasks ({total} total):"
+        )
+    elif has_more:
+        lines.append(f"\nShowing {showing} of {total}:")
+    else:
+        lines.append(f"\nShowing all {showing}:")
+
+    for i, task in enumerate(tasks, 1):
+        task_id = task.get("task_id", "")
+        # The list endpoint returns the prompt under `query` for both task types
+        # (browsing create takes it as `task`); read `query` for either.
+        query = task.get("query") or ""
+        status = task.get("status", "unknown")
+        created = _format_date(task.get("created_at"))
+        view_url = task.get("view_url")
+
+        lines.append(f"\n{i}. {_truncate(query, 80)} ({status})")
+        lines.append(f"   ID: {task_id}")
+        if view_url:
+            lines.append(f"   URL: {view_url}")
+        lines.append(f"   Created: {created}")
+        _append_rejection_reason(lines, task.get("rejection_reason"), indent="   ")
+
+    lines.append("")
+    if has_more and next_cursor:
+        lines.append(
+            f'More tasks available. Use {list_tool}(cursor="{next_cursor}") to load more.'
+        )
+    lines.append(
+        f'Use {list_tool}(status="succeeded") to list tasks with retrievable results.'
+    )
+    lines.append(f"Use {get_tool}(task_id) for full details.")
+
+    return "\n".join(lines)
+
+
 def _append_result_content(lines: list[str], response: dict[str, Any]) -> None:
     """Append the task's result body (marker-wrapped) and sources, if any."""
     result = _get_first(response, "result", "output", "content")
@@ -755,6 +836,11 @@ _TASK_POLL_FNS: dict[str, str] = {
     "Browsing": "get_browsing_task_result",
 }
 
+_TASK_LIST_TOOLS: dict[str, tuple[str, str]] = {
+    "Research": ("list_research_tasks", "get_research_task_result"),
+    "Browsing": ("list_browsing_tasks", "get_browsing_task_result"),
+}
+
 # Tool-name -> formatter registry, referenced by format_response() above.
 # Defined at module scope (after all formatters) so the dict is built once at
 # import time rather than rebuilt on every call.
@@ -766,8 +852,10 @@ _TOOL_FORMATTERS = {
     "create_scout": format_scout_created,
     "edit_scout": format_scout_edited,
     "delete_scout": format_scout_deleted,
+    "list_browsing_tasks": format_task_list,
     "run_browsing_task": format_task_started,
     "get_browsing_task_result": format_task_result,
+    "list_research_tasks": format_task_list,
     "run_research_task": format_task_started,
     "get_research_task_result": format_task_result,
 }

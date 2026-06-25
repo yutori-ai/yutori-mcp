@@ -10,8 +10,10 @@ from yutori_mcp.adapter import MCPClientAdapter, YutoriAPIError, _strip_none
 
 @pytest.fixture()
 def adapter():
-    with patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-test-key"), \
-         patch("yutori_mcp.adapter.AsyncYutoriClient"):
+    with (
+        patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-test-key"),
+        patch("yutori_mcp.adapter.AsyncYutoriClient"),
+    ):
         return MCPClientAdapter()
 
 
@@ -43,7 +45,9 @@ class TestErrorMapping:
         assert exc_info.value.status_code == 401
         assert "Invalid API key" in exc_info.value.message
 
-    async def test_authentication_handler_preferred_if_auth_error_becomes_api_subclass(self):
+    async def test_authentication_handler_preferred_if_auth_error_becomes_api_subclass(
+        self,
+    ):
         class AuthAsApiError(APIError):
             pass
 
@@ -103,8 +107,10 @@ class TestAdapterInit:
                 MCPClientAdapter()
 
     def test_creates_client_with_resolved_key(self):
-        with patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-key"), \
-             patch("yutori_mcp.adapter.AsyncYutoriClient") as mock_client_cls:
+        with (
+            patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-key"),
+            patch("yutori_mcp.adapter.AsyncYutoriClient") as mock_client_cls,
+        ):
             MCPClientAdapter()
             mock_client_cls.assert_called_once_with(api_key="yt-key")
 
@@ -125,7 +131,11 @@ class TestStripNone:
         assert _strip_none({"a": 1, "b": None, "c": "x"}) == {"a": 1, "c": "x"}
 
     def test_preserves_falsy_non_none(self):
-        assert _strip_none({"a": 0, "b": False, "c": ""}) == {"a": 0, "b": False, "c": ""}
+        assert _strip_none({"a": 0, "b": False, "c": ""}) == {
+            "a": 0,
+            "b": False,
+            "c": "",
+        }
 
     def test_empty_dict(self):
         assert _strip_none({}) == {}
@@ -170,7 +180,9 @@ class TestCreateScoutForwarding:
 
     async def test_set_values_are_forwarded(self, adapter):
         adapter._client.scouts.create = AsyncMock(return_value={"id": "s1"})
-        await adapter.create_scout("test query", output_interval=3600, webhook_url="https://example.com")
+        await adapter.create_scout(
+            "test query", output_interval=3600, webhook_url="https://example.com"
+        )
 
         _, kwargs = adapter._client.scouts.create.call_args
         assert kwargs["output_interval"] == 3600
@@ -182,7 +194,9 @@ class TestEditScoutForwarding:
 
     async def test_none_values_not_forwarded(self, adapter):
         adapter._client.scouts.update = AsyncMock(return_value={"id": "s1"})
-        await adapter.edit_scout("s1", query=None, output_interval=None, status="paused")
+        await adapter.edit_scout(
+            "s1", query=None, output_interval=None, status="paused"
+        )
 
         _, kwargs = adapter._client.scouts.update.call_args
         assert "query" not in kwargs
@@ -207,6 +221,27 @@ class TestEditScoutForwarding:
 
 class TestBrowsingAndResearchForwarding:
     """Browsing and research should forward newly supported developer API fields."""
+
+    async def test_list_browsing_tasks_forwards_pagination_filters(self, adapter):
+        adapter._client.browsing.list = AsyncMock(return_value={"tasks": []})
+        await adapter.list_browsing_tasks(limit=20, status="succeeded", cursor="cur-1")
+
+        _, kwargs = adapter._client.browsing.list.call_args
+        assert kwargs == {"limit": 20, "status": "succeeded", "cursor": "cur-1"}
+
+    async def test_list_browsing_tasks_strips_none_values(self, adapter):
+        adapter._client.browsing.list = AsyncMock(return_value={"tasks": []})
+        await adapter.list_browsing_tasks(limit=None, status=None, cursor=None)
+
+        _, kwargs = adapter._client.browsing.list.call_args
+        assert kwargs == {}
+
+    async def test_list_research_tasks_forwards_pagination_filters(self, adapter):
+        adapter._client.research.list = AsyncMock(return_value={"tasks": []})
+        await adapter.list_research_tasks(limit=20, status="failed", cursor="cur-2")
+
+        _, kwargs = adapter._client.research.list.call_args
+        assert kwargs == {"limit": 20, "status": "failed", "cursor": "cur-2"}
 
     async def test_browsing_forwards_require_auth_browser_and_zapier(self, adapter):
         adapter._client.browsing.create = AsyncMock(return_value={"task_id": "t1"})

@@ -10,9 +10,13 @@ from yutori.auth.types import AuthStatus, LoginResult
 from yutori_mcp import __version__
 from yutori_mcp.adapter import YutoriAPIError
 from yutori_mcp.formatters import format_scout_edited
-from yutori_mcp.schema_utils import output_fields_to_output_schema, simplify_schema, get_simplified_schema
+from yutori_mcp.schema_utils import (
+    output_fields_to_output_schema,
+    simplify_schema,
+    get_simplified_schema,
+)
 from yutori_mcp.server import _handle_edit_scout, create_server, main
-from yutori_mcp.schemas import ListScoutsInput, CreateScoutInput
+from yutori_mcp.schemas import ListScoutsInput, CreateScoutInput, ListTasksInput
 
 
 class TestSimplifySchema:
@@ -136,6 +140,14 @@ class TestGetSimplifiedSchema:
         assert status_schema["enum"] == ["active", "paused", "done"]
         assert "anyOf" not in status_schema
 
+    def test_list_tasks_schema_has_task_status_enum(self):
+        """ListTasksInput.status should expose the REST task-list statuses."""
+        schema = get_simplified_schema(ListTasksInput)
+        status_schema = schema["properties"]["status"]
+        assert status_schema["type"] == "string"
+        assert status_schema["enum"] == ["running", "succeeded", "failed"]
+        assert "anyOf" not in status_schema
+
     def test_create_scout_schema_has_integer_output_interval(self):
         """CreateScoutInput.output_interval should be integer, not anyOf."""
         schema = get_simplified_schema(CreateScoutInput)
@@ -194,16 +206,25 @@ class TestMainStatusExitCode:
 
     def test_status_unauthenticated_exits_1(self):
         status = AuthStatus(authenticated=False, config_path="/tmp/.yutori/config.json")
-        with patch("sys.argv", ["yutori-mcp", "status"]), \
-             patch("yutori.auth.get_auth_status", return_value=status):
+        with (
+            patch("sys.argv", ["yutori-mcp", "status"]),
+            patch("yutori.auth.get_auth_status", return_value=status),
+        ):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
 
     def test_status_authenticated_exits_0(self):
-        status = AuthStatus(authenticated=True, masked_key="yt-abc...xyz", source="config_file", config_path="/tmp")
-        with patch("sys.argv", ["yutori-mcp", "status"]), \
-             patch("yutori.auth.get_auth_status", return_value=status):
+        status = AuthStatus(
+            authenticated=True,
+            masked_key="yt-abc...xyz",
+            source="config_file",
+            config_path="/tmp",
+        )
+        with (
+            patch("sys.argv", ["yutori-mcp", "status"]),
+            patch("yutori.auth.get_auth_status", return_value=status),
+        ):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 0
@@ -213,9 +234,17 @@ class TestMainLoginAuthUrl:
     """Ensure `yutori-mcp login` surfaces auth_url on failure."""
 
     def test_login_failure_prints_auth_url(self, capsys):
-        result = LoginResult(success=False, error="timed out", auth_url="https://clerk.example.com/oauth/authorize?x=1")
-        with patch("sys.argv", ["yutori-mcp", "login"]), \
-             patch("yutori.auth.run_login_flow", return_value=result) as mock_run_login_flow:
+        result = LoginResult(
+            success=False,
+            error="timed out",
+            auth_url="https://clerk.example.com/oauth/authorize?x=1",
+        )
+        with (
+            patch("sys.argv", ["yutori-mcp", "login"]),
+            patch(
+                "yutori.auth.run_login_flow", return_value=result
+            ) as mock_run_login_flow,
+        ):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
@@ -225,8 +254,12 @@ class TestMainLoginAuthUrl:
 
     def test_login_failure_without_auth_url(self, capsys):
         result = LoginResult(success=False, error="port in use")
-        with patch("sys.argv", ["yutori-mcp", "login"]), \
-             patch("yutori.auth.run_login_flow", return_value=result) as mock_run_login_flow:
+        with (
+            patch("sys.argv", ["yutori-mcp", "login"]),
+            patch(
+                "yutori.auth.run_login_flow", return_value=result
+            ) as mock_run_login_flow,
+        ):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
@@ -253,14 +286,20 @@ class TestEditScoutPartialFailure:
 
     async def test_status_failure_after_config_update_reports_partial_application(self):
         client = AsyncMock()
-        client.get_scout_detail.return_value = {"id": "s1", "status": "active", "query": "q"}
+        client.get_scout_detail.return_value = {
+            "id": "s1",
+            "status": "active",
+            "query": "q",
+        }
         client.edit_scout.side_effect = [
             {"id": "s1"},  # config update succeeds
             YutoriAPIError(message="server error", status_code=500),  # status fails
         ]
 
         with pytest.raises(YutoriAPIError) as exc_info:
-            await _handle_edit_scout(client, {"scout_id": "s1", "query": "new q", "status": "paused"})
+            await _handle_edit_scout(
+                client, {"scout_id": "s1", "query": "new q", "status": "paused"}
+            )
 
         assert "config changes were applied" in exc_info.value.message.lower()
         assert "server error" in exc_info.value.message
@@ -269,7 +308,9 @@ class TestEditScoutPartialFailure:
     async def test_status_only_failure_propagates_unwrapped(self):
         client = AsyncMock()
         client.get_scout_detail.return_value = {"id": "s1", "status": "active"}
-        client.edit_scout.side_effect = YutoriAPIError(message="server error", status_code=500)
+        client.edit_scout.side_effect = YutoriAPIError(
+            message="server error", status_code=500
+        )
 
         with pytest.raises(YutoriAPIError) as exc_info:
             await _handle_edit_scout(client, {"scout_id": "s1", "status": "paused"})
@@ -307,7 +348,9 @@ class TestCallToolErrorContract:
     async def test_api_error_returns_iserror_with_formatted_message(self):
         handler = _call_tool_handler()
         with _patched_adapter() as client:
-            client.list_scouts.side_effect = YutoriAPIError(message="boom", status_code=500)
+            client.list_scouts.side_effect = YutoriAPIError(
+                message="boom", status_code=500
+            )
             result = await handler(_call_tool_request("list_scouts", {}))
 
         assert result.root.isError is True
@@ -326,10 +369,51 @@ class TestCallToolErrorContract:
         assert result.root.isError is False
         assert "Found 0 scouts" in result.root.content[0].text
 
+    async def test_list_browsing_tasks_dispatches_with_filters(self):
+        handler = _call_tool_handler()
+        with _patched_adapter() as client:
+            client.list_browsing_tasks.return_value = {
+                "tasks": [],
+                "total": 0,
+                "filtered_total": 0,
+                "summary": {"running": 0, "succeeded": 0, "failed": 0},
+            }
+            result = await handler(
+                _call_tool_request(
+                    "list_browsing_tasks",
+                    {"limit": 20, "status": "succeeded", "cursor": "cur-1"},
+                )
+            )
+
+        client.list_browsing_tasks.assert_awaited_once_with(
+            limit=20, status="succeeded", cursor="cur-1"
+        )
+        assert result.root.isError is False
+        assert "Found 0 browsing tasks" in result.root.content[0].text
+
+    async def test_list_research_tasks_dispatches_with_filters(self):
+        handler = _call_tool_handler()
+        with _patched_adapter() as client:
+            client.list_research_tasks.return_value = {
+                "tasks": [],
+                "total": 0,
+                "filtered_total": 0,
+                "summary": {"running": 0, "succeeded": 0, "failed": 0},
+            }
+            result = await handler(
+                _call_tool_request("list_research_tasks", {"status": "failed"})
+            )
+
+        client.list_research_tasks.assert_awaited_once_with(limit=10, status="failed")
+        assert result.root.isError is False
+        assert "Found 0 research tasks" in result.root.content[0].text
+
     async def test_unknown_argument_rejected_before_handler_runs(self):
         # No adapter patch: additionalProperties=false must fail jsonschema
         # validation in the framework before any handler/API code runs.
-        result = await _call_tool_handler()(_call_tool_request("list_scouts", {"bogus": 1}))
+        result = await _call_tool_handler()(
+            _call_tool_request("list_scouts", {"bogus": 1})
+        )
 
         assert result.root.isError is True
         assert "Input validation error" in result.root.content[0].text

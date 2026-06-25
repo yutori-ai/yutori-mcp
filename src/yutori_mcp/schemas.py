@@ -37,6 +37,7 @@ class ToolInput(BaseModel):
 WebhookFormat = Literal["scout", "slack", "zapier"] | None
 
 ScoutStatus = Literal["active", "paused", "done"] | None
+TaskListStatus = Literal["running", "succeeded", "failed"] | None
 
 # Shared field descriptions, defined once so the call sites cannot drift out
 # of sync as the schemas evolve.
@@ -221,6 +222,29 @@ class ListScoutsInput(ToolInput):
     status: ScoutStatus = Field(
         default=None,
         description="Filter by status: 'active', 'paused', or 'done'",
+    )
+    cursor: str | None = Field(
+        default=None,
+        description="Pagination cursor from a previous list response",
+    )
+
+
+class ListTasksInput(ToolInput):
+    """Input for listing one-time browsing or research tasks."""
+
+    limit: int | None = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Maximum number of tasks to return (1-100). Default: 10",
+    )
+    status: TaskListStatus = Field(
+        default=None,
+        description="Filter by status: 'running', 'succeeded', or 'failed'",
+    )
+    cursor: str | None = Field(
+        default=None,
+        description="Pagination cursor from a previous list response",
     )
 
 
