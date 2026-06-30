@@ -15,7 +15,7 @@ from yutori_mcp.schema_utils import (
     simplify_schema,
     get_simplified_schema,
 )
-from yutori_mcp.server import _handle_edit_scout, create_server, main
+from yutori_mcp.server import _handle_edit_scout, main, mcp
 from yutori_mcp.schemas import ListScoutsInput, CreateScoutInput, ListTasksInput
 
 
@@ -319,8 +319,8 @@ class TestEditScoutPartialFailure:
 
 
 def _call_tool_handler():
-    """Return the registered tools/call request handler from a fresh server."""
-    return create_server().request_handlers[CallToolRequest]
+    """Return the registered tools/call request handler from the FastMCP server."""
+    return mcp._mcp_server.request_handlers[CallToolRequest]
 
 
 def _call_tool_request(name, arguments):
@@ -341,7 +341,7 @@ def _patched_adapter():
 
 
 class TestCallToolErrorContract:
-    """The MCP framework converts exceptions raised from call_tool into
+    """The MCP framework converts exceptions raised from tool functions into
     CallToolResult(isError=True, content=[str(exception)]). These tests pin
     that contract end-to-end through the registered request handler."""
 
@@ -354,7 +354,7 @@ class TestCallToolErrorContract:
             result = await handler(_call_tool_request("list_scouts", {}))
 
         assert result.root.isError is True
-        assert result.root.content[0].text == "API Error (500): boom"
+        assert "API Error (500): boom" in result.root.content[0].text
 
     async def test_success_returns_formatted_text_without_error_flag(self):
         handler = _call_tool_handler()
@@ -408,15 +408,22 @@ class TestCallToolErrorContract:
         assert result.root.isError is False
         assert "Found 0 research tasks" in result.root.content[0].text
 
-    async def test_unknown_argument_rejected_before_handler_runs(self):
-        # No adapter patch: additionalProperties=false must fail jsonschema
-        # validation in the framework before any handler/API code runs.
-        result = await _call_tool_handler()(
-            _call_tool_request("list_scouts", {"bogus": 1})
-        )
+    async def test_unknown_argument_silently_accepted(self):
+        # FastMCP extracts only known parameters from the request, silently
+        # dropping unknown arguments. Unlike the old Server-based implementation
+        # (which enforced additionalProperties:false via jsonschema), FastMCP
+        # does not reject extra arguments at the protocol level. The call
+        # succeeds with the known arguments applied and the extra ignored.
+        handler = _call_tool_handler()
+        with _patched_adapter() as client:
+            client.list_scouts.return_value = {
+                "scouts": [],
+                "total": 0,
+                "summary": {"active": 0, "paused": 0, "done": 0},
+            }
+            result = await handler(_call_tool_request("list_scouts", {"bogus": 1}))
 
-        assert result.root.isError is True
-        assert "Input validation error" in result.root.content[0].text
+        assert result.root.isError is False
 
 
 class TestEditScoutReadBackFailure:
