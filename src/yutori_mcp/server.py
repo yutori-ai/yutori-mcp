@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ValidationError
 
 from . import __version__
 from .adapter import MCPClientAdapter, YutoriAPIError
 from .formatters import format_response
-from .schema_utils import get_simplified_schema, output_fields_to_output_schema
+from .schema_utils import output_fields_to_output_schema
 from .schemas import (
     BrowsingTaskInput,
     CreateScoutInput,
@@ -30,149 +29,284 @@ from .schemas import (
 
 logger = logging.getLogger(__name__)
 
-
-# Tool definitions with annotations
-TOOLS = [
-    # Usage
-    Tool(
-        name="list_api_usage",
-        description=(
-            "Get API usage statistics including active scout counts, rate limits, and activity metrics."
-        ),
-        inputSchema=get_simplified_schema(UsageInput),
-        annotations={"readOnlyHint": True},
-    ),
-    # Read operations
-    Tool(
-        name="list_scouts",
-        description=(
-            "List all scouts for the authenticated user. "
-            "Returns basic metadata; use get_scout_detail for full fields."
-        ),
-        inputSchema=get_simplified_schema(ListScoutsInput),
-        annotations={"readOnlyHint": True},
-    ),
-    Tool(
-        name="get_scout_detail",
-        description="Get detailed information about a specific scout.",
-        inputSchema=get_simplified_schema(ScoutIdInput),
-        annotations={"readOnlyHint": True},
-    ),
-    Tool(
-        name="get_scout_updates",
-        description="Get paginated updates/reports for a scout. Each update contains findings from a run.",
-        inputSchema=get_simplified_schema(GetUpdatesInput),
-        annotations={"readOnlyHint": True},
-    ),
-    # Scout lifecycle
-    Tool(
-        name="create_scout",
-        description=(
-            "Create a monitoring scout for continuous web monitoring. Scouts track changes relevant to "
-            "a query and alert you. Examples: 'news about Yutori', 'H100 pricing below $1.50'."
-        ),
-        inputSchema=get_simplified_schema(CreateScoutInput),
-    ),
-    Tool(
-        name="edit_scout",
-        description=(
-            "Update an existing scout's query, schedule, webhook configuration, or status. "
-            "Use status='paused' to pause, 'active' to resume, or 'done' to archive."
-        ),
-        inputSchema=get_simplified_schema(EditScoutInput),
-        annotations={"idempotentHint": True},
-    ),
-    Tool(
-        name="delete_scout",
-        description="Permanently delete a scout and all its data. This action cannot be undone.",
-        inputSchema=get_simplified_schema(ScoutIdInput),
-        annotations={"destructiveHint": True},
-    ),
-    # Browsing operations
-    Tool(
-        name="run_browsing_task",
-        description=(
-            "Execute a one-time web browsing task. The navigator agent runs a browser and "
-            "operates it like a person. Returns a task_id for polling. Example: 'list employees'. "
-            "Set browser='local' to use the desktop app with the user's logged-in sessions."
-        ),
-        inputSchema=get_simplified_schema(BrowsingTaskInput),
-    ),
-    Tool(
-        name="list_browsing_tasks",
-        description=(
-            "List one-time browsing tasks for the authenticated user. "
-            "Supports cursor pagination and status filtering. List status is approximate "
-            "(running also covers queued and not-yet-reconciled tasks); call "
-            "get_browsing_task_result for a task's authoritative status."
-        ),
-        inputSchema=get_simplified_schema(ListTasksInput),
-        annotations={"readOnlyHint": True},
-    ),
-    Tool(
-        name="get_browsing_task_result",
-        description="Poll for browsing task status and result. Call until status is 'succeeded' or 'failed'.",
-        inputSchema=get_simplified_schema(TaskIdInput),
-        annotations={"readOnlyHint": True},
-    ),
-    # Research operations
-    Tool(
-        name="run_research_task",
-        description=(
-            "Execute a one-time deep web research task. The research agent searches, "
-            "reads, and synthesizes information from across the web. Returns a task_id for polling. "
-            "Example: 'latest AI startup funding announcements'."
-        ),
-        inputSchema=get_simplified_schema(ResearchTaskInput),
-    ),
-    Tool(
-        name="list_research_tasks",
-        description=(
-            "List one-time research tasks for the authenticated user. "
-            "Supports cursor pagination and status filtering. List status is approximate "
-            "(running also covers queued and not-yet-reconciled tasks); call "
-            "get_research_task_result for a task's authoritative status."
-        ),
-        inputSchema=get_simplified_schema(ListTasksInput),
-        annotations={"readOnlyHint": True},
-    ),
-    Tool(
-        name="get_research_task_result",
-        description="Poll for research task status and result. Call until status is 'succeeded' or 'failed'.",
-        inputSchema=get_simplified_schema(TaskIdInput),
-        annotations={"readOnlyHint": True},
-    ),
-]
+mcp = FastMCP("yutori-mcp")
 
 
-def create_server() -> Server:
-    """Create and configure the MCP server."""
-    server = Server("yutori-mcp")
+async def _invoke(tool_name: str, args: dict[str, Any]) -> str:
+    """Invoke a tool handler and return the formatted response text.
 
-    @server.list_tools()
-    async def list_tools() -> list[Tool]:
-        return TOOLS
+    Centralizes error handling: YutoriAPIError → RuntimeError so the MCP
+    framework marks the result isError=True; ValidationError re-raised as-is;
+    unexpected exceptions logged and re-raised.
+    """
+    handler = _TOOL_HANDLERS[tool_name]
+    try:
+        async with MCPClientAdapter() as client:
+            result, context = await handler(client, args)
+        return format_response(tool_name, result, **context)
+    except YutoriAPIError as e:
+        raise RuntimeError(f"API Error ({e.status_code}): {e.message}") from e
+    except ValidationError:
+        raise
+    except Exception:
+        logger.exception(f"Error handling tool {tool_name}")
+        raise
 
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-        # Errors are raised (not returned as text) so the MCP framework marks
-        # the result with isError=True; it uses str(exception) as the message.
-        try:
-            async with MCPClientAdapter() as client:
-                result, context = await _handle_tool(client, name, arguments)
-            formatted = format_response(name, result, **context)
-            return [TextContent(type="text", text=formatted)]
-        except YutoriAPIError as e:
-            raise RuntimeError(f"API Error ({e.status_code}): {e.message}") from e
-        except ValidationError:
-            # Routine bad-arguments case; str(e) is already actionable for the
-            # client. Don't pollute logs with an ERROR-level traceback.
-            raise
-        except Exception:
-            logger.exception(f"Error handling tool {name}")
-            raise
 
-    return server
+# ---------------------------------------------------------------------------
+# Tool definitions. Each @mcp.tool function is a thin wrapper that collects
+# its typed parameters into a plain dict and delegates to _invoke, which
+# routes through _TOOL_HANDLERS (unchanged from the prior Server-based
+# implementation).
+# ---------------------------------------------------------------------------
+
+_READ_ONLY = ToolAnnotations(readOnlyHint=True)
+_IDEMPOTENT = ToolAnnotations(idempotentHint=True)
+_DESTRUCTIVE = ToolAnnotations(destructiveHint=True)
+
+
+@mcp.tool(
+    description=(
+        "Get API usage statistics including active scout counts, rate limits, and activity metrics."
+    ),
+    annotations=_READ_ONLY,
+)
+async def list_api_usage(
+    period: Literal["24h", "7d", "30d", "90d"] | None = None,
+) -> str:
+    return await _invoke("list_api_usage", {"period": period})
+
+
+@mcp.tool(
+    description=(
+        "List all scouts for the authenticated user. "
+        "Returns basic metadata; use get_scout_detail for full fields."
+    ),
+    annotations=_READ_ONLY,
+)
+async def list_scouts(
+    limit: int | None = 10,
+    status: Literal["active", "paused", "done"] | None = None,
+    cursor: str | None = None,
+) -> str:
+    return await _invoke("list_scouts", {"limit": limit, "status": status, "cursor": cursor})
+
+
+@mcp.tool(
+    description="Get detailed information about a specific scout.",
+    annotations=_READ_ONLY,
+)
+async def get_scout_detail(scout_id: str) -> str:
+    return await _invoke("get_scout_detail", {"scout_id": scout_id})
+
+
+@mcp.tool(
+    description="Get paginated updates/reports for a scout. Each update contains findings from a run.",
+    annotations=_READ_ONLY,
+)
+async def get_scout_updates(
+    scout_id: str,
+    cursor: str | None = None,
+    limit: int | None = None,
+) -> str:
+    return await _invoke(
+        "get_scout_updates", {"scout_id": scout_id, "cursor": cursor, "limit": limit}
+    )
+
+
+@mcp.tool(
+    description=(
+        "Create a monitoring scout for continuous web monitoring. Scouts track changes relevant to "
+        "a query and alert you. Examples: 'news about Yutori', 'H100 pricing below $1.50'."
+    ),
+)
+async def create_scout(
+    query: str,
+    output_interval: int | None = None,
+    webhook_url: str | None = None,
+    webhook_format: Literal["scout", "slack", "zapier"] | None = None,
+    output_fields: list[str] | None = None,
+    user_timezone: str | None = None,
+    skip_email: bool | None = None,
+    start_timestamp: int | None = None,
+    user_location: str | None = None,
+    is_public: bool | None = None,
+) -> str:
+    return await _invoke(
+        "create_scout",
+        {
+            "query": query,
+            "output_interval": output_interval,
+            "webhook_url": webhook_url,
+            "webhook_format": webhook_format,
+            "output_fields": output_fields,
+            "user_timezone": user_timezone,
+            "skip_email": skip_email,
+            "start_timestamp": start_timestamp,
+            "user_location": user_location,
+            "is_public": is_public,
+        },
+    )
+
+
+@mcp.tool(
+    description=(
+        "Update an existing scout's query, schedule, webhook configuration, or status. "
+        "Use status='paused' to pause, 'active' to resume, or 'done' to archive."
+    ),
+    annotations=_IDEMPOTENT,
+)
+async def edit_scout(
+    scout_id: str,
+    status: Literal["active", "paused", "done"] | None = None,
+    query: str | None = None,
+    output_interval: int | None = None,
+    webhook_url: str | None = None,
+    webhook_format: Literal["scout", "slack", "zapier"] | None = None,
+    output_fields: list[str] | None = None,
+    skip_email: bool | None = None,
+    user_timezone: str | None = None,
+    user_location: str | None = None,
+    is_public: bool | None = None,
+) -> str:
+    return await _invoke(
+        "edit_scout",
+        {
+            "scout_id": scout_id,
+            "status": status,
+            "query": query,
+            "output_interval": output_interval,
+            "webhook_url": webhook_url,
+            "webhook_format": webhook_format,
+            "output_fields": output_fields,
+            "skip_email": skip_email,
+            "user_timezone": user_timezone,
+            "user_location": user_location,
+            "is_public": is_public,
+        },
+    )
+
+
+@mcp.tool(
+    description="Permanently delete a scout and all its data. This action cannot be undone.",
+    annotations=_DESTRUCTIVE,
+)
+async def delete_scout(scout_id: str) -> str:
+    return await _invoke("delete_scout", {"scout_id": scout_id})
+
+
+@mcp.tool(
+    description=(
+        "Execute a one-time web browsing task. The navigator agent runs a browser and "
+        "operates it like a person. Returns a task_id for polling. Example: 'list employees'. "
+        "Set browser='local' to use the desktop app with the user's logged-in sessions."
+    ),
+)
+async def run_browsing_task(
+    task: str,
+    start_url: str,
+    max_steps: int | None = None,
+    require_auth: bool | None = None,
+    browser: Literal["cloud", "local"] | None = None,
+    output_fields: list[str] | None = None,
+    webhook_url: str | None = None,
+    webhook_format: Literal["scout", "slack", "zapier"] | None = None,
+) -> str:
+    return await _invoke(
+        "run_browsing_task",
+        {
+            "task": task,
+            "start_url": start_url,
+            "max_steps": max_steps,
+            "require_auth": require_auth,
+            "browser": browser,
+            "output_fields": output_fields,
+            "webhook_url": webhook_url,
+            "webhook_format": webhook_format,
+        },
+    )
+
+
+@mcp.tool(
+    description=(
+        "List one-time browsing tasks for the authenticated user. "
+        "Supports cursor pagination and status filtering. List status is approximate "
+        "(running also covers queued and not-yet-reconciled tasks); call "
+        "get_browsing_task_result for a task's authoritative status."
+    ),
+    annotations=_READ_ONLY,
+)
+async def list_browsing_tasks(
+    limit: int | None = 10,
+    status: Literal["running", "succeeded", "failed"] | None = None,
+    cursor: str | None = None,
+) -> str:
+    return await _invoke(
+        "list_browsing_tasks", {"limit": limit, "status": status, "cursor": cursor}
+    )
+
+
+@mcp.tool(
+    description="Poll for browsing task status and result. Call until status is 'succeeded' or 'failed'.",
+    annotations=_READ_ONLY,
+)
+async def get_browsing_task_result(task_id: str) -> str:
+    return await _invoke("get_browsing_task_result", {"task_id": task_id})
+
+
+@mcp.tool(
+    description=(
+        "Execute a one-time deep web research task. The research agent searches, "
+        "reads, and synthesizes information from across the web. Returns a task_id for polling. "
+        "Example: 'latest AI startup funding announcements'."
+    ),
+)
+async def run_research_task(
+    query: str,
+    user_timezone: str | None = None,
+    user_location: str | None = None,
+    output_fields: list[str] | None = None,
+    webhook_url: str | None = None,
+    webhook_format: Literal["scout", "slack", "zapier"] | None = None,
+) -> str:
+    return await _invoke(
+        "run_research_task",
+        {
+            "query": query,
+            "user_timezone": user_timezone,
+            "user_location": user_location,
+            "output_fields": output_fields,
+            "webhook_url": webhook_url,
+            "webhook_format": webhook_format,
+        },
+    )
+
+
+@mcp.tool(
+    description=(
+        "List one-time research tasks for the authenticated user. "
+        "Supports cursor pagination and status filtering. List status is approximate "
+        "(running also covers queued and not-yet-reconciled tasks); call "
+        "get_research_task_result for a task's authoritative status."
+    ),
+    annotations=_READ_ONLY,
+)
+async def list_research_tasks(
+    limit: int | None = 10,
+    status: Literal["running", "succeeded", "failed"] | None = None,
+    cursor: str | None = None,
+) -> str:
+    return await _invoke(
+        "list_research_tasks", {"limit": limit, "status": status, "cursor": cursor}
+    )
+
+
+@mcp.tool(
+    description="Poll for research task status and result. Call until status is 'succeeded' or 'failed'.",
+    annotations=_READ_ONLY,
+)
+async def get_research_task_result(task_id: str) -> str:
+    return await _invoke("get_research_task_result", {"task_id": task_id})
 
 
 # Signature for tool handlers registered in _TOOL_HANDLERS.
@@ -180,20 +314,6 @@ ToolHandler = Callable[
     [MCPClientAdapter, dict[str, Any]],
     Awaitable[tuple[dict[str, Any], dict[str, Any]]],
 ]
-
-
-async def _handle_tool(
-    client: MCPClientAdapter, name: str, arguments: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Route tool calls to the appropriate handler.
-
-    Returns:
-        Tuple of (result, context) where context contains extra info for formatting.
-    """
-    handler = _TOOL_HANDLERS.get(name)
-    if handler is None:
-        raise ValueError(f"Unknown tool: {name}")
-    return await handler(client, arguments)
 
 
 def _scout_kwargs(
@@ -378,7 +498,7 @@ def _make_get_task_result_handler(task_type: str, client_method: str) -> ToolHan
     return handler
 
 
-# Tool-name -> handler registry, consulted by _handle_tool() above. Mirrors
+# Tool-name -> handler registry, consulted by _invoke() above. Mirrors
 # the _TOOL_FORMATTERS registry in formatters.py so the parse/dispatch side
 # of the MCP tool lifecycle is structured the same way as the format side.
 _TOOL_HANDLERS: dict[str, ToolHandler] = {
@@ -410,15 +530,6 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
         "Research", "get_research_task"
     ),
 }
-
-
-async def run_server() -> None:
-    """Run the MCP server using stdio transport."""
-    server = create_server()
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream, write_stream, server.create_initialization_options()
-        )
 
 
 # CLI auth subcommand name -> argparse `help` text. Iterated over to register
@@ -476,7 +587,6 @@ def _handle_auth_command(command: str) -> NoReturn:
 def main() -> None:
     """Entry point for the yutori-mcp command."""
     import argparse
-    import asyncio
 
     parser = argparse.ArgumentParser(prog="yutori-mcp")
     parser.add_argument(
@@ -494,7 +604,7 @@ def main() -> None:
     if args.command in _AUTH_SUBCOMMANDS:
         _handle_auth_command(args.command)
 
-    asyncio.run(run_server())
+    mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":
