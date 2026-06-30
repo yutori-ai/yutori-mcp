@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 
+def _is_null_schema(v: Any) -> bool:
+    return isinstance(v, dict) and v.get("type") == "null"
+
+
 def simplify_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """Simplify JSON Schema for MCP clients by flattening anyOf with null.
 
@@ -20,14 +24,8 @@ def simplify_schema(schema: dict[str, Any]) -> dict[str, Any]:
     for key, value in schema.items():
         if key == "anyOf" and isinstance(value, list) and len(value) == 2:
             # Check if this is the pattern: [{actual_type}, {type: null}]
-            non_null = [
-                v
-                for v in value
-                if not (isinstance(v, dict) and v.get("type") == "null")
-            ]
-            null_types = [
-                v for v in value if isinstance(v, dict) and v.get("type") == "null"
-            ]
+            non_null = [v for v in value if not _is_null_schema(v)]
+            null_types = [v for v in value if _is_null_schema(v)]
 
             if len(non_null) == 1 and len(null_types) == 1:
                 # Flatten: merge the non-null type's properties into result
