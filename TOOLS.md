@@ -2,7 +2,7 @@
 
 All tool outputs are formatted as human-readable text optimized for LLM consumption.
 
-All tool inputs enforce strict validation: unknown fields are rejected, webhook URLs must use HTTPS, and `output_fields` (where supported) must contain at least one entry.
+All tool inputs enforce validation: webhook URLs must use HTTPS, and `output_fields` (where supported) must contain at least one entry. Unknown/extra fields are silently ignored rather than rejected.
 
 ## Usage
 
