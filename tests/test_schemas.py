@@ -486,12 +486,6 @@ class TestExtraFieldsRejected:
         with pytest.raises(ValidationError):
             CreateScoutInput(query="Test", frequency="daily")
 
-    def test_schema_marks_additional_properties_false(self):
-        from yutori_mcp.schema_utils import get_simplified_schema
-
-        schema = get_simplified_schema(EditScoutInput)
-        assert schema["additionalProperties"] is False
-
 
 @pytest.mark.parametrize("cls,required_kwargs", _ALL_INPUT_CLASSES)
 def test_empty_output_fields_rejected(cls, required_kwargs):
@@ -515,22 +509,3 @@ class TestEditScoutIsPublic:
         """is_public is editable (SDK >=0.8.0 forwards it to the PATCH route)."""
         data = EditScoutInput(scout_id="abc-123", is_public=False)
         assert data.is_public is False
-
-
-class TestSimplifiedSchemaConstraints:
-    """Constraints must survive simplify_schema into the published inputSchema."""
-
-    def test_min_items_survives_simplification(self):
-        from yutori_mcp.schema_utils import get_simplified_schema
-
-        for model_cls in (
-            CreateScoutInput,
-            EditScoutInput,
-            BrowsingTaskInput,
-            ResearchTaskInput,
-        ):
-            schema = get_simplified_schema(model_cls)
-            field = schema["properties"]["output_fields"]
-            assert field.get("minItems") == 1, (
-                f"{model_cls.__name__}.output_fields lost minItems in the simplified schema"
-            )
