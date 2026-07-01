@@ -349,26 +349,6 @@ async def _handle_list_api_usage(
     return result, {}
 
 
-def _make_scout_kwargs_handler(
-    input_class: type[BaseModel], client_method: str
-) -> ToolHandler:
-    """Build a handler that parses an input schema and forwards it as scout kwargs.
-
-    Used for tools whose handler body is the one-liner
-    ``client.METHOD(**_scout_kwargs(params))``. Generating these from one
-    factory keeps the registry as the single place that pairs the tool name
-    with its input schema and adapter method.
-    """
-
-    async def handler(
-        client: MCPClientAdapter, arguments: dict[str, Any]
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        params = input_class(**arguments)
-        return await getattr(client, client_method)(**_scout_kwargs(params)), {}
-
-    return handler
-
-
 def _make_model_kwargs_handler(
     input_class: type[BaseModel], client_method: str, context: dict[str, Any] | None = None
 ) -> ToolHandler:
@@ -450,26 +430,31 @@ async def _handle_delete_scout(
 
 
 def _make_run_task_handler(
-    task_type: str,
+    task_type: str | None,
     input_class: type[BaseModel],
     client_method: str,
     include_browser: bool = False,
 ) -> ToolHandler:
-    """Build a ``run_*_task`` handler that differs only by input schema + adapter method + task_type.
+    """Build a handler that parses an input schema and forwards it as scout kwargs.
 
-    The browsing and research variants share one shape: parse a task-input
-    schema, call the adapter method with ``_scout_kwargs(params)``, and stamp
-    the matching ``task_type`` into the formatter context.
-    ``include_browser=True`` additionally surfaces ``params.browser`` so
-    ``format_task_started`` can annotate the local/cloud distinction
-    (research has no browser knob, so it omits the field).
+    Shared shape for tools whose handler body is the one-liner
+    ``client.METHOD(**_scout_kwargs(params))``: parse a schema, call the
+    adapter method, and stamp the matching ``task_type`` into the formatter
+    context. ``task_type=None`` (used for ``create_scout``, which has no
+    task-type concept) omits the context entry entirely rather than stamping
+    a null value. ``include_browser=True`` additionally surfaces
+    ``params.browser`` so ``format_task_started`` can annotate the
+    local/cloud distinction (research has no browser knob, so it omits the
+    field). Generating these from one factory keeps the registry as the
+    single place that pairs the tool name with its input schema and adapter
+    method.
     """
 
     async def handler(
         client: MCPClientAdapter, arguments: dict[str, Any]
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         params = input_class(**arguments)
-        context: dict[str, Any] = {"task_type": task_type}
+        context: dict[str, Any] = {} if task_type is None else {"task_type": task_type}
         if include_browser:
             context["browser"] = params.browser  # type: ignore[attr-defined]
         return await getattr(client, client_method)(**_scout_kwargs(params)), context
@@ -508,7 +493,7 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
     "get_scout_updates": _make_model_kwargs_handler(
         GetUpdatesInput, "get_scout_updates"
     ),
-    "create_scout": _make_scout_kwargs_handler(CreateScoutInput, "create_scout"),
+    "create_scout": _make_run_task_handler(None, CreateScoutInput, "create_scout"),
     "edit_scout": _handle_edit_scout,
     "delete_scout": _handle_delete_scout,
     "list_browsing_tasks": _make_model_kwargs_handler(
