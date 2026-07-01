@@ -641,10 +641,9 @@ def format_task_started(response: dict[str, Any], **context: Any) -> str:
     if view_url:
         lines.append(f"View progress: {view_url}")
 
+    _, get_tool = _TASK_TOOLS[task_type]
     lines.append("")
-    lines.append(
-        f'Poll with {_TASK_POLL_FNS[task_type]}(task_id="{task_id}") to check status.'
-    )
+    lines.append(f'Poll with {get_tool}(task_id="{task_id}") to check status.')
 
     return "\n".join(lines)
 
@@ -724,7 +723,7 @@ def format_task_list(response: dict[str, Any], **context: Any) -> str:
     summary = response.get("summary") or {}
     has_more = response.get("has_more", False)
     next_cursor = response.get("next_cursor")
-    list_tool, get_tool = _TASK_LIST_TOOLS[task_type]
+    list_tool, get_tool = _TASK_TOOLS[task_type]
 
     if summary:
         lines = [
@@ -828,15 +827,11 @@ _SCOUT_EDIT_FIELDS = (
     ("is_public", "Public", _format_yes_no),
 )
 
-# Map task_type (as stamped by run_browsing_task / run_research_task handlers
-# in server.py) to the polling tool name surfaced in the user-facing hint
-# emitted by format_task_started().
-_TASK_POLL_FNS: dict[str, str] = {
-    "Research": "get_research_task_result",
-    "Browsing": "get_browsing_task_result",
-}
-
-_TASK_LIST_TOOLS: dict[str, tuple[str, str]] = {
+# Map task_type (as stamped by the run_*_task / list_*_task handlers in
+# server.py) to its (list_tool, get_tool) names, surfaced in the user-facing
+# hints emitted by format_task_started() and format_task_list(). A single
+# table keeps the two formatters from drifting if a tool is ever renamed.
+_TASK_TOOLS: dict[str, tuple[str, str]] = {
     "Research": ("list_research_tasks", "get_research_task_result"),
     "Browsing": ("list_browsing_tasks", "get_browsing_task_result"),
 }
