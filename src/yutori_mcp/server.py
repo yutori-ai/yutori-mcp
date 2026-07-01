@@ -341,14 +341,6 @@ def _scout_kwargs(
 # -----------------------------------------------------------------------------
 
 
-async def _handle_list_api_usage(
-    client: MCPClientAdapter, arguments: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    params = UsageInput(**arguments)
-    result = await client.get_usage(period=params.period)
-    return result, {}
-
-
 def _make_model_kwargs_handler(
     input_class: type[BaseModel], client_method: str, context: dict[str, Any] | None = None
 ) -> ToolHandler:
@@ -487,7 +479,7 @@ def _make_get_task_result_handler(task_type: str, client_method: str) -> ToolHan
 # the _TOOL_FORMATTERS registry in formatters.py so the parse/dispatch side
 # of the MCP tool lifecycle is structured the same way as the format side.
 _TOOL_HANDLERS: dict[str, ToolHandler] = {
-    "list_api_usage": _handle_list_api_usage,
+    "list_api_usage": _make_model_kwargs_handler(UsageInput, "get_usage"),
     "list_scouts": _make_model_kwargs_handler(ListScoutsInput, "list_scouts"),
     "get_scout_detail": _handle_get_scout_detail,
     "get_scout_updates": _make_model_kwargs_handler(
