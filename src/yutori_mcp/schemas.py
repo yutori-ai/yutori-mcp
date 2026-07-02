@@ -38,6 +38,8 @@ WebhookFormat = Literal["scout", "slack", "zapier"] | None
 
 ScoutStatus = Literal["active", "paused", "done"] | None
 TaskListStatus = Literal["running", "succeeded", "failed"] | None
+UsagePeriod = Literal["24h", "7d", "30d", "90d"] | None
+BrowserChoice = Literal["cloud", "local"] | None
 
 # Shared field descriptions, defined once so the call sites cannot drift out
 # of sync as the schemas evolve.
@@ -75,7 +77,7 @@ def _output_fields_description(example: list[str], docs_slug: str | None = None)
 class UsageInput(ToolInput):
     """Input for retrieving API usage statistics."""
 
-    period: Literal["24h", "7d", "30d", "90d"] | None = Field(
+    period: UsagePeriod = Field(
         default=None,
         description="Time range for activity counts: '24h' (default), '7d', '30d', or '90d'",
     )
@@ -298,7 +300,7 @@ class BrowsingTaskInput(ToolInput):
         default=None,
         description="If true, use an auth-optimized cloud browser provider for login flows. Only applies when browser is 'cloud' (default).",
     )
-    browser: Literal["cloud", "local"] | None = Field(
+    browser: BrowserChoice = Field(
         default=None,
         description=(
             "Where to run the browser. 'cloud' (default) uses Yutori's cloud browser. "
