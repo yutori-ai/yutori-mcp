@@ -48,6 +48,12 @@ _WEBHOOK_FORMAT_DESCRIPTION = (
     "Webhook payload format: 'scout' (default), 'slack', or 'zapier'"
 )
 _IS_PUBLIC_DESCRIPTION = "Whether scout results are publicly accessible"
+_LIST_CURSOR_DESCRIPTION = "Pagination cursor from a previous list response"
+
+# Minimum allowed `output_interval` in seconds, shared by CreateScoutInput and
+# EditScoutInput so the `ge=` validation bound and the "30 minutes" prose
+# describing it cannot drift apart if the minimum ever changes.
+_MIN_OUTPUT_INTERVAL_SECONDS = 1800
 
 
 def _output_fields_description(example: list[str], docs_slug: str | None = None) -> str:
@@ -104,8 +110,11 @@ class CreateScoutInput(ToolInput):
     )
     output_interval: int | None = Field(
         default=None,
-        ge=1800,
-        description="Seconds between scout runs. Minimum 1800 (30 minutes). Default: 86400 (daily)",
+        ge=_MIN_OUTPUT_INTERVAL_SECONDS,
+        description=(
+            f"Seconds between scout runs. Minimum {_MIN_OUTPUT_INTERVAL_SECONDS} "
+            "(30 minutes). Default: 86400 (daily)"
+        ),
     )
     webhook_url: HttpsWebhookUrl = Field(
         default=None,
@@ -165,8 +174,10 @@ class EditScoutInput(ToolInput):
     )
     output_interval: int | None = Field(
         default=None,
-        ge=1800,
-        description="Updated run interval in seconds. Minimum 1800 (30 minutes)",
+        ge=_MIN_OUTPUT_INTERVAL_SECONDS,
+        description=(
+            f"Updated run interval in seconds. Minimum {_MIN_OUTPUT_INTERVAL_SECONDS} (30 minutes)"
+        ),
     )
     webhook_url: HttpsWebhookUrl = Field(
         default=None,
@@ -227,7 +238,7 @@ class ListScoutsInput(ToolInput):
     )
     cursor: str | None = Field(
         default=None,
-        description="Pagination cursor from a previous list response",
+        description=_LIST_CURSOR_DESCRIPTION,
     )
 
 
@@ -246,7 +257,7 @@ class ListTasksInput(ToolInput):
     )
     cursor: str | None = Field(
         default=None,
-        description="Pagination cursor from a previous list response",
+        description=_LIST_CURSOR_DESCRIPTION,
     )
 
 
