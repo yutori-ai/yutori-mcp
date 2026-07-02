@@ -24,11 +24,9 @@ HttpsWebhookUrl = Annotated[str | None, AfterValidator(_check_webhook_https)]
 class ToolInput(BaseModel):
     """Base class for all tool input schemas.
 
-    Forbids unknown fields so a misspelled or unsupported argument fails with
-    a clear validation error instead of being silently dropped. This also
-    emits ``additionalProperties: false`` in the generated JSON Schema, so
-    the MCP server framework's input validation (and any client that
-    pre-validates) rejects bad arguments before they reach the handler.
+    ``extra="forbid"`` guards direct model instantiation (in handler factories
+    and tests). FastMCP strips unknown fields at the protocol level before they
+    reach handlers, so the schema constraint is not enforced at runtime there.
     """
 
     model_config = ConfigDict(extra="forbid")
