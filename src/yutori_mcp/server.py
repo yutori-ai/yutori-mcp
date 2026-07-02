@@ -59,10 +59,17 @@ async def _invoke(tool_name: str, args: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Tool definitions. Each @mcp.tool function is a thin wrapper that collects
-# its typed parameters into a plain dict and delegates to _invoke, which
-# routes through _TOOL_HANDLERS (unchanged from the prior Server-based
-# implementation).
+# Tool definitions. Each @mcp.tool function is a thin wrapper that forwards
+# its typed parameters to _invoke, which routes through _TOOL_HANDLERS
+# (unchanged from the prior Server-based implementation). Each wrapper's body
+# is a single `return await _invoke(name, locals())` statement, so `locals()`
+# at that point contains exactly the function's parameters -- no other names
+# are ever bound first. This keeps the per-tool parameter list written once
+# (in the signature) instead of duplicated in a hand-written dict literal that
+# could silently drift out of sync with the signature. If a stray local were
+# ever introduced before the return, the affected input schema's
+# `extra="forbid"` config (see schemas.ToolInput) would raise immediately
+# rather than silently misforwarding it.
 # ---------------------------------------------------------------------------
 
 _READ_ONLY = ToolAnnotations(readOnlyHint=True)
@@ -79,7 +86,7 @@ _DESTRUCTIVE = ToolAnnotations(destructiveHint=True)
 async def list_api_usage(
     period: UsagePeriod = None,
 ) -> str:
-    return await _invoke("list_api_usage", {"period": period})
+    return await _invoke("list_api_usage", locals())
 
 
 @mcp.tool(
@@ -94,7 +101,7 @@ async def list_scouts(
     status: ScoutStatus = None,
     cursor: str | None = None,
 ) -> str:
-    return await _invoke("list_scouts", {"limit": limit, "status": status, "cursor": cursor})
+    return await _invoke("list_scouts", locals())
 
 
 @mcp.tool(
@@ -102,7 +109,7 @@ async def list_scouts(
     annotations=_READ_ONLY,
 )
 async def get_scout_detail(scout_id: str) -> str:
-    return await _invoke("get_scout_detail", {"scout_id": scout_id})
+    return await _invoke("get_scout_detail", locals())
 
 
 @mcp.tool(
@@ -114,9 +121,7 @@ async def get_scout_updates(
     cursor: str | None = None,
     limit: int | None = None,
 ) -> str:
-    return await _invoke(
-        "get_scout_updates", {"scout_id": scout_id, "cursor": cursor, "limit": limit}
-    )
+    return await _invoke("get_scout_updates", locals())
 
 
 @mcp.tool(
@@ -137,21 +142,7 @@ async def create_scout(
     user_location: str | None = None,
     is_public: bool | None = None,
 ) -> str:
-    return await _invoke(
-        "create_scout",
-        {
-            "query": query,
-            "output_interval": output_interval,
-            "webhook_url": webhook_url,
-            "webhook_format": webhook_format,
-            "output_fields": output_fields,
-            "user_timezone": user_timezone,
-            "skip_email": skip_email,
-            "start_timestamp": start_timestamp,
-            "user_location": user_location,
-            "is_public": is_public,
-        },
-    )
+    return await _invoke("create_scout", locals())
 
 
 @mcp.tool(
@@ -174,22 +165,7 @@ async def edit_scout(
     user_location: str | None = None,
     is_public: bool | None = None,
 ) -> str:
-    return await _invoke(
-        "edit_scout",
-        {
-            "scout_id": scout_id,
-            "status": status,
-            "query": query,
-            "output_interval": output_interval,
-            "webhook_url": webhook_url,
-            "webhook_format": webhook_format,
-            "output_fields": output_fields,
-            "skip_email": skip_email,
-            "user_timezone": user_timezone,
-            "user_location": user_location,
-            "is_public": is_public,
-        },
-    )
+    return await _invoke("edit_scout", locals())
 
 
 @mcp.tool(
@@ -197,7 +173,7 @@ async def edit_scout(
     annotations=_DESTRUCTIVE,
 )
 async def delete_scout(scout_id: str) -> str:
-    return await _invoke("delete_scout", {"scout_id": scout_id})
+    return await _invoke("delete_scout", locals())
 
 
 @mcp.tool(
@@ -217,19 +193,7 @@ async def run_browsing_task(
     webhook_url: str | None = None,
     webhook_format: WebhookFormat = None,
 ) -> str:
-    return await _invoke(
-        "run_browsing_task",
-        {
-            "task": task,
-            "start_url": start_url,
-            "max_steps": max_steps,
-            "require_auth": require_auth,
-            "browser": browser,
-            "output_fields": output_fields,
-            "webhook_url": webhook_url,
-            "webhook_format": webhook_format,
-        },
-    )
+    return await _invoke("run_browsing_task", locals())
 
 
 @mcp.tool(
@@ -246,9 +210,7 @@ async def list_browsing_tasks(
     status: TaskListStatus = None,
     cursor: str | None = None,
 ) -> str:
-    return await _invoke(
-        "list_browsing_tasks", {"limit": limit, "status": status, "cursor": cursor}
-    )
+    return await _invoke("list_browsing_tasks", locals())
 
 
 @mcp.tool(
@@ -256,7 +218,7 @@ async def list_browsing_tasks(
     annotations=_READ_ONLY,
 )
 async def get_browsing_task_result(task_id: str) -> str:
-    return await _invoke("get_browsing_task_result", {"task_id": task_id})
+    return await _invoke("get_browsing_task_result", locals())
 
 
 @mcp.tool(
@@ -274,17 +236,7 @@ async def run_research_task(
     webhook_url: str | None = None,
     webhook_format: WebhookFormat = None,
 ) -> str:
-    return await _invoke(
-        "run_research_task",
-        {
-            "query": query,
-            "user_timezone": user_timezone,
-            "user_location": user_location,
-            "output_fields": output_fields,
-            "webhook_url": webhook_url,
-            "webhook_format": webhook_format,
-        },
-    )
+    return await _invoke("run_research_task", locals())
 
 
 @mcp.tool(
@@ -301,9 +253,7 @@ async def list_research_tasks(
     status: TaskListStatus = None,
     cursor: str | None = None,
 ) -> str:
-    return await _invoke(
-        "list_research_tasks", {"limit": limit, "status": status, "cursor": cursor}
-    )
+    return await _invoke("list_research_tasks", locals())
 
 
 @mcp.tool(
@@ -311,7 +261,7 @@ async def list_research_tasks(
     annotations=_READ_ONLY,
 )
 async def get_research_task_result(task_id: str) -> str:
-    return await _invoke("get_research_task_result", {"task_id": task_id})
+    return await _invoke("get_research_task_result", locals())
 
 
 # Signature for tool handlers registered in _TOOL_HANDLERS.
