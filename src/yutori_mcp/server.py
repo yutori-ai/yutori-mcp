@@ -271,16 +271,16 @@ ToolHandler = Callable[
 ]
 
 
-def _scout_kwargs(
+def _output_schema_kwargs(
     params: BaseModel, extra_exclude: set[str] | None = None
 ) -> dict[str, Any]:
     """Convert a Pydantic input model into adapter kwargs.
 
-    Drops None fields — _handle_edit_scout relies on the result being empty
-    when no config fields were provided — and
-    transforms `output_fields` into the API's `output_schema` format.
-    Callers can pass `extra_exclude` to drop additional fields (e.g. control
-    fields that are not part of the scout config payload).
+    Drops None fields — callers relying on an empty result when no config
+    fields were provided (e.g. _handle_edit_scout) should confirm that still
+    holds — and transforms `output_fields` into the API's `output_schema`
+    format. Callers can pass `extra_exclude` to drop additional fields (e.g.
+    control fields that should not be forwarded to the adapter method).
     """
     exclude = {"output_fields"} | (extra_exclude or set())
     kwargs = params.model_dump(exclude=exclude, exclude_none=True)
@@ -327,7 +327,7 @@ async def _handle_edit_scout(
 
     # Build config kwargs, excluding control fields (scout_id is passed
     # explicitly below; status is applied separately after config updates).
-    config_kwargs = _scout_kwargs(params, extra_exclude={"scout_id", "status"})
+    config_kwargs = _output_schema_kwargs(params, extra_exclude={"scout_id", "status"})
 
     if config_kwargs:
         await client.edit_scout(scout_id=params.scout_id, **config_kwargs)
@@ -375,10 +375,10 @@ def _make_run_task_handler(
     client_method: str,
     include_browser: bool = False,
 ) -> ToolHandler:
-    """Build a handler that parses an input schema and forwards it as scout kwargs.
+    """Build a handler that parses an input schema and forwards it as adapter kwargs.
 
     Shared shape for tools whose handler body is the one-liner
-    ``client.METHOD(**_scout_kwargs(params))``: parse a schema, call the
+    ``client.METHOD(**_output_schema_kwargs(params))``: parse a schema, call the
     adapter method, and stamp the matching ``task_type`` into the formatter
     context. ``task_type=None`` (used for ``create_scout``, which has no
     task-type concept) omits the context entry entirely rather than stamping
@@ -397,7 +397,9 @@ def _make_run_task_handler(
         context: dict[str, Any] = {} if task_type is None else {"task_type": task_type}
         if include_browser:
             context["browser"] = params.browser  # type: ignore[attr-defined]
-        return await getattr(client, client_method)(**_scout_kwargs(params)), context
+        return await getattr(client, client_method)(
+            **_output_schema_kwargs(params)
+        ), context
 
     return handler
 

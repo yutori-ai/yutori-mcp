@@ -1,7 +1,7 @@
 """Thin adapter mapping MCP tool calls to the Yutori SDK async client.
 
-Wraps AsyncYutoriClient namespace methods, preserving the same interface that
-server.py's _handle_tool() expects. Catches SDK APIError and re-raises
+Wraps AsyncYutoriClient namespace methods, preserving the interface that
+server.py's _invoke()/_TOOL_HANDLERS dispatch expects. Catches SDK APIError and re-raises
 as YutoriAPIError for consistent MCP error formatting. The async client is
 used so slow Yutori API calls never block the MCP server's event loop.
 """
