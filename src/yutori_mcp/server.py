@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal, NoReturn
+from typing import Any, NoReturn
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -15,6 +15,7 @@ from .adapter import MCPClientAdapter, YutoriAPIError
 from .formatters import format_response
 from .schema_utils import output_fields_to_output_schema
 from .schemas import (
+    BrowserChoice,
     BrowsingTaskInput,
     CreateScoutInput,
     EditScoutInput,
@@ -23,8 +24,12 @@ from .schemas import (
     ListTasksInput,
     ResearchTaskInput,
     ScoutIdInput,
+    ScoutStatus,
     TaskIdInput,
+    TaskListStatus,
     UsageInput,
+    UsagePeriod,
+    WebhookFormat,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,7 +77,7 @@ _DESTRUCTIVE = ToolAnnotations(destructiveHint=True)
     annotations=_READ_ONLY,
 )
 async def list_api_usage(
-    period: Literal["24h", "7d", "30d", "90d"] | None = None,
+    period: UsagePeriod = None,
 ) -> str:
     return await _invoke("list_api_usage", {"period": period})
 
@@ -86,7 +91,7 @@ async def list_api_usage(
 )
 async def list_scouts(
     limit: int | None = 10,
-    status: Literal["active", "paused", "done"] | None = None,
+    status: ScoutStatus = None,
     cursor: str | None = None,
 ) -> str:
     return await _invoke("list_scouts", {"limit": limit, "status": status, "cursor": cursor})
@@ -124,7 +129,7 @@ async def create_scout(
     query: str,
     output_interval: int | None = None,
     webhook_url: str | None = None,
-    webhook_format: Literal["scout", "slack", "zapier"] | None = None,
+    webhook_format: WebhookFormat = None,
     output_fields: list[str] | None = None,
     user_timezone: str | None = None,
     skip_email: bool | None = None,
@@ -158,11 +163,11 @@ async def create_scout(
 )
 async def edit_scout(
     scout_id: str,
-    status: Literal["active", "paused", "done"] | None = None,
+    status: ScoutStatus = None,
     query: str | None = None,
     output_interval: int | None = None,
     webhook_url: str | None = None,
-    webhook_format: Literal["scout", "slack", "zapier"] | None = None,
+    webhook_format: WebhookFormat = None,
     output_fields: list[str] | None = None,
     skip_email: bool | None = None,
     user_timezone: str | None = None,
@@ -207,10 +212,10 @@ async def run_browsing_task(
     start_url: str,
     max_steps: int | None = None,
     require_auth: bool | None = None,
-    browser: Literal["cloud", "local"] | None = None,
+    browser: BrowserChoice = None,
     output_fields: list[str] | None = None,
     webhook_url: str | None = None,
-    webhook_format: Literal["scout", "slack", "zapier"] | None = None,
+    webhook_format: WebhookFormat = None,
 ) -> str:
     return await _invoke(
         "run_browsing_task",
@@ -238,7 +243,7 @@ async def run_browsing_task(
 )
 async def list_browsing_tasks(
     limit: int | None = 10,
-    status: Literal["running", "succeeded", "failed"] | None = None,
+    status: TaskListStatus = None,
     cursor: str | None = None,
 ) -> str:
     return await _invoke(
@@ -267,7 +272,7 @@ async def run_research_task(
     user_location: str | None = None,
     output_fields: list[str] | None = None,
     webhook_url: str | None = None,
-    webhook_format: Literal["scout", "slack", "zapier"] | None = None,
+    webhook_format: WebhookFormat = None,
 ) -> str:
     return await _invoke(
         "run_research_task",
@@ -293,7 +298,7 @@ async def run_research_task(
 )
 async def list_research_tasks(
     limit: int | None = 10,
-    status: Literal["running", "succeeded", "failed"] | None = None,
+    status: TaskListStatus = None,
     cursor: str | None = None,
 ) -> str:
     return await _invoke(
