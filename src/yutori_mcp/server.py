@@ -317,13 +317,6 @@ def _make_model_kwargs_handler(
     return handler
 
 
-async def _handle_get_scout_detail(
-    client: MCPClientAdapter, arguments: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    params = ScoutIdInput(**arguments)
-    return await client.get_scout_detail(params.scout_id), {}
-
-
 async def _handle_edit_scout(
     client: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -436,7 +429,7 @@ def _make_get_task_result_handler(task_type: str, client_method: str) -> ToolHan
 _TOOL_HANDLERS: dict[str, ToolHandler] = {
     "list_api_usage": _make_model_kwargs_handler(UsageInput, "get_usage"),
     "list_scouts": _make_model_kwargs_handler(ListScoutsInput, "list_scouts"),
-    "get_scout_detail": _handle_get_scout_detail,
+    "get_scout_detail": _make_model_kwargs_handler(ScoutIdInput, "get_scout_detail"),
     "get_scout_updates": _make_model_kwargs_handler(
         GetUpdatesInput, "get_scout_updates"
     ),
