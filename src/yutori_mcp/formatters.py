@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -112,26 +113,44 @@ def _timestamp_to_utc(timestamp: int | float) -> datetime:
     return datetime.fromtimestamp(timestamp, tz=timezone.utc)
 
 
-def _format_date(value: str | int | float | None) -> str:
-    """Format an ISO date string or Unix timestamp (s or ms) as YYYY-MM-DD."""
+def _format_temporal(
+    value: str | int | float | None,
+    *,
+    numeric_format: str,
+    format_iso_string: Callable[[str], str],
+) -> str:
+    """Shared not-set guard and numeric/string dispatch for timestamp formatting.
+
+    ``_format_date`` and ``_format_datetime`` differ only in the strftime
+    format applied to numeric (Unix s/ms) timestamps and how an already-ISO
+    string is sliced; this centralizes the "not set" guard and the
+    numeric-vs-string branch so the two can't drift apart.
+    """
     if not value:
         return "not set"
     if isinstance(value, (int, float)):
-        return _timestamp_to_utc(value).strftime("%Y-%m-%d")
-    # Extract date portion (YYYY-MM-DD)
-    return value[:10] if len(value) >= 10 else value
+        return _timestamp_to_utc(value).strftime(numeric_format)
+    return format_iso_string(value)
+
+
+def _format_date(value: str | int | float | None) -> str:
+    """Format an ISO date string or Unix timestamp (s or ms) as YYYY-MM-DD."""
+    return _format_temporal(
+        value,
+        numeric_format="%Y-%m-%d",
+        # Extract date portion (YYYY-MM-DD)
+        format_iso_string=lambda v: v[:10] if len(v) >= 10 else v,
+    )
 
 
 def _format_datetime(timestamp: str | int | float | None) -> str:
     """Format an ISO datetime string or Unix timestamp (s or ms) as readable UTC."""
-    if not timestamp:
-        return "not set"
-    if isinstance(timestamp, (int, float)):
-        return _timestamp_to_utc(timestamp).strftime("%Y-%m-%d %H:%M UTC")
-    # Handle ISO datetime string
-    if len(timestamp) >= 16:
-        return f"{timestamp[:10]} {timestamp[11:16]} UTC"
-    return timestamp
+    return _format_temporal(
+        timestamp,
+        numeric_format="%Y-%m-%d %H:%M UTC",
+        # Handle ISO datetime string
+        format_iso_string=lambda v: f"{v[:10]} {v[11:16]} UTC" if len(v) >= 16 else v,
+    )
 
 
 def _truncate(text: str, max_len: int = 60) -> str:
