@@ -77,6 +77,32 @@ _IDEMPOTENT = ToolAnnotations(idempotentHint=True)
 _DESTRUCTIVE = ToolAnnotations(destructiveHint=True)
 
 
+def _list_tasks_description(task_label: str, get_tool: str) -> str:
+    """Build the shared list_*_tasks tool description.
+
+    list_browsing_tasks and list_research_tasks share identical boilerplate
+    describing pagination/status filtering and pointing at the matching
+    get_*_task_result tool for authoritative status; only the task label and
+    get-tool name differ. Mirrors the ``_output_fields_description`` helper
+    in schemas.py, which extracts the same kind of repeated tool-facing prose.
+    """
+    return (
+        f"List one-time {task_label} tasks for the authenticated user. "
+        "Supports cursor pagination and status filtering. List status is approximate "
+        f"(running also covers queued and not-yet-reconciled tasks); call "
+        f"{get_tool} for a task's authoritative status."
+    )
+
+
+def _get_task_result_description(task_label: str) -> str:
+    """Build the shared get_*_task_result tool description.
+
+    get_browsing_task_result and get_research_task_result share identical
+    text apart from the task label.
+    """
+    return f"Poll for {task_label} task status and result. Call until status is 'succeeded' or 'failed'."
+
+
 @mcp.tool(
     description=(
         "Get API usage statistics including active scout counts, rate limits, and activity metrics."
@@ -197,12 +223,7 @@ async def run_browsing_task(
 
 
 @mcp.tool(
-    description=(
-        "List one-time browsing tasks for the authenticated user. "
-        "Supports cursor pagination and status filtering. List status is approximate "
-        "(running also covers queued and not-yet-reconciled tasks); call "
-        "get_browsing_task_result for a task's authoritative status."
-    ),
+    description=_list_tasks_description("browsing", "get_browsing_task_result"),
     annotations=_READ_ONLY,
 )
 async def list_browsing_tasks(
@@ -214,7 +235,7 @@ async def list_browsing_tasks(
 
 
 @mcp.tool(
-    description="Poll for browsing task status and result. Call until status is 'succeeded' or 'failed'.",
+    description=_get_task_result_description("browsing"),
     annotations=_READ_ONLY,
 )
 async def get_browsing_task_result(task_id: str) -> str:
@@ -240,12 +261,7 @@ async def run_research_task(
 
 
 @mcp.tool(
-    description=(
-        "List one-time research tasks for the authenticated user. "
-        "Supports cursor pagination and status filtering. List status is approximate "
-        "(running also covers queued and not-yet-reconciled tasks); call "
-        "get_research_task_result for a task's authoritative status."
-    ),
+    description=_list_tasks_description("research", "get_research_task_result"),
     annotations=_READ_ONLY,
 )
 async def list_research_tasks(
@@ -257,7 +273,7 @@ async def list_research_tasks(
 
 
 @mcp.tool(
-    description="Poll for research task status and result. Call until status is 'succeeded' or 'failed'.",
+    description=_get_task_result_description("research"),
     annotations=_READ_ONLY,
 )
 async def get_research_task_result(task_id: str) -> str:

@@ -11,7 +11,13 @@ from yutori_mcp import __version__
 from yutori_mcp.adapter import YutoriAPIError
 from yutori_mcp.formatters import format_scout_edited
 from yutori_mcp.schema_utils import output_fields_to_output_schema
-from yutori_mcp.server import _handle_edit_scout, main, mcp
+from yutori_mcp.server import (
+    _get_task_result_description,
+    _handle_edit_scout,
+    _list_tasks_description,
+    main,
+    mcp,
+)
 
 
 class TestOutputFieldsToOutputSchema:
@@ -56,6 +62,45 @@ class TestOutputFieldsToOutputSchema:
         """Array items are always objects."""
         result = output_fields_to_output_schema(["field1"])
         assert result["items"]["type"] == "object"
+
+
+class TestTaskDescriptionHelpers:
+    """`_list_tasks_description`/`_get_task_result_description` are extracted
+    so the browsing and research tool descriptions cannot drift out of sync
+    with each other (mirrors `_output_fields_description` in schemas.py)."""
+
+    def test_list_tasks_description_substitutes_label_and_get_tool(self):
+        result = _list_tasks_description("browsing", "get_browsing_task_result")
+        assert result == (
+            "List one-time browsing tasks for the authenticated user. "
+            "Supports cursor pagination and status filtering. List status is approximate "
+            "(running also covers queued and not-yet-reconciled tasks); call "
+            "get_browsing_task_result for a task's authoritative status."
+        )
+
+    def test_get_task_result_description_substitutes_label(self):
+        result = _get_task_result_description("research")
+        assert (
+            result
+            == "Poll for research task status and result. Call until status is 'succeeded' or 'failed'."
+        )
+
+    async def test_registered_tool_descriptions_match_helpers(self):
+        """Drift guard: the live tool registry must use these helpers, not
+        hand-written duplicates that could diverge from the browsing variant."""
+        tools = {t.name: t.description for t in await mcp.list_tools()}
+        assert tools["list_browsing_tasks"] == _list_tasks_description(
+            "browsing", "get_browsing_task_result"
+        )
+        assert tools["list_research_tasks"] == _list_tasks_description(
+            "research", "get_research_task_result"
+        )
+        assert tools["get_browsing_task_result"] == _get_task_result_description(
+            "browsing"
+        )
+        assert tools["get_research_task_result"] == _get_task_result_description(
+            "research"
+        )
 
 
 class TestMainStatusExitCode:
