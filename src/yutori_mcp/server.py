@@ -420,27 +420,6 @@ def _make_run_task_handler(
     return handler
 
 
-def _make_get_task_result_handler(task_type: str, client_method: str) -> ToolHandler:
-    """Build a ``get_*_task_result`` handler that differs only by adapter method + task_type.
-
-    The browsing and research variants share one shape: parse
-    :class:`TaskIdInput`, call a single-argument adapter method, and stamp
-    the matching ``task_type`` into the formatter context. Generating both
-    from one factory keeps the registry as the single place that pairs the
-    tool name with its task type.
-    """
-
-    async def handler(
-        client: MCPClientAdapter, arguments: dict[str, Any]
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        params = TaskIdInput(**arguments)
-        return await getattr(client, client_method)(params.task_id), {
-            "task_type": task_type
-        }
-
-    return handler
-
-
 # Tool-name -> handler registry, consulted by _invoke() above. Mirrors
 # the _TOOL_FORMATTERS registry in formatters.py so the parse/dispatch side
 # of the MCP tool lifecycle is structured the same way as the format side.
@@ -460,8 +439,8 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
     "run_browsing_task": _make_run_task_handler(
         "Browsing", BrowsingTaskInput, "run_browsing_task", include_browser=True
     ),
-    "get_browsing_task_result": _make_get_task_result_handler(
-        "Browsing", "get_browsing_task"
+    "get_browsing_task_result": _make_model_kwargs_handler(
+        TaskIdInput, "get_browsing_task", {"task_type": "Browsing"}
     ),
     "list_research_tasks": _make_model_kwargs_handler(
         ListTasksInput, "list_research_tasks", {"task_type": "Research"}
@@ -469,8 +448,8 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
     "run_research_task": _make_run_task_handler(
         "Research", ResearchTaskInput, "run_research_task"
     ),
-    "get_research_task_result": _make_get_task_result_handler(
-        "Research", "get_research_task"
+    "get_research_task_result": _make_model_kwargs_handler(
+        TaskIdInput, "get_research_task", {"task_type": "Research"}
     ),
 }
 
