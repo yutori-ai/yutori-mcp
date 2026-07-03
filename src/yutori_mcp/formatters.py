@@ -441,7 +441,7 @@ def format_scout_detail(response: dict[str, Any], **context: Any) -> str:
     lines.append(f"  Email notifications: {'disabled' if skip_email else 'enabled'}")
 
     is_public = response.get("is_public", False)
-    lines.append(f"  Public: {'yes' if is_public else 'no'}")
+    lines.append(f"  Public: {_format_yes_no(is_public)}")
 
     if response.get("user_location"):
         lines.append(f"  Location: {response['user_location']}")
