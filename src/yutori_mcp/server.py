@@ -295,8 +295,13 @@ def _output_schema_kwargs(
     Drops None fields — callers relying on an empty result when no config
     fields were provided (e.g. _handle_edit_scout) should confirm that still
     holds — and transforms `output_fields` into the API's `output_schema`
-    format. Callers can pass `extra_exclude` to drop additional fields (e.g.
-    control fields that should not be forwarded to the adapter method).
+    format when present. This is the single kwargs-building step shared by
+    every handler factory below (``_make_model_kwargs_handler`` and
+    ``_make_run_task_handler``): input classes without an `output_fields`
+    field simply skip the transform, since `exclude={"output_fields", ...}`
+    on a model without that field is a no-op. Callers can pass
+    `extra_exclude` to drop additional fields (e.g. control fields that
+    should not be forwarded to the adapter method).
     """
     exclude = {"output_fields"} | (extra_exclude or set())
     kwargs = params.model_dump(exclude=exclude, exclude_none=True)
@@ -319,7 +324,10 @@ def _make_model_kwargs_handler(
 
     ``context`` is the formatter context stamped onto the result (e.g.
     ``{"task_type": "Browsing"}`` for the list_*_tasks tools); it defaults to
-    an empty context for tools whose formatter needs none.
+    an empty context for tools whose formatter needs none. Goes through
+    ``_output_schema_kwargs`` (like ``_make_run_task_handler`` below) so both
+    handler factories build adapter kwargs the same way; none of the input
+    classes used here define `output_fields`, so its transform is a no-op.
     """
 
     async def handler(
@@ -327,7 +335,7 @@ def _make_model_kwargs_handler(
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         params = input_class(**arguments)
         return await getattr(client, client_method)(
-            **params.model_dump(exclude_none=True)
+            **_output_schema_kwargs(params)
         ), context or {}
 
     return handler
