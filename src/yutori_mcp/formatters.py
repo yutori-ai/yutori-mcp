@@ -846,13 +846,22 @@ _SCOUT_EDIT_FIELDS = (
     ("is_public", "Public", _format_yes_no),
 )
 
-# Map task_type (as stamped by the run_*_task / list_*_task handlers in
-# server.py) to its (list_tool, get_tool) names, surfaced in the user-facing
-# hints emitted by format_task_started() and format_task_list(). A single
-# table keeps the two formatters from drifting if a tool is ever renamed.
+# Canonical task_type labels stamped into the formatter context by server.py's
+# tool handlers (via _make_model_kwargs_handler / _make_run_task_handler) and
+# consumed as _TASK_TOOLS keys below. Defined once so server.py and this
+# module can't drift on the literal spelling -- a mismatch would surface as a
+# KeyError in format_task_started()/format_task_list() rather than a
+# statically-checkable typo.
+TASK_TYPE_BROWSING = "Browsing"
+TASK_TYPE_RESEARCH = "Research"
+
+# Map task_type to its (list_tool, get_tool) names, surfaced in the
+# user-facing hints emitted by format_task_started() and format_task_list().
+# A single table keeps the two formatters from drifting if a tool is ever
+# renamed.
 _TASK_TOOLS: dict[str, tuple[str, str]] = {
-    "Research": ("list_research_tasks", "get_research_task_result"),
-    "Browsing": ("list_browsing_tasks", "get_browsing_task_result"),
+    TASK_TYPE_RESEARCH: ("list_research_tasks", "get_research_task_result"),
+    TASK_TYPE_BROWSING: ("list_browsing_tasks", "get_browsing_task_result"),
 }
 
 # Tool-name -> formatter registry, referenced by format_response() above.
