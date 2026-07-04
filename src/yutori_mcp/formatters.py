@@ -180,6 +180,19 @@ def _append_more_indicator(
         lines.append(f"{indent}... and {remaining} more")
 
 
+def _showing_line(showing: int, total: int, has_more: bool) -> str:
+    """Build the shared `Showing N of M:` / `Showing all N:` pagination line.
+
+    ``format_list_scouts`` and ``format_task_list`` both render this line
+    right after their "Found ..." summary; ``format_task_list`` layers an
+    extra "matching tasks" branch (keyed off ``filtered_total``) ahead of
+    this shared has_more/else check.
+    """
+    if has_more:
+        return f"\nShowing {showing} of {total}:"
+    return f"\nShowing all {showing}:"
+
+
 def _format_yes_no(value: Any) -> str:
     """Render a boolean-ish value as ``yes``/``no`` for diff display."""
     return "yes" if value else "no"
@@ -375,10 +388,7 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
 
     # Show count context
     showing = len(scouts)
-    if has_more:
-        lines.append(f"\nShowing {showing} of {total}:")
-    else:
-        lines.append(f"\nShowing all {showing}:")
+    lines.append(_showing_line(showing, total, has_more))
 
     # Format each scout
     for i, scout in enumerate(scouts, 1):
@@ -767,10 +777,8 @@ def format_task_list(response: dict[str, Any], **context: Any) -> str:
         lines.append(
             f"\nShowing {showing} of {filtered_total} matching tasks ({total} total):"
         )
-    elif has_more:
-        lines.append(f"\nShowing {showing} of {total}:")
     else:
-        lines.append(f"\nShowing all {showing}:")
+        lines.append(_showing_line(showing, total, has_more))
 
     for i, task in enumerate(tasks, 1):
         task_id = task.get("task_id", "")
