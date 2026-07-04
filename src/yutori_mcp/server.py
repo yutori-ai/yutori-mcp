@@ -12,7 +12,7 @@ from pydantic import BaseModel, ValidationError
 
 from . import __version__
 from .adapter import MCPClientAdapter, YutoriAPIError
-from .formatters import format_response
+from .formatters import TASK_TYPE_BROWSING, TASK_TYPE_RESEARCH, format_response
 from .schema_utils import output_fields_to_output_schema
 from .schemas import (
     BrowserChoice,
@@ -434,22 +434,22 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
     "edit_scout": _handle_edit_scout,
     "delete_scout": _handle_delete_scout,
     "list_browsing_tasks": _make_model_kwargs_handler(
-        ListTasksInput, "list_browsing_tasks", {"task_type": "Browsing"}
+        ListTasksInput, "list_browsing_tasks", {"task_type": TASK_TYPE_BROWSING}
     ),
     "run_browsing_task": _make_run_task_handler(
-        "Browsing", BrowsingTaskInput, "run_browsing_task", include_browser=True
+        TASK_TYPE_BROWSING, BrowsingTaskInput, "run_browsing_task", include_browser=True
     ),
     "get_browsing_task_result": _make_model_kwargs_handler(
-        TaskIdInput, "get_browsing_task", {"task_type": "Browsing"}
+        TaskIdInput, "get_browsing_task", {"task_type": TASK_TYPE_BROWSING}
     ),
     "list_research_tasks": _make_model_kwargs_handler(
-        ListTasksInput, "list_research_tasks", {"task_type": "Research"}
+        ListTasksInput, "list_research_tasks", {"task_type": TASK_TYPE_RESEARCH}
     ),
     "run_research_task": _make_run_task_handler(
-        "Research", ResearchTaskInput, "run_research_task"
+        TASK_TYPE_RESEARCH, ResearchTaskInput, "run_research_task"
     ),
     "get_research_task_result": _make_model_kwargs_handler(
-        TaskIdInput, "get_research_task", {"task_type": "Research"}
+        TaskIdInput, "get_research_task", {"task_type": TASK_TYPE_RESEARCH}
     ),
 }
 
