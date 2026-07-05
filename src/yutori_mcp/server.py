@@ -296,12 +296,11 @@ def _output_schema_kwargs(
     fields were provided (e.g. _handle_edit_scout) should confirm that still
     holds — and transforms `output_fields` into the API's `output_schema`
     format when present. This is the single kwargs-building step shared by
-    every handler factory below (``_make_model_kwargs_handler`` and
-    ``_make_run_task_handler``): input classes without an `output_fields`
-    field simply skip the transform, since `exclude={"output_fields", ...}`
-    on a model without that field is a no-op. Callers can pass
-    `extra_exclude` to drop additional fields (e.g. control fields that
-    should not be forwarded to the adapter method).
+    every handler built via ``_make_handler`` below: input classes without an
+    `output_fields` field simply skip the transform, since
+    `exclude={"output_fields", ...}` on a model without that field is a
+    no-op. Callers can pass `extra_exclude` to drop additional fields (e.g.
+    control fields that should not be forwarded to the adapter method).
     """
     exclude = {"output_fields"} | (extra_exclude or set())
     kwargs = params.model_dump(exclude=exclude, exclude_none=True)
@@ -317,26 +316,34 @@ def _output_schema_kwargs(
 # -----------------------------------------------------------------------------
 
 
-def _make_model_kwargs_handler(
-    input_class: type[BaseModel], client_method: str, context: dict[str, Any] | None = None
+def _make_handler(
+    input_class: type[BaseModel],
+    client_method: str,
+    context: dict[str, Any] | Callable[[BaseModel], dict[str, Any]] | None = None,
 ) -> ToolHandler:
-    """Build a handler that forwards a simple input model as keyword arguments.
+    """Build a handler that parses an input schema and forwards it as adapter kwargs.
 
-    ``context`` is the formatter context stamped onto the result (e.g.
-    ``{"task_type": "Browsing"}`` for the list_*_tasks tools); it defaults to
-    an empty context for tools whose formatter needs none. Goes through
-    ``_output_schema_kwargs`` (like ``_make_run_task_handler`` below) so both
-    handler factories build adapter kwargs the same way; none of the input
-    classes used here define `output_fields`, so its transform is a no-op.
+    Shared shape for tools whose handler body is the one-liner
+    ``client.METHOD(**_output_schema_kwargs(params))``: parse a schema, call the
+    adapter method, and stamp a formatter context onto the result. ``context``
+    is either a static dict (e.g. ``{"task_type": "Browsing"}`` for the
+    list_*_tasks tools), a callable that derives the context from the parsed
+    params (e.g. ``run_browsing_task`` needs ``params.browser`` so
+    ``format_task_started`` can annotate the local/cloud distinction), or
+    omitted entirely for tools whose formatter needs no context (e.g.
+    ``create_scout``, which has no task-type concept). Generating these from
+    one factory keeps the registry as the single place that pairs the tool
+    name with its input schema, adapter method, and context.
     """
 
     async def handler(
         client: MCPClientAdapter, arguments: dict[str, Any]
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         params = input_class(**arguments)
+        ctx = context(params) if callable(context) else dict(context or {})
         return await getattr(client, client_method)(
             **_output_schema_kwargs(params)
-        ), context or {}
+        ), ctx
 
     return handler
 
@@ -393,70 +400,35 @@ async def _handle_delete_scout(
     return result, {"scout_id": params.scout_id}
 
 
-def _make_run_task_handler(
-    task_type: str | None,
-    input_class: type[BaseModel],
-    client_method: str,
-    include_browser: bool = False,
-) -> ToolHandler:
-    """Build a handler that parses an input schema and forwards it as adapter kwargs.
-
-    Shared shape for tools whose handler body is the one-liner
-    ``client.METHOD(**_output_schema_kwargs(params))``: parse a schema, call the
-    adapter method, and stamp the matching ``task_type`` into the formatter
-    context. ``task_type=None`` (used for ``create_scout``, which has no
-    task-type concept) omits the context entry entirely rather than stamping
-    a null value. ``include_browser=True`` additionally surfaces
-    ``params.browser`` so ``format_task_started`` can annotate the
-    local/cloud distinction (research has no browser knob, so it omits the
-    field). Generating these from one factory keeps the registry as the
-    single place that pairs the tool name with its input schema and adapter
-    method.
-    """
-
-    async def handler(
-        client: MCPClientAdapter, arguments: dict[str, Any]
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        params = input_class(**arguments)
-        context: dict[str, Any] = {} if task_type is None else {"task_type": task_type}
-        if include_browser:
-            context["browser"] = params.browser  # type: ignore[attr-defined]
-        return await getattr(client, client_method)(
-            **_output_schema_kwargs(params)
-        ), context
-
-    return handler
-
-
 # Tool-name -> handler registry, consulted by _invoke() above. Mirrors
 # the _TOOL_FORMATTERS registry in formatters.py so the parse/dispatch side
 # of the MCP tool lifecycle is structured the same way as the format side.
 _TOOL_HANDLERS: dict[str, ToolHandler] = {
-    "list_api_usage": _make_model_kwargs_handler(UsageInput, "get_usage"),
-    "list_scouts": _make_model_kwargs_handler(ListScoutsInput, "list_scouts"),
-    "get_scout_detail": _make_model_kwargs_handler(ScoutIdInput, "get_scout_detail"),
-    "get_scout_updates": _make_model_kwargs_handler(
-        GetUpdatesInput, "get_scout_updates"
-    ),
-    "create_scout": _make_run_task_handler(None, CreateScoutInput, "create_scout"),
+    "list_api_usage": _make_handler(UsageInput, "get_usage"),
+    "list_scouts": _make_handler(ListScoutsInput, "list_scouts"),
+    "get_scout_detail": _make_handler(ScoutIdInput, "get_scout_detail"),
+    "get_scout_updates": _make_handler(GetUpdatesInput, "get_scout_updates"),
+    "create_scout": _make_handler(CreateScoutInput, "create_scout"),
     "edit_scout": _handle_edit_scout,
     "delete_scout": _handle_delete_scout,
-    "list_browsing_tasks": _make_model_kwargs_handler(
+    "list_browsing_tasks": _make_handler(
         ListTasksInput, "list_browsing_tasks", {"task_type": TASK_TYPE_BROWSING}
     ),
-    "run_browsing_task": _make_run_task_handler(
-        TASK_TYPE_BROWSING, BrowsingTaskInput, "run_browsing_task", include_browser=True
+    "run_browsing_task": _make_handler(
+        BrowsingTaskInput,
+        "run_browsing_task",
+        lambda params: {"task_type": TASK_TYPE_BROWSING, "browser": params.browser},  # type: ignore[attr-defined]
     ),
-    "get_browsing_task_result": _make_model_kwargs_handler(
+    "get_browsing_task_result": _make_handler(
         TaskIdInput, "get_browsing_task", {"task_type": TASK_TYPE_BROWSING}
     ),
-    "list_research_tasks": _make_model_kwargs_handler(
+    "list_research_tasks": _make_handler(
         ListTasksInput, "list_research_tasks", {"task_type": TASK_TYPE_RESEARCH}
     ),
-    "run_research_task": _make_run_task_handler(
-        TASK_TYPE_RESEARCH, ResearchTaskInput, "run_research_task"
+    "run_research_task": _make_handler(
+        ResearchTaskInput, "run_research_task", {"task_type": TASK_TYPE_RESEARCH}
     ),
-    "get_research_task_result": _make_model_kwargs_handler(
+    "get_research_task_result": _make_handler(
         TaskIdInput, "get_research_task", {"task_type": TASK_TYPE_RESEARCH}
     ),
 }
