@@ -233,6 +233,20 @@ def _scout_platform_url(scout_id: str) -> str:
     return f"https://platform.yutori.com/scouting/tasks/{scout_id}"
 
 
+def _id_url_lines(scout_id: str, *, indent: str = "") -> list[str]:
+    """Build the shared `ID: ...` / `URL: ...` two-line pair, optionally indented.
+
+    Used by ``_scout_identity_lines`` (unindented, for the top-level scout
+    detail/created/edited formatters) and directly by ``format_list_scouts``
+    (indented under each numbered entry), so the two call sites can't drift
+    on the URL format.
+    """
+    return [
+        f"{indent}ID: {scout_id}",
+        f"{indent}URL: {_scout_platform_url(scout_id)}",
+    ]
+
+
 _STATUS_UNSET: Any = object()
 
 
@@ -251,14 +265,9 @@ def _scout_identity_lines(
     line entirely (e.g. the diff path of ``format_scout_edited``) simply
     don't pass ``status``.
 
-    Used by the top-level scout detail / created / edited formatters. The list-scouts
-    formatter uses its own indented variant and doesn't call this helper.
+    Used by the top-level scout detail / created / edited formatters.
     """
-    lines = [
-        f"{name_label}: {name}",
-        f"ID: {scout_id}",
-        f"URL: {_scout_platform_url(scout_id)}",
-    ]
+    lines = [f"{name_label}: {name}", *_id_url_lines(scout_id)]
     if status is not _STATUS_UNSET:
         lines.append(f"Status: {status}")
     return lines
@@ -401,8 +410,7 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
 
         lines.append(f"\n{i}. {name} ({status})")
         lines.append(f'   Query: "{_truncate(query)}"')
-        lines.append(f"   ID: {scout_id}")
-        lines.append(f"   URL: {_scout_platform_url(scout_id)}")
+        lines.extend(_id_url_lines(scout_id, indent="   "))
         lines.append(f"   Runs {interval} | Next: {next_run}")
         _append_rejection_reason(lines, scout.get("rejection_reason"), indent="   ")
 
