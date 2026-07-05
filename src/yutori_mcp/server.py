@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, NoReturn
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ValidationError
 
@@ -34,7 +35,44 @@ from .schemas import (
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("yutori-mcp")
+
+class _StrictArgsFastMCP(FastMCP):
+    """FastMCP that rejects tool calls containing unknown argument names.
+
+    FastMCP's own tool-call binding silently drops any argument name it
+    doesn't recognize (it disables the low-level Server's jsonschema
+    additionalProperties:false check "for backwards compatibility" - see
+    mcp.server.fastmcp.server.FastMCP._setup_handlers), which defeats the
+    extra="forbid" intent documented on schemas.ToolInput. This restores
+    that rejection at the one point that still sees the client's raw
+    argument dict, before FastMCP's own binding drops anything unknown.
+    `tool.parameters`/`_tool_manager` are undocumented FastMCP internals;
+    if a future `mcp` release renames them, fail open (skip validation)
+    rather than break the server.
+    """
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        try:
+            tool = self._tool_manager.get_tool(name)
+            unknown = (
+                set(arguments) - set(tool.parameters.get("properties", {}))
+                if tool
+                else set()
+            )
+        except AttributeError:
+            logger.warning(
+                "Could not validate tool arguments against %r; skipping strict-args check",
+                name,
+            )
+            unknown = set()
+        if unknown:
+            raise ToolError(
+                f"Unknown argument(s) for tool {name!r}: {', '.join(sorted(unknown))}"
+            )
+        return await super().call_tool(name, arguments)
+
+
+mcp = _StrictArgsFastMCP("yutori-mcp")
 
 
 async def _invoke(tool_name: str, args: dict[str, Any]) -> str:

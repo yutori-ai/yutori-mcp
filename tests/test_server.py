@@ -310,12 +310,21 @@ class TestCallToolErrorContract:
         assert result.root.isError is False
         assert "Found 0 research tasks" in result.root.content[0].text
 
-    async def test_unknown_argument_silently_accepted(self):
-        # FastMCP extracts only known parameters from the request, silently
-        # dropping unknown arguments. Unlike the old Server-based implementation
-        # (which enforced additionalProperties:false via jsonschema), FastMCP
-        # does not reject extra arguments at the protocol level. The call
-        # succeeds with the known arguments applied and the extra ignored.
+    async def test_unknown_argument_rejected(self):
+        # FastMCP itself extracts only known parameters from the request,
+        # silently dropping unknown ones. _StrictArgsFastMCP.call_tool
+        # restores the old Server-based additionalProperties:false-style
+        # rejection by checking the raw argument dict before FastMCP's own
+        # binding drops anything unrecognized.
+        handler = _call_tool_handler()
+        with _patched_adapter() as client:
+            result = await handler(_call_tool_request("list_scouts", {"bogus": 1}))
+
+        client.list_scouts.assert_not_awaited()
+        assert result.root.isError is True
+        assert "bogus" in result.root.content[0].text
+
+    async def test_known_arguments_still_accepted(self):
         handler = _call_tool_handler()
         with _patched_adapter() as client:
             client.list_scouts.return_value = {
@@ -323,7 +332,7 @@ class TestCallToolErrorContract:
                 "total": 0,
                 "summary": {"active": 0, "paused": 0, "done": 0},
             }
-            result = await handler(_call_tool_request("list_scouts", {"bogus": 1}))
+            result = await handler(_call_tool_request("list_scouts", {"limit": 5}))
 
         assert result.root.isError is False
 
