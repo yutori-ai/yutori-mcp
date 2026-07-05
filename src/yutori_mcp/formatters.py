@@ -867,11 +867,11 @@ _SCOUT_EDIT_FIELDS = (
 )
 
 # Canonical task_type labels stamped into the formatter context by server.py's
-# tool handlers (via _make_model_kwargs_handler / _make_run_task_handler) and
-# consumed as _TASK_TOOLS keys below. Defined once so server.py and this
-# module can't drift on the literal spelling -- a mismatch would surface as a
-# KeyError in format_task_started()/format_task_list() rather than a
-# statically-checkable typo.
+# tool handlers (via _make_handler) and consumed as _TASK_TOOLS keys below.
+# Defined once so server.py and this module can't drift on the literal
+# spelling -- a mismatch would surface as a KeyError in
+# format_task_started()/format_task_list() rather than a statically-checkable
+# typo.
 TASK_TYPE_BROWSING = "Browsing"
 TASK_TYPE_RESEARCH = "Research"
 
