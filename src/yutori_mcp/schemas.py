@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
@@ -78,6 +78,21 @@ def _output_fields_description(example: list[str], docs_slug: str | None = None)
     return base + f" (see example at: https://docs.yutori.com/reference/{docs_slug})."
 
 
+def _output_fields_field(example: list[str], docs_slug: str | None = None) -> Any:
+    """Build the shared `output_fields` Field (text from `_output_fields_description`).
+
+    Four input schemas repeat the identical `Field(default=None, min_length=1, ...)`
+    shape for `output_fields`; only the example names and docs slug differ. Keeping
+    the Field construction here too (not just the description text) means the
+    `min_length=1` constraint cannot drift out of sync across the four schemas.
+    """
+    return Field(
+        default=None,
+        min_length=1,
+        description=_output_fields_description(example, docs_slug),
+    )
+
+
 class UsageInput(ToolInput):
     """Input for retrieving API usage statistics."""
 
@@ -125,13 +140,9 @@ class CreateScoutInput(ToolInput):
         default=None,
         description=_WEBHOOK_FORMAT_DESCRIPTION,
     )
-    output_fields: list[str] | None = Field(
-        default=None,
-        min_length=1,
-        description=_output_fields_description(
-            ["headline", "summary", "url"],
-            docs_slug="scouts-create#using-scheduling-webhooks-and-a-structured-output-schema",
-        ),
+    output_fields: list[str] | None = _output_fields_field(
+        ["headline", "summary", "url"],
+        docs_slug="scouts-create#using-scheduling-webhooks-and-a-structured-output-schema",
     )
     user_timezone: str | None = Field(
         default=None,
@@ -185,10 +196,8 @@ class EditScoutInput(ToolInput):
         default=None,
         description=_WEBHOOK_FORMAT_DESCRIPTION,
     )
-    output_fields: list[str] | None = Field(
-        default=None,
-        min_length=1,
-        description=_output_fields_description(["headline", "summary", "url"]),
+    output_fields: list[str] | None = _output_fields_field(
+        ["headline", "summary", "url"]
     )
     skip_email: bool | None = Field(
         default=None,
@@ -317,13 +326,9 @@ class BrowsingTaskInput(ToolInput):
             "Requires the desktop app to be running."
         ),
     )
-    output_fields: list[str] | None = Field(
-        default=None,
-        min_length=1,
-        description=_output_fields_description(
-            ["name", "title", "email"],
-            docs_slug="browsing-create#using-webhooks-and-a-structured-output-schema",
-        ),
+    output_fields: list[str] | None = _output_fields_field(
+        ["name", "title", "email"],
+        docs_slug="browsing-create#using-webhooks-and-a-structured-output-schema",
     )
     webhook_url: HttpsWebhookUrl = Field(
         default=None,
@@ -369,13 +374,9 @@ class ResearchTaskInput(ToolInput):
         default=None,
         description="Location for contextual awareness. Format: 'city, region, country'. Default: 'San Francisco, CA, US'",
     )
-    output_fields: list[str] | None = Field(
-        default=None,
-        min_length=1,
-        description=_output_fields_description(
-            ["title", "summary", "source_url"],
-            docs_slug="research-create#using-webhooks-and-a-structured-output-schema",
-        ),
+    output_fields: list[str] | None = _output_fields_field(
+        ["title", "summary", "source_url"],
+        docs_slug="research-create#using-webhooks-and-a-structured-output-schema",
     )
     webhook_url: HttpsWebhookUrl = Field(
         default=None,
