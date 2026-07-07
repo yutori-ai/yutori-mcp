@@ -93,6 +93,21 @@ def _output_fields_field(example: list[str], docs_slug: str | None = None) -> An
     )
 
 
+def _limit_field(noun: str, *, default: int | None = 10) -> Any:
+    """Build the shared pagination `limit` Field (1-100, optional "Default: N" suffix).
+
+    ListScoutsInput, ListTasksInput, and GetUpdatesInput each repeat the same
+    `Field(..., ge=1, le=100, description="Maximum number of {noun} to return
+    (1-100)...")` shape; only the noun and whether a client-side default is
+    advertised differ. Centralizing the `ge=1`/`le=100` bounds here means they
+    cannot drift apart across the three schemas.
+    """
+    description = f"Maximum number of {noun} to return (1-100)"
+    if default is not None:
+        description += f". Default: {default}"
+    return Field(default=default, ge=1, le=100, description=description)
+
+
 class UsageInput(ToolInput):
     """Input for retrieving API usage statistics."""
 
@@ -233,12 +248,7 @@ class ScoutIdInput(ToolInput):
 class ListScoutsInput(ToolInput):
     """Input for listing scouts with optional limit and filtering."""
 
-    limit: int | None = Field(
-        default=10,
-        ge=1,
-        le=100,
-        description="Maximum number of scouts to return (1-100). Default: 10",
-    )
+    limit: int | None = _limit_field("scouts")
     status: ScoutStatus = Field(
         default=None,
         description="Filter by status: 'active', 'paused', or 'done'",
@@ -252,12 +262,7 @@ class ListScoutsInput(ToolInput):
 class ListTasksInput(ToolInput):
     """Input for listing one-time browsing or research tasks."""
 
-    limit: int | None = Field(
-        default=10,
-        ge=1,
-        le=100,
-        description="Maximum number of tasks to return (1-100). Default: 10",
-    )
+    limit: int | None = _limit_field("tasks")
     status: TaskListStatus = Field(
         default=None,
         description="Filter by status: 'running', 'succeeded', or 'failed'",
@@ -276,12 +281,7 @@ class GetUpdatesInput(ToolInput):
         default=None,
         description="Pagination cursor from a previous response",
     )
-    limit: int | None = Field(
-        default=None,
-        ge=1,
-        le=100,
-        description="Maximum number of updates to return (1-100)",
-    )
+    limit: int | None = _limit_field("updates", default=None)
 
 
 class BrowsingTaskInput(ToolInput):
