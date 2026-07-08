@@ -25,8 +25,11 @@ class ToolInput(BaseModel):
     """Base class for all tool input schemas.
 
     ``extra="forbid"`` guards direct model instantiation (in handler factories
-    and tests). FastMCP strips unknown fields at the protocol level before they
-    reach handlers, so the schema constraint is not enforced at runtime there.
+    and tests). FastMCP's own tool-call binding would otherwise silently drop
+    unknown fields at the protocol level before they reach handlers, but
+    ``server._StrictArgsFastMCP`` restores that rejection at the point that
+    still sees the client's raw argument dict, so the constraint is enforced
+    at runtime there too.
     """
 
     model_config = ConfigDict(extra="forbid")
