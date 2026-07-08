@@ -103,6 +103,12 @@ class TestTaskDescriptionHelpers:
         )
 
 
+def _assert_main_exits(expected_code: int) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == expected_code
+
+
 class TestMainStatusExitCode:
     """Ensure `yutori-mcp status` exits 1 when unauthenticated, 0 when authenticated."""
 
@@ -112,9 +118,7 @@ class TestMainStatusExitCode:
             patch("sys.argv", ["yutori-mcp", "status"]),
             patch("yutori.auth.get_auth_status", return_value=status),
         ):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
-            assert exc_info.value.code == 1
+            _assert_main_exits(1)
 
     def test_status_authenticated_exits_0(self):
         status = AuthStatus(
@@ -127,9 +131,7 @@ class TestMainStatusExitCode:
             patch("sys.argv", ["yutori-mcp", "status"]),
             patch("yutori.auth.get_auth_status", return_value=status),
         ):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
-            assert exc_info.value.code == 0
+            _assert_main_exits(0)
 
 
 class TestMainLoginAuthUrl:
@@ -147,9 +149,7 @@ class TestMainLoginAuthUrl:
                 "yutori.auth.run_login_flow", return_value=result
             ) as mock_run_login_flow,
         ):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
-            assert exc_info.value.code == 1
+            _assert_main_exits(1)
         mock_run_login_flow.assert_called_once_with(key_source="yutori-mcp")
         output = capsys.readouterr().out
         assert "https://clerk.example.com/oauth/authorize?x=1" in output
@@ -162,9 +162,7 @@ class TestMainLoginAuthUrl:
                 "yutori.auth.run_login_flow", return_value=result
             ) as mock_run_login_flow,
         ):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
-            assert exc_info.value.code == 1
+            _assert_main_exits(1)
         mock_run_login_flow.assert_called_once_with(key_source="yutori-mcp")
         output = capsys.readouterr().out
         assert "browser" not in output.lower()
@@ -175,9 +173,7 @@ class TestMainVersionFlag:
 
     def test_version_flag_prints_version(self, capsys):
         with patch("sys.argv", ["yutori-mcp", "--version"]):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
-            assert exc_info.value.code == 0
+            _assert_main_exits(0)
         output = capsys.readouterr().out.strip()
         assert output == f"yutori-mcp {__version__}"
 
