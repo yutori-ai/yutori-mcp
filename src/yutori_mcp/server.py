@@ -430,14 +430,6 @@ async def _handle_edit_scout(
     return {"old": old_scout, "new": new_scout}, {}
 
 
-async def _handle_delete_scout(
-    client: MCPClientAdapter, arguments: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    params = ScoutIdInput(**arguments)
-    result = await client.delete_scout(params.scout_id)
-    return result, {"scout_id": params.scout_id}
-
-
 # Tool-name -> handler registry, consulted by _invoke() above. Mirrors
 # the _TOOL_FORMATTERS registry in formatters.py so the parse/dispatch side
 # of the MCP tool lifecycle is structured the same way as the format side.
@@ -448,7 +440,11 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
     "get_scout_updates": _make_handler(GetUpdatesInput, "get_scout_updates"),
     "create_scout": _make_handler(CreateScoutInput, "create_scout"),
     "edit_scout": _handle_edit_scout,
-    "delete_scout": _handle_delete_scout,
+    "delete_scout": _make_handler(
+        ScoutIdInput,
+        "delete_scout",
+        lambda params: {"scout_id": params.scout_id},  # type: ignore[attr-defined]
+    ),
     "list_browsing_tasks": _make_handler(
         ListTasksInput, "list_browsing_tasks", {"task_type": TASK_TYPE_BROWSING}
     ),
