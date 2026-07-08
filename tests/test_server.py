@@ -310,6 +310,19 @@ class TestCallToolErrorContract:
         assert result.root.isError is False
         assert "Found 0 research tasks" in result.root.content[0].text
 
+    async def test_delete_scout_dispatches_with_scout_id(self):
+        handler = _call_tool_handler()
+        with _patched_adapter() as client:
+            client.delete_scout.return_value = {}
+            result = await handler(
+                _call_tool_request("delete_scout", {"scout_id": "scout-1"})
+            )
+
+        client.delete_scout.assert_awaited_once_with(scout_id="scout-1")
+        assert result.root.isError is False
+        assert "Scout deleted" in result.root.content[0].text
+        assert "scout-1" in result.root.content[0].text
+
     async def test_unknown_argument_rejected(self):
         # FastMCP itself extracts only known parameters from the request,
         # silently dropping unknown ones. _StrictArgsFastMCP.call_tool
