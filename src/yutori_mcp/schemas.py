@@ -96,6 +96,17 @@ def _output_fields_field(example: list[str], docs_slug: str | None = None) -> An
     )
 
 
+def _webhook_format_field() -> Any:
+    """Build the shared `webhook_format` Field (text from `_WEBHOOK_FORMAT_DESCRIPTION`).
+
+    CreateScoutInput, EditScoutInput, BrowsingTaskInput, and ResearchTaskInput
+    each repeat the identical `Field(default=None, description=_WEBHOOK_FORMAT_DESCRIPTION)`
+    shape for `webhook_format`. Centralizing the Field construction (not just the
+    description text) means the four call sites cannot drift apart.
+    """
+    return Field(default=None, description=_WEBHOOK_FORMAT_DESCRIPTION)
+
+
 def _limit_field(noun: str, *, default: int | None = 10) -> Any:
     """Build the shared pagination `limit` Field (1-100, optional "Default: N" suffix).
 
@@ -154,10 +165,7 @@ class CreateScoutInput(ToolInput):
             "Must use https://. Confirm the URL with the user before setting."
         ),
     )
-    webhook_format: WebhookFormat = Field(
-        default=None,
-        description=_WEBHOOK_FORMAT_DESCRIPTION,
-    )
+    webhook_format: WebhookFormat = _webhook_format_field()
     output_fields: list[str] | None = _output_fields_field(
         ["headline", "summary", "url"],
         docs_slug="scouts-create#using-scheduling-webhooks-and-a-structured-output-schema",
@@ -210,10 +218,7 @@ class EditScoutInput(ToolInput):
         default=None,
         description="Updated HTTPS webhook URL. Must use https://. Confirm the URL with the user before setting.",
     )
-    webhook_format: WebhookFormat = Field(
-        default=None,
-        description=_WEBHOOK_FORMAT_DESCRIPTION,
-    )
+    webhook_format: WebhookFormat = _webhook_format_field()
     output_fields: list[str] | None = _output_fields_field(
         ["headline", "summary", "url"]
     )
@@ -337,10 +342,7 @@ class BrowsingTaskInput(ToolInput):
         default=None,
         description="HTTPS URL to receive webhook notification when task completes. Must use https://.",
     )
-    webhook_format: WebhookFormat = Field(
-        default=None,
-        description=_WEBHOOK_FORMAT_DESCRIPTION,
-    )
+    webhook_format: WebhookFormat = _webhook_format_field()
 
 
 class TaskIdInput(ToolInput):
@@ -385,7 +387,4 @@ class ResearchTaskInput(ToolInput):
         default=None,
         description="HTTPS URL to receive webhook notification when research completes. Must use https://.",
     )
-    webhook_format: WebhookFormat = Field(
-        default=None,
-        description=_WEBHOOK_FORMAT_DESCRIPTION,
-    )
+    webhook_format: WebhookFormat = _webhook_format_field()
