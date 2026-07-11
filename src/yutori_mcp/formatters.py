@@ -180,6 +180,16 @@ def _append_more_indicator(
         lines.append(f"{indent}... and {remaining} more")
 
 
+def _pagination_state(response: dict[str, Any]) -> tuple[bool, str | None]:
+    """Return the shared `(has_more, next_cursor)` pagination pair from a list-style response.
+
+    Used by ``format_list_scouts``, ``format_scout_updates``, and ``format_task_list``, all of
+    which read these two fields with the same defaults before deciding how to render a
+    "see more" hint.
+    """
+    return response.get("has_more", False), response.get("next_cursor")
+
+
 def _showing_line(showing: int, total: int, has_more: bool) -> str:
     """Build the shared `Showing N of M:` / `Showing all N:` pagination line.
 
@@ -382,7 +392,7 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
     total = response.get("total", len(scouts))
     # `or {}` guards an explicit `summary: null` (a missing key already defaults).
     summary = response.get("summary") or {}
-    has_more = response.get("has_more", False)
+    has_more, next_cursor = _pagination_state(response)
 
     # Build summary line
     active = summary.get("active", 0)
@@ -416,7 +426,6 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
 
     # Add hints
     lines.append("")
-    next_cursor = response.get("next_cursor")
     if has_more and next_cursor:
         lines.append(f'Use list_scouts(cursor="{next_cursor}") to see more.')
     elif has_more:
@@ -479,8 +488,7 @@ def format_scout_detail(response: dict[str, Any], **context: Any) -> str:
 def format_scout_updates(response: dict[str, Any], **context: Any) -> str:
     """Format get_scout_updates response as readable text."""
     updates = response.get("updates", [])
-    has_more = response.get("has_more", False)
-    next_cursor = response.get("next_cursor")
+    has_more, next_cursor = _pagination_state(response)
 
     if not updates:
         return "No updates found for this scout."
@@ -762,8 +770,7 @@ def format_task_list(response: dict[str, Any], **context: Any) -> str:
     total = response.get("total", len(tasks))
     filtered_total = response.get("filtered_total", total)
     summary = response.get("summary") or {}
-    has_more = response.get("has_more", False)
-    next_cursor = response.get("next_cursor")
+    has_more, next_cursor = _pagination_state(response)
     list_tool, get_tool = _TASK_TOOLS[task_type]
 
     if summary:
