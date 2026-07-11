@@ -107,6 +107,18 @@ def _webhook_format_field() -> Any:
     return Field(default=None, description=_WEBHOOK_FORMAT_DESCRIPTION)
 
 
+def _webhook_url_field(description: str) -> Any:
+    """Build the shared `webhook_url` Field (type is always `HttpsWebhookUrl`).
+
+    CreateScoutInput, EditScoutInput, BrowsingTaskInput, and ResearchTaskInput
+    each repeat the identical `Field(default=None, description=...)` shape for
+    `webhook_url`; only the description wording differs per call site.
+    Centralizing the Field construction means the shared `default=None` cannot
+    drift out of sync, mirroring `_webhook_format_field` above.
+    """
+    return Field(default=None, description=description)
+
+
 def _limit_field(noun: str, *, default: int | None = 10) -> Any:
     """Build the shared pagination `limit` Field (1-100, optional "Default: N" suffix).
 
@@ -158,12 +170,9 @@ class CreateScoutInput(ToolInput):
             "(30 minutes). Default: 86400 (daily)"
         ),
     )
-    webhook_url: HttpsWebhookUrl = Field(
-        default=None,
-        description=(
-            "HTTPS URL to receive webhook notifications when updates are available. "
-            "Must use https://. Confirm the URL with the user before setting."
-        ),
+    webhook_url: HttpsWebhookUrl = _webhook_url_field(
+        "HTTPS URL to receive webhook notifications when updates are available. "
+        "Must use https://. Confirm the URL with the user before setting."
     )
     webhook_format: WebhookFormat = _webhook_format_field()
     output_fields: list[str] | None = _output_fields_field(
@@ -214,9 +223,8 @@ class EditScoutInput(ToolInput):
             f"Updated run interval in seconds. Minimum {_MIN_OUTPUT_INTERVAL_SECONDS} (30 minutes)"
         ),
     )
-    webhook_url: HttpsWebhookUrl = Field(
-        default=None,
-        description="Updated HTTPS webhook URL. Must use https://. Confirm the URL with the user before setting.",
+    webhook_url: HttpsWebhookUrl = _webhook_url_field(
+        "Updated HTTPS webhook URL. Must use https://. Confirm the URL with the user before setting."
     )
     webhook_format: WebhookFormat = _webhook_format_field()
     output_fields: list[str] | None = _output_fields_field(
@@ -338,9 +346,8 @@ class BrowsingTaskInput(ToolInput):
         ["name", "title", "email"],
         docs_slug="browsing-create#using-webhooks-and-a-structured-output-schema",
     )
-    webhook_url: HttpsWebhookUrl = Field(
-        default=None,
-        description="HTTPS URL to receive webhook notification when task completes. Must use https://.",
+    webhook_url: HttpsWebhookUrl = _webhook_url_field(
+        "HTTPS URL to receive webhook notification when task completes. Must use https://."
     )
     webhook_format: WebhookFormat = _webhook_format_field()
 
@@ -383,8 +390,7 @@ class ResearchTaskInput(ToolInput):
         ["title", "summary", "source_url"],
         docs_slug="research-create#using-webhooks-and-a-structured-output-schema",
     )
-    webhook_url: HttpsWebhookUrl = Field(
-        default=None,
-        description="HTTPS URL to receive webhook notification when research completes. Must use https://.",
+    webhook_url: HttpsWebhookUrl = _webhook_url_field(
+        "HTTPS URL to receive webhook notification when research completes. Must use https://."
     )
     webhook_format: WebhookFormat = _webhook_format_field()
