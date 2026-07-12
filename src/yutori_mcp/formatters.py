@@ -192,6 +192,20 @@ def _pagination_state(response: dict[str, Any]) -> tuple[bool, str | None]:
     return response.get("has_more", False), response.get("next_cursor")
 
 
+def _found_summary_line(label: str, total: int, breakdown: list[tuple[str, int]] | None) -> str:
+    """Build the shared `Found N <label>[: a x, b y, c z].` summary line.
+
+    ``format_list_scouts`` always supplies a breakdown (defaulting missing
+    counts to 0). ``format_task_list`` passes ``None`` when the response
+    omitted ``summary`` entirely, to avoid printing a misleading all-zero
+    breakdown over real rows.
+    """
+    if breakdown is None:
+        return f"Found {total} {label}."
+    parts = ", ".join(f"{count} {name}" for name, count in breakdown)
+    return f"Found {total} {label}: {parts}."
+
+
 def _showing_line(showing: int, total: int, has_more: bool) -> str:
     """Build the shared `Showing N of M:` / `Showing all N:` pagination line.
 
@@ -396,7 +410,8 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
     paused = summary.get("paused", 0)
     done = summary.get("done", 0)
 
-    lines = [f"Found {total} scouts: {active} active, {paused} paused, {done} done."]
+    breakdown = [("active", active), ("paused", paused), ("done", done)]
+    lines = [_found_summary_line("scouts", total, breakdown)]
 
     if not scouts:
         lines.append("\nNo scouts to display.")
@@ -770,15 +785,16 @@ def format_task_list(response: dict[str, Any], **context: Any) -> str:
     has_more, next_cursor = _pagination_state(response)
     list_tool, get_tool = _TASK_TOOLS[task_type]
 
-    if summary:
-        lines = [
-            f"Found {total} {task_label} tasks: "
-            f"{summary.get('running', 0)} running, "
-            f"{summary.get('succeeded', 0)} succeeded, "
-            f"{summary.get('failed', 0)} failed."
+    breakdown = (
+        [
+            ("running", summary.get("running", 0)),
+            ("succeeded", summary.get("succeeded", 0)),
+            ("failed", summary.get("failed", 0)),
         ]
-    else:
-        lines = [f"Found {total} {task_label} tasks."]
+        if summary
+        else None
+    )
+    lines = [_found_summary_line(f"{task_label} tasks", total, breakdown)]
 
     if not tasks:
         lines.append(f"\nNo {task_label} tasks to display.")
