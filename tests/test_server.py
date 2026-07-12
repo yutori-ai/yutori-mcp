@@ -10,7 +10,10 @@ from yutori.auth.types import AuthStatus, LoginResult
 from yutori_mcp import __version__
 from yutori_mcp.adapter import YutoriAPIError
 from yutori_mcp.formatters import format_scout_edited
-from yutori_mcp.schema_utils import output_fields_to_output_schema
+from yutori_mcp.schema_utils import (
+    output_fields_to_output_schema,
+    output_schema_field_names,
+)
 from yutori_mcp.server import (
     _get_task_result_description,
     _handle_edit_scout,
@@ -62,6 +65,19 @@ class TestOutputFieldsToOutputSchema:
         """Array items are always objects."""
         result = output_fields_to_output_schema(["field1"])
         assert result["items"]["type"] == "object"
+
+    def test_round_trips_through_output_schema_field_names(self):
+        """output_schema_field_names must invert output_fields_to_output_schema.
+
+        Drift guard: formatters._format_output_fields_diff renders diffs by
+        calling output_schema_field_names() on the schema this function
+        builds. If the two ever fall out of sync (e.g. this function adds a
+        `required` list or changes nesting), this test catches it instead of
+        the diff formatter silently degrading to "(custom schema)".
+        """
+        fields = ["headline", "summary", "url"]
+        schema = output_fields_to_output_schema(fields)
+        assert output_schema_field_names(schema) == fields
 
 
 class TestTaskDescriptionHelpers:
