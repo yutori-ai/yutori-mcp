@@ -107,6 +107,18 @@ def _webhook_format_field() -> Any:
     return Field(default=None, description=_WEBHOOK_FORMAT_DESCRIPTION)
 
 
+def _output_interval_field(description: str) -> Any:
+    """Build the shared `output_interval` Field (bound is always `_MIN_OUTPUT_INTERVAL_SECONDS`).
+
+    CreateScoutInput and EditScoutInput each repeat the identical
+    `Field(default=None, ge=_MIN_OUTPUT_INTERVAL_SECONDS, description=...)` shape;
+    only the description wording differs. Centralizing the Field construction
+    means the `ge=` bound cannot drift out of sync, mirroring `_webhook_url_field`
+    below.
+    """
+    return Field(default=None, ge=_MIN_OUTPUT_INTERVAL_SECONDS, description=description)
+
+
 def _webhook_url_field(description: str) -> Any:
     """Build the shared `webhook_url` Field (type is always `HttpsWebhookUrl`).
 
@@ -162,13 +174,9 @@ class CreateScoutInput(ToolInput):
             "'anytime a startup in SF announces seed funding'"
         ),
     )
-    output_interval: int | None = Field(
-        default=None,
-        ge=_MIN_OUTPUT_INTERVAL_SECONDS,
-        description=(
-            f"Seconds between scout runs. Minimum {_MIN_OUTPUT_INTERVAL_SECONDS} "
-            "(30 minutes). Default: 86400 (daily)"
-        ),
+    output_interval: int | None = _output_interval_field(
+        f"Seconds between scout runs. Minimum {_MIN_OUTPUT_INTERVAL_SECONDS} "
+        "(30 minutes). Default: 86400 (daily)"
     )
     webhook_url: HttpsWebhookUrl = _webhook_url_field(
         "HTTPS URL to receive webhook notifications when updates are available. "
@@ -216,12 +224,8 @@ class EditScoutInput(ToolInput):
         default=None,
         description="Updated monitoring query",
     )
-    output_interval: int | None = Field(
-        default=None,
-        ge=_MIN_OUTPUT_INTERVAL_SECONDS,
-        description=(
-            f"Updated run interval in seconds. Minimum {_MIN_OUTPUT_INTERVAL_SECONDS} (30 minutes)"
-        ),
+    output_interval: int | None = _output_interval_field(
+        f"Updated run interval in seconds. Minimum {_MIN_OUTPUT_INTERVAL_SECONDS} (30 minutes)"
     )
     webhook_url: HttpsWebhookUrl = _webhook_url_field(
         "Updated HTTPS webhook URL. Must use https://. Confirm the URL with the user before setting."
