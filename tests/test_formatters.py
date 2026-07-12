@@ -200,6 +200,25 @@ class TestFormatListScouts:
         assert "abc-123" in result
         assert "active" in result
 
+    def test_summary_breakdown_line_exact(self):
+        """Pin the exact 'Found N scouts: a active, b paused, c done.' summary line."""
+        response = {
+            "scouts": [{"id": "abc", "query": "test", "status": "active"}],
+            "total": 6,
+            "summary": {"active": 3, "paused": 2, "done": 1},
+        }
+        result = format_list_scouts(response)
+        assert "Found 6 scouts: 3 active, 2 paused, 1 done." in result
+
+    def test_summary_breakdown_shown_even_when_summary_missing(self):
+        """Unlike format_task_list, a missing summary still renders an all-zero breakdown."""
+        response = {
+            "scouts": [{"id": "abc", "query": "test", "status": "active"}],
+            "total": 1,
+        }
+        result = format_list_scouts(response)
+        assert "Found 1 scouts: 0 active, 0 paused, 0 done." in result
+
     def test_has_more_hint(self):
         """When has_more is true, shows hint to increase limit."""
         response = {
