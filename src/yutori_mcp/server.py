@@ -331,7 +331,7 @@ def _output_schema_kwargs(
     """Convert a Pydantic input model into adapter kwargs.
 
     Drops None fields — callers relying on an empty result when no config
-    fields were provided (e.g. _handle_edit_scout) should confirm that still
+    fields were provided (e.g. _apply_edit_config) should confirm that still
     holds — and transforms `output_fields` into the API's `output_schema`
     format when present. This is the single kwargs-building step shared by
     every handler built via ``_make_handler`` below: input classes without an
@@ -386,6 +386,48 @@ def _make_handler(
     return handler
 
 
+async def _apply_edit_config(
+    client: MCPClientAdapter, params: EditScoutInput
+) -> dict[str, Any]:
+    """Build and apply edit_scout's config kwargs (query, schedule, webhook, etc.).
+
+    Excludes control fields (scout_id is passed explicitly; status is applied
+    separately by _apply_edit_status). Returns the applied kwargs so the
+    caller can tell whether a config update happened, which _apply_edit_status
+    needs to distinguish a partial failure from a plain one.
+    """
+    config_kwargs = _output_schema_kwargs(params, extra_exclude={"scout_id", "status"})
+    if config_kwargs:
+        await client.edit_scout(scout_id=params.scout_id, **config_kwargs)
+    return config_kwargs
+
+
+async def _apply_edit_status(
+    client: MCPClientAdapter, params: EditScoutInput, config_kwargs: dict[str, Any]
+) -> None:
+    """Apply edit_scout's status change, if any, after config updates.
+
+    The API requires status and config to be updated in separate calls, so
+    the operation is not atomic: if the status call fails after a config
+    update succeeded, say so explicitly instead of reporting a plain failure.
+    """
+    if params.status is None:
+        return
+    try:
+        await client.edit_scout(scout_id=params.scout_id, status=params.status)
+    except YutoriAPIError as e:
+        if config_kwargs:
+            raise YutoriAPIError(
+                message=(
+                    "Scout config changes were applied, but the status "
+                    f"change to '{params.status}' failed: {e.message}. "
+                    "Retry with edit_scout(scout_id, status=...) only."
+                ),
+                status_code=e.status_code,
+            ) from e
+        raise
+
+
 async def _handle_edit_scout(
     client: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -394,31 +436,8 @@ async def _handle_edit_scout(
     # Fetch current state for diff (also validates scout exists)
     old_scout = await client.get_scout_detail(params.scout_id)
 
-    # Build config kwargs, excluding control fields (scout_id is passed
-    # explicitly below; status is applied separately after config updates).
-    config_kwargs = _output_schema_kwargs(params, extra_exclude={"scout_id", "status"})
-
-    if config_kwargs:
-        await client.edit_scout(scout_id=params.scout_id, **config_kwargs)
-
-    # Apply status change after config updates. The API requires status and
-    # config to be updated in separate calls, so the operation is not atomic:
-    # if the status call fails after a config update succeeded, say so
-    # explicitly instead of reporting a plain failure.
-    if params.status is not None:
-        try:
-            await client.edit_scout(scout_id=params.scout_id, status=params.status)
-        except YutoriAPIError as e:
-            if config_kwargs:
-                raise YutoriAPIError(
-                    message=(
-                        "Scout config changes were applied, but the status "
-                        f"change to '{params.status}' failed: {e.message}. "
-                        "Retry with edit_scout(scout_id, status=...) only."
-                    ),
-                    status_code=e.status_code,
-                ) from e
-            raise
+    config_kwargs = await _apply_edit_config(client, params)
+    await _apply_edit_status(client, params, config_kwargs)
 
     # Return old and new state for diff. Every mutation already succeeded at
     # this point, so a failed read-back must not surface as a failed edit —
