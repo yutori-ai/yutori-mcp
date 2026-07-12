@@ -131,6 +131,17 @@ def _webhook_url_field(description: str) -> Any:
     return Field(default=None, description=description)
 
 
+def _is_public_field() -> Any:
+    """Build the shared `is_public` Field (text from `_IS_PUBLIC_DESCRIPTION`).
+
+    CreateScoutInput and EditScoutInput each repeat the identical
+    `Field(default=None, description=_IS_PUBLIC_DESCRIPTION)` shape for
+    `is_public`. Centralizing the Field construction mirrors
+    `_webhook_format_field` above.
+    """
+    return Field(default=None, description=_IS_PUBLIC_DESCRIPTION)
+
+
 def _limit_field(noun: str, *, default: int | None = 10) -> Any:
     """Build the shared pagination `limit` Field (1-100, optional "Default: N" suffix).
 
@@ -203,10 +214,7 @@ class CreateScoutInput(ToolInput):
         default=None,
         description="User location for geo-relevant searches. Format: 'city, region, country'",
     )
-    is_public: bool | None = Field(
-        default=None,
-        description=_IS_PUBLIC_DESCRIPTION,
-    )
+    is_public: bool | None = _is_public_field()
 
 
 class EditScoutInput(ToolInput):
@@ -246,10 +254,7 @@ class EditScoutInput(ToolInput):
         default=None,
         description="User location for geo-relevant searches",
     )
-    is_public: bool | None = Field(
-        default=None,
-        description=_IS_PUBLIC_DESCRIPTION,
-    )
+    is_public: bool | None = _is_public_field()
 
     @model_validator(mode="after")
     def validate_has_changes(self) -> "EditScoutInput":
