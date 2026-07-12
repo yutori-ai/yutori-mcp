@@ -6,6 +6,8 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
+from .schema_utils import output_schema_field_names
+
 # Markers wrapping API payloads that may contain user-controlled text (scout
 # content/findings, browsing/research task results). Surfaced verbatim so the
 # downstream LLM client can distinguish remote data from MCP instructions.
@@ -228,13 +230,8 @@ def _format_output_fields_diff(value: Any) -> Any:
     than crashing or rendering as unset.
     """
     if isinstance(value, dict):
-        items = value.get("items")
-        container = items if isinstance(items, dict) else value
-        properties = container.get("properties")
-        if isinstance(properties, dict) and properties:
-            value = ", ".join(properties)
-        else:
-            value = "(custom schema)"
+        field_names = output_schema_field_names(value)
+        value = ", ".join(field_names) if field_names is not None else "(custom schema)"
     return _format_or_unset(value)
 
 
