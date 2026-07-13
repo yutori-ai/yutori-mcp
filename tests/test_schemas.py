@@ -289,16 +289,11 @@ class TestListScoutsInput:
         with pytest.raises(ValidationError):
             ListScoutsInput(limit=101)
 
-    def test_status_filter(self):
+    @pytest.mark.parametrize("status", ["active", "paused", "done"])
+    def test_status_filter(self, status):
         """Status filter works with valid values."""
-        data = ListScoutsInput(status="active")
-        assert data.status == "active"
-
-        data = ListScoutsInput(status="paused")
-        assert data.status == "paused"
-
-        data = ListScoutsInput(status="done")
-        assert data.status == "done"
+        data = ListScoutsInput(status=status)
+        assert data.status == status
 
     def test_status_invalid(self):
         """Invalid status values are rejected."""
