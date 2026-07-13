@@ -140,20 +140,11 @@ class TestEditScoutInput:
         assert data.scout_id == "abc-123"
         assert data.query is None
 
-    def test_status_paused(self):
-        """Status can be set to paused."""
-        data = EditScoutInput(scout_id="abc-123", status="paused")
-        assert data.status == "paused"
-
-    def test_status_active(self):
-        """Status can be set to active."""
-        data = EditScoutInput(scout_id="abc-123", status="active")
-        assert data.status == "active"
-
-    def test_status_done(self):
-        """Status can be set to done."""
-        data = EditScoutInput(scout_id="abc-123", status="done")
-        assert data.status == "done"
+    @pytest.mark.parametrize("status", ["paused", "active", "done"])
+    def test_status_valid(self, status):
+        """Status can be set to any of the valid literal values."""
+        data = EditScoutInput(scout_id="abc-123", status=status)
+        assert data.status == status
 
     def test_status_invalid(self):
         """Invalid status values are rejected."""
