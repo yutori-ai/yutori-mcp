@@ -142,6 +142,19 @@ def _is_public_field() -> Any:
     return Field(default=None, description=_IS_PUBLIC_DESCRIPTION)
 
 
+def _cursor_field() -> Any:
+    """Build the shared list-pagination `cursor` Field (text from `_LIST_CURSOR_DESCRIPTION`).
+
+    ListScoutsInput and ListTasksInput each repeat the identical
+    `Field(default=None, description=_LIST_CURSOR_DESCRIPTION)` shape for
+    `cursor`. Centralizing the Field construction mirrors `_webhook_format_field`
+    and `_is_public_field` above. GetUpdatesInput's `cursor` field uses different
+    description wording ("previous response" vs. "previous list response"), so
+    it is intentionally not routed through this helper.
+    """
+    return Field(default=None, description=_LIST_CURSOR_DESCRIPTION)
+
+
 def _limit_field(noun: str, *, default: int | None = 10) -> Any:
     """Build the shared pagination `limit` Field (1-100, optional "Default: N" suffix).
 
@@ -278,10 +291,7 @@ class ListScoutsInput(ToolInput):
         default=None,
         description="Filter by status: 'active', 'paused', or 'done'",
     )
-    cursor: str | None = Field(
-        default=None,
-        description=_LIST_CURSOR_DESCRIPTION,
-    )
+    cursor: str | None = _cursor_field()
 
 
 class ListTasksInput(ToolInput):
@@ -292,10 +302,7 @@ class ListTasksInput(ToolInput):
         default=None,
         description="Filter by status: 'running', 'succeeded', or 'failed'",
     )
-    cursor: str | None = Field(
-        default=None,
-        description=_LIST_CURSOR_DESCRIPTION,
-    )
+    cursor: str | None = _cursor_field()
 
 
 class GetUpdatesInput(ToolInput):
