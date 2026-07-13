@@ -142,6 +142,17 @@ def _is_public_field() -> Any:
     return Field(default=None, description=_IS_PUBLIC_DESCRIPTION)
 
 
+def _scout_id_field() -> Any:
+    """Build the shared required `scout_id` Field (text from `_SCOUT_ID_DESCRIPTION`).
+
+    EditScoutInput, ScoutIdInput, and GetUpdatesInput each repeat the identical
+    `Field(..., description=_SCOUT_ID_DESCRIPTION)` shape for `scout_id`.
+    Centralizing the Field construction mirrors `_webhook_format_field`/
+    `_is_public_field` above, so the three call sites cannot drift apart.
+    """
+    return Field(..., description=_SCOUT_ID_DESCRIPTION)
+
+
 def _cursor_field() -> Any:
     """Build the shared list-pagination `cursor` Field (text from `_LIST_CURSOR_DESCRIPTION`).
 
@@ -233,7 +244,7 @@ class CreateScoutInput(ToolInput):
 class EditScoutInput(ToolInput):
     """Input for editing an existing scout or changing its status."""
 
-    scout_id: str = Field(..., description=_SCOUT_ID_DESCRIPTION)
+    scout_id: str = _scout_id_field()
     status: ScoutStatus = Field(
         default=None,
         description=(
@@ -280,7 +291,7 @@ class EditScoutInput(ToolInput):
 class ScoutIdInput(ToolInput):
     """Input for operations on a specific scout."""
 
-    scout_id: str = Field(..., description=_SCOUT_ID_DESCRIPTION)
+    scout_id: str = _scout_id_field()
 
 
 class ListScoutsInput(ToolInput):
@@ -308,7 +319,7 @@ class ListTasksInput(ToolInput):
 class GetUpdatesInput(ToolInput):
     """Input for retrieving scout updates."""
 
-    scout_id: str = Field(..., description=_SCOUT_ID_DESCRIPTION)
+    scout_id: str = _scout_id_field()
     cursor: str | None = Field(
         default=None,
         description="Pagination cursor from a previous response",
