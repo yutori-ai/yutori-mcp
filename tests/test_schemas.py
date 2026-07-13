@@ -376,6 +376,32 @@ class TestCursorFieldSharedDescription:
         )
 
 
+class TestScoutIdFieldSharedDescription:
+    """EditScoutInput, ScoutIdInput, and GetUpdatesInput share `_scout_id_field()`.
+
+    Drift guard: all three schemas' `scout_id` field must keep the identical
+    description text (and stay required) so the call sites cannot silently
+    diverge.
+    """
+
+    def test_descriptions_match(self):
+        description = EditScoutInput.model_fields["scout_id"].description
+        assert ScoutIdInput.model_fields["scout_id"].description == description
+        assert GetUpdatesInput.model_fields["scout_id"].description == description
+
+    @pytest.mark.parametrize(
+        "cls,extra_kwargs",
+        [
+            pytest.param(EditScoutInput, {"query": "q"}, id="EditScoutInput"),
+            pytest.param(ScoutIdInput, {}, id="ScoutIdInput"),
+            pytest.param(GetUpdatesInput, {}, id="GetUpdatesInput"),
+        ],
+    )
+    def test_scout_id_required(self, cls, extra_kwargs):
+        with pytest.raises(ValidationError):
+            cls(**extra_kwargs)
+
+
 class TestTaskIdInput:
     def test_task_id_required(self):
         """task_id is required."""
