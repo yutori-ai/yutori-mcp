@@ -362,6 +362,20 @@ class TestListTasksInput:
             ListTasksInput(status="queued")
 
 
+class TestCursorFieldSharedDescription:
+    """ListScoutsInput and ListTasksInput share the same `_cursor_field()` construction.
+
+    Drift guard: both schemas' `cursor` field must keep the identical
+    description text so the two call sites cannot silently diverge.
+    """
+
+    def test_descriptions_match(self):
+        assert (
+            ListScoutsInput.model_fields["cursor"].description
+            == ListTasksInput.model_fields["cursor"].description
+        )
+
+
 class TestTaskIdInput:
     def test_task_id_required(self):
         """task_id is required."""
