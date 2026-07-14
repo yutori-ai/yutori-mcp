@@ -62,15 +62,15 @@ class TestErrorMapping:
         assert exc_info.value.status_code == 401
         assert "Invalid API key" in exc_info.value.message
 
-    async def test_api_error_preserves_status_code(self, adapter):
-        for code in [400, 403, 429, 500, 503]:
-            sdk_error = APIError(message=f"Error {code}", status_code=code)
-            adapter._client.scouts.list = AsyncMock(side_effect=sdk_error)
+    @pytest.mark.parametrize("code", [400, 403, 429, 500, 503])
+    async def test_api_error_preserves_status_code(self, adapter, code):
+        sdk_error = APIError(message=f"Error {code}", status_code=code)
+        adapter._client.scouts.list = AsyncMock(side_effect=sdk_error)
 
-            with pytest.raises(YutoriAPIError) as exc_info:
-                await adapter.list_scouts()
+        with pytest.raises(YutoriAPIError) as exc_info:
+            await adapter.list_scouts()
 
-            assert exc_info.value.status_code == code
+        assert exc_info.value.status_code == code
 
     async def test_api_error_chains_original_exception(self, adapter):
         sdk_error = APIError(message="Rate limited", status_code=429)
