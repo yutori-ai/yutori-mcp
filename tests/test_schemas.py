@@ -59,11 +59,11 @@ class TestUsageInput:
         data = UsageInput()
         assert data.period is None
 
-    def test_valid_periods(self):
+    @pytest.mark.parametrize("period", ["24h", "7d", "30d", "90d"])
+    def test_valid_periods(self, period):
         """All valid period values are accepted."""
-        for period in ("24h", "7d", "30d", "90d"):
-            data = UsageInput(period=period)
-            assert data.period == period
+        data = UsageInput(period=period)
+        assert data.period == period
 
     def test_invalid_period_rejected(self):
         """Invalid period values are rejected."""
@@ -342,10 +342,10 @@ class TestListTasksInput:
         """Limit must be between 1 and 100."""
         _assert_limit_boundary(ListTasksInput, limit, is_valid)
 
-    def test_status_filter(self):
+    @pytest.mark.parametrize("status", ["running", "succeeded", "failed"])
+    def test_status_filter(self, status):
         """Status filter accepts the task-list statuses from the REST API."""
-        for status in ("running", "succeeded", "failed"):
-            assert ListTasksInput(status=status).status == status
+        assert ListTasksInput(status=status).status == status
 
     def test_status_invalid(self):
         """Detail-only statuses are rejected for list filters."""
