@@ -6,6 +6,7 @@ import pytest
 
 from yutori.exceptions import APIConnectionError, APIError, AuthenticationError
 from yutori_mcp.adapter import MCPClientAdapter, YutoriAPIError, _strip_none
+from yutori_mcp.server import _format_api_error
 
 
 @pytest.fixture()
@@ -82,17 +83,21 @@ class TestErrorMapping:
 
 
 class TestErrorFormattingContract:
-    """Ensure the server formats YutoriAPIError into a stable text shape."""
+    """Ensure server._format_api_error renders a stable text shape.
+
+    Calls the real helper _invoke() uses (rather than re-deriving the format
+    string inline), so a change to that formatting is actually caught here
+    instead of only in the end-to-end assertion in
+    test_server.py::TestCallToolErrorContract.
+    """
 
     def test_api_error_formatted_as_text(self):
         err = YutoriAPIError(message="Not found", status_code=404)
-        formatted = f"API Error ({err.status_code}): {err.message}"
-        assert formatted == "API Error (404): Not found"
+        assert _format_api_error(err) == "API Error (404): Not found"
 
     def test_auth_error_formatted_as_401(self):
         err = YutoriAPIError(message="Invalid API key", status_code=401)
-        formatted = f"API Error ({err.status_code}): {err.message}"
-        assert formatted == "API Error (401): Invalid API key"
+        assert _format_api_error(err) == "API Error (401): Invalid API key"
 
 
 # ---------------------------------------------------------------------------
