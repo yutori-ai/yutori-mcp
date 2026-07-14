@@ -16,6 +16,7 @@ from .adapter import MCPClientAdapter, YutoriAPIError
 from .formatters import TASK_TYPE_BROWSING, TASK_TYPE_RESEARCH, format_response
 from .schema_utils import output_fields_to_output_schema
 from .schemas import (
+    DEFAULT_LIST_LIMIT,
     BrowserChoice,
     BrowsingTaskInput,
     CreateScoutInput,
@@ -161,7 +162,7 @@ async def list_api_usage(
     annotations=_READ_ONLY,
 )
 async def list_scouts(
-    limit: int | None = 10,
+    limit: int | None = DEFAULT_LIST_LIMIT,
     status: ScoutStatus = None,
     cursor: str | None = None,
 ) -> str:
@@ -265,7 +266,7 @@ async def run_browsing_task(
     annotations=_READ_ONLY,
 )
 async def list_browsing_tasks(
-    limit: int | None = 10,
+    limit: int | None = DEFAULT_LIST_LIMIT,
     status: TaskListStatus = None,
     cursor: str | None = None,
 ) -> str:
@@ -303,7 +304,7 @@ async def run_research_task(
     annotations=_READ_ONLY,
 )
 async def list_research_tasks(
-    limit: int | None = 10,
+    limit: int | None = DEFAULT_LIST_LIMIT,
     status: TaskListStatus = None,
     cursor: str | None = None,
 ) -> str:

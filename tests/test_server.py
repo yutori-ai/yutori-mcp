@@ -14,6 +14,7 @@ from yutori_mcp.schema_utils import (
     output_fields_to_output_schema,
     output_schema_field_names,
 )
+from yutori_mcp.schemas import DEFAULT_LIST_LIMIT
 from yutori_mcp.server import (
     _get_task_result_description,
     _handle_edit_scout,
@@ -117,6 +118,20 @@ class TestTaskDescriptionHelpers:
         assert tools["get_research_task_result"] == _get_task_result_description(
             "research"
         )
+
+
+class TestRegisteredToolLimitDefaults:
+    """Drift guard: the `limit` default FastMCP advertises to callers for
+    list_scouts/list_browsing_tasks/list_research_tasks comes from each
+    ``@mcp.tool`` function's own signature default in server.py, not from
+    schemas.DEFAULT_LIST_LIMIT (schemas.py's Pydantic field default only
+    applies once a request omits the argument entirely). The two must be
+    kept in sync manually, so pin them here."""
+
+    async def test_advertised_limit_defaults_match_shared_constant(self):
+        tools = {t.name: t.inputSchema for t in await mcp.list_tools()}
+        for name in ("list_scouts", "list_browsing_tasks", "list_research_tasks"):
+            assert tools[name]["properties"]["limit"]["default"] == DEFAULT_LIST_LIMIT
 
 
 def _assert_main_exits(expected_code: int) -> None:

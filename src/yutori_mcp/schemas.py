@@ -56,6 +56,14 @@ _LIST_CURSOR_DESCRIPTION = "Pagination cursor from a previous list response"
 # describing it cannot drift apart if the minimum ever changes.
 _MIN_OUTPUT_INTERVAL_SECONDS = 1800
 
+# Default `limit` for list_scouts/list_browsing_tasks/list_research_tasks,
+# shared with the matching `@mcp.tool` function signatures in server.py.
+# FastMCP builds each tool's advertised JSON Schema `default` from the Python
+# function signature, not from this module's Pydantic field default, so
+# server.py can't simply rely on `_limit_field()`'s default -- it needs its
+# own literal. Centralizing the number here means the two cannot drift apart.
+DEFAULT_LIST_LIMIT = 10
+
 
 def _output_fields_description(example: list[str], docs_slug: str | None = None) -> str:
     """Build the shared `output_fields` field description.
@@ -166,7 +174,7 @@ def _cursor_field() -> Any:
     return Field(default=None, description=_LIST_CURSOR_DESCRIPTION)
 
 
-def _limit_field(noun: str, *, default: int | None = 10) -> Any:
+def _limit_field(noun: str, *, default: int | None = DEFAULT_LIST_LIMIT) -> Any:
     """Build the shared pagination `limit` Field (1-100, optional "Default: N" suffix).
 
     ListScoutsInput, ListTasksInput, and GetUpdatesInput each repeat the same
