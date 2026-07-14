@@ -32,6 +32,26 @@ _ALL_INPUT_CLASSES = [
     pytest.param(ResearchTaskInput, {"query": "Test"}, id="ResearchTaskInput"),
 ]
 
+# Boundary cases for the shared `_limit_field()` 1-100 range, used by
+# ListScoutsInput's and ListTasksInput's `test_limit_range` below. Centralizing
+# the (limit, is_valid) pairs here means the two classes' boundary checks can't
+# silently drift apart. GetUpdatesInput also uses `_limit_field()` but has no
+# equivalent boundary test, so it intentionally doesn't participate here.
+_LIMIT_BOUNDARY_CASES = [
+    pytest.param(1, True, id="min-valid"),
+    pytest.param(100, True, id="max-valid"),
+    pytest.param(0, False, id="below-min"),
+    pytest.param(101, False, id="above-max"),
+]
+
+
+def _assert_limit_boundary(cls, limit, is_valid):
+    if is_valid:
+        assert cls(limit=limit).limit == limit
+    else:
+        with pytest.raises(ValidationError):
+            cls(limit=limit)
+
 
 class TestUsageInput:
     def test_default_period(self):
@@ -275,19 +295,10 @@ class TestListScoutsInput:
         data = ListScoutsInput(limit=50)
         assert data.limit == 50
 
-    def test_limit_range(self):
+    @pytest.mark.parametrize("limit,is_valid", _LIMIT_BOUNDARY_CASES)
+    def test_limit_range(self, limit, is_valid):
         """Limit must be between 1 and 100."""
-        data = ListScoutsInput(limit=1)
-        assert data.limit == 1
-
-        data = ListScoutsInput(limit=100)
-        assert data.limit == 100
-
-        with pytest.raises(ValidationError):
-            ListScoutsInput(limit=0)
-
-        with pytest.raises(ValidationError):
-            ListScoutsInput(limit=101)
+        _assert_limit_boundary(ListScoutsInput, limit, is_valid)
 
     @pytest.mark.parametrize("status", ["active", "paused", "done"])
     def test_status_filter(self, status):
@@ -326,16 +337,10 @@ class TestListTasksInput:
         assert data.limit == 50
         assert data.cursor == "next-page"
 
-    def test_limit_range(self):
+    @pytest.mark.parametrize("limit,is_valid", _LIMIT_BOUNDARY_CASES)
+    def test_limit_range(self, limit, is_valid):
         """Limit must be between 1 and 100."""
-        assert ListTasksInput(limit=1).limit == 1
-        assert ListTasksInput(limit=100).limit == 100
-
-        with pytest.raises(ValidationError):
-            ListTasksInput(limit=0)
-
-        with pytest.raises(ValidationError):
-            ListTasksInput(limit=101)
+        _assert_limit_boundary(ListTasksInput, limit, is_valid)
 
     def test_status_filter(self):
         """Status filter accepts the task-list statuses from the REST API."""
