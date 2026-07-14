@@ -76,6 +76,18 @@ class _StrictArgsFastMCP(FastMCP):
 mcp = _StrictArgsFastMCP("yutori-mcp")
 
 
+def _format_api_error(e: YutoriAPIError) -> str:
+    """Render a YutoriAPIError in the stable `API Error (status): message` text shape.
+
+    Single source of truth for this string: `_invoke()` uses it to build the
+    RuntimeError message that becomes the MCP tool result's error text, and
+    tests assert against this function directly instead of re-deriving the
+    format inline (which previously let a test believe it was covering the
+    format while never exercising it).
+    """
+    return f"API Error ({e.status_code}): {e.message}"
+
+
 async def _invoke(tool_name: str, args: dict[str, Any]) -> str:
     """Invoke a tool handler and return the formatted response text.
 
@@ -89,7 +101,7 @@ async def _invoke(tool_name: str, args: dict[str, Any]) -> str:
             result, context = await handler(client, args)
         return format_response(tool_name, result, **context)
     except YutoriAPIError as e:
-        raise RuntimeError(f"API Error ({e.status_code}): {e.message}") from e
+        raise RuntimeError(_format_api_error(e)) from e
     except ValidationError:
         raise
     except Exception:
