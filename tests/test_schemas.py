@@ -475,19 +475,17 @@ class TestOutputFieldsDescription:
         )
         assert result.endswith(".")
 
-    def test_all_schemas_use_helper(self):
-        """All four output_fields descriptions are produced by the helper."""
-        for model_cls in (
-            CreateScoutInput,
-            EditScoutInput,
-            BrowsingTaskInput,
-            ResearchTaskInput,
-        ):
-            desc = model_cls.model_fields["output_fields"].description
-            assert desc is not None
-            assert "Optional: Extract structured data" in desc, (
-                f"{model_cls.__name__}.output_fields description does not use _output_fields_description"
-            )
+    @pytest.mark.parametrize(
+        "model_cls",
+        [CreateScoutInput, EditScoutInput, BrowsingTaskInput, ResearchTaskInput],
+    )
+    def test_all_schemas_use_helper(self, model_cls):
+        """Each output_fields description is produced by the helper."""
+        desc = model_cls.model_fields["output_fields"].description
+        assert desc is not None
+        assert "Optional: Extract structured data" in desc, (
+            f"{model_cls.__name__}.output_fields description does not use _output_fields_description"
+        )
 
 
 class TestInvalidBrowserRejected:
