@@ -230,26 +230,35 @@ class TestEditScoutForwarding:
 class TestBrowsingAndResearchForwarding:
     """Browsing and research should forward newly supported developer API fields."""
 
-    async def test_list_browsing_tasks_forwards_pagination_filters(self, adapter):
-        adapter._client.browsing.list = AsyncMock(return_value={"tasks": []})
-        await adapter.list_browsing_tasks(limit=20, status="succeeded", cursor="cur-1")
+    @pytest.mark.parametrize(
+        "adapter_method,client_ns,status,cursor",
+        [
+            pytest.param("list_browsing_tasks", "browsing", "succeeded", "cur-1", id="browsing"),
+            pytest.param("list_research_tasks", "research", "failed", "cur-2", id="research"),
+        ],
+    )
+    async def test_list_tasks_forwards_pagination_filters(self, adapter, adapter_method, client_ns, status, cursor):
+        namespace = getattr(adapter._client, client_ns)
+        namespace.list = AsyncMock(return_value={"tasks": []})
+        await getattr(adapter, adapter_method)(limit=20, status=status, cursor=cursor)
 
-        _, kwargs = adapter._client.browsing.list.call_args
-        assert kwargs == {"limit": 20, "status": "succeeded", "cursor": "cur-1"}
+        _, kwargs = namespace.list.call_args
+        assert kwargs == {"limit": 20, "status": status, "cursor": cursor}
 
-    async def test_list_browsing_tasks_strips_none_values(self, adapter):
-        adapter._client.browsing.list = AsyncMock(return_value={"tasks": []})
-        await adapter.list_browsing_tasks(limit=None, status=None, cursor=None)
+    @pytest.mark.parametrize(
+        "adapter_method,client_ns",
+        [
+            pytest.param("list_browsing_tasks", "browsing", id="browsing"),
+            pytest.param("list_research_tasks", "research", id="research"),
+        ],
+    )
+    async def test_list_tasks_strips_none_values(self, adapter, adapter_method, client_ns):
+        namespace = getattr(adapter._client, client_ns)
+        namespace.list = AsyncMock(return_value={"tasks": []})
+        await getattr(adapter, adapter_method)(limit=None, status=None, cursor=None)
 
-        _, kwargs = adapter._client.browsing.list.call_args
+        _, kwargs = namespace.list.call_args
         assert kwargs == {}
-
-    async def test_list_research_tasks_forwards_pagination_filters(self, adapter):
-        adapter._client.research.list = AsyncMock(return_value={"tasks": []})
-        await adapter.list_research_tasks(limit=20, status="failed", cursor="cur-2")
-
-        _, kwargs = adapter._client.research.list.call_args
-        assert kwargs == {"limit": 20, "status": "failed", "cursor": "cur-2"}
 
     async def test_browsing_forwards_require_auth_browser_and_zapier(self, adapter):
         adapter._client.browsing.create = AsyncMock(return_value={"task_id": "t1"})
