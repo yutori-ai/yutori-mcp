@@ -1,5 +1,7 @@
 """Tests for output formatters."""
 
+import pytest
+
 from yutori_mcp.formatters import (
     _EXTERNAL_CONTENT_END,
     _EXTERNAL_CONTENT_START,
@@ -779,12 +781,16 @@ class TestTimestampFormatting:
         result = format_list_scouts(response)
         assert "Next: 2026-02-02" in result
 
-    def test_format_datetime_unix_seconds(self):
-        # Same instant as the millisecond value used elsewhere in this suite.
-        assert _format_datetime(1769997854) == "2026-02-02 02:04 UTC"
-
-    def test_format_datetime_unix_milliseconds(self):
-        assert _format_datetime(1769997854699) == "2026-02-02 02:04 UTC"
+    @pytest.mark.parametrize(
+        "timestamp",
+        [
+            # Same instant expressed as Unix seconds and Unix milliseconds.
+            pytest.param(1769997854, id="seconds"),
+            pytest.param(1769997854699, id="milliseconds"),
+        ],
+    )
+    def test_format_datetime_unix(self, timestamp):
+        assert _format_datetime(timestamp) == "2026-02-02 02:04 UTC"
 
 
 class TestFormatTaskResultUnrecognizedStatus:
