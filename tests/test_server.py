@@ -128,10 +128,12 @@ class TestRegisteredToolLimitDefaults:
     applies once a request omits the argument entirely). The two must be
     kept in sync manually, so pin them here."""
 
-    async def test_advertised_limit_defaults_match_shared_constant(self):
+    @pytest.mark.parametrize(
+        "name", ["list_scouts", "list_browsing_tasks", "list_research_tasks"]
+    )
+    async def test_advertised_limit_defaults_match_shared_constant(self, name):
         tools = {t.name: t.inputSchema for t in await mcp.list_tools()}
-        for name in ("list_scouts", "list_browsing_tasks", "list_research_tasks"):
-            assert tools[name]["properties"]["limit"]["default"] == DEFAULT_LIST_LIMIT
+        assert tools[name]["properties"]["limit"]["default"] == DEFAULT_LIST_LIMIT
 
 
 def _assert_main_exits(expected_code: int) -> None:
