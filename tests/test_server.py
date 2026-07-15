@@ -145,26 +145,33 @@ def _assert_main_exits(expected_code: int) -> None:
 class TestMainStatusExitCode:
     """Ensure `yutori-mcp status` exits 1 when unauthenticated, 0 when authenticated."""
 
-    def test_status_unauthenticated_exits_1(self):
-        status = AuthStatus(authenticated=False, config_path="/tmp/.yutori/config.json")
+    @pytest.mark.parametrize(
+        "status_kwargs,expected_exit_code",
+        [
+            pytest.param(
+                {"authenticated": False, "config_path": "/tmp/.yutori/config.json"},
+                1,
+                id="unauthenticated",
+            ),
+            pytest.param(
+                {
+                    "authenticated": True,
+                    "masked_key": "yt-abc...xyz",
+                    "source": "config_file",
+                    "config_path": "/tmp",
+                },
+                0,
+                id="authenticated",
+            ),
+        ],
+    )
+    def test_status_exit_code(self, status_kwargs, expected_exit_code):
+        status = AuthStatus(**status_kwargs)
         with (
             patch("sys.argv", ["yutori-mcp", "status"]),
             patch("yutori.auth.get_auth_status", return_value=status),
         ):
-            _assert_main_exits(1)
-
-    def test_status_authenticated_exits_0(self):
-        status = AuthStatus(
-            authenticated=True,
-            masked_key="yt-abc...xyz",
-            source="config_file",
-            config_path="/tmp",
-        )
-        with (
-            patch("sys.argv", ["yutori-mcp", "status"]),
-            patch("yutori.auth.get_auth_status", return_value=status),
-        ):
-            _assert_main_exits(0)
+            _assert_main_exits(expected_exit_code)
 
 
 class TestMainLoginAuthUrl:
