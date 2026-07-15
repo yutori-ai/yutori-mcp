@@ -91,13 +91,16 @@ class TestErrorFormattingContract:
     test_server.py::TestCallToolErrorContract.
     """
 
-    def test_api_error_formatted_as_text(self):
-        err = YutoriAPIError(message="Not found", status_code=404)
-        assert _format_api_error(err) == "API Error (404): Not found"
-
-    def test_auth_error_formatted_as_401(self):
-        err = YutoriAPIError(message="Invalid API key", status_code=401)
-        assert _format_api_error(err) == "API Error (401): Invalid API key"
+    @pytest.mark.parametrize(
+        "message,status_code",
+        [
+            pytest.param("Not found", 404, id="api-error"),
+            pytest.param("Invalid API key", 401, id="auth-error-as-401"),
+        ],
+    )
+    def test_error_formatted_as_text(self, message, status_code):
+        err = YutoriAPIError(message=message, status_code=status_code)
+        assert _format_api_error(err) == f"API Error ({status_code}): {message}"
 
 
 # ---------------------------------------------------------------------------
