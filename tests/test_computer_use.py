@@ -145,6 +145,83 @@ class TestDrag:
         assert not self.calls
 
 
+class TestKeyPress:
+    def _driver(self, monkeypatch):
+        import yutori_mcp.computer_use.driver as driver_mod
+
+        self.calls = []
+
+        class _Result:
+            is_error = False
+            text = ""
+            structured = None
+
+        def fake_cua_call(tool, args):
+            self.calls.append((tool, args))
+            return _Result()
+
+        monkeypatch.setattr(driver_mod, "cua_call", fake_cua_call)
+        driver = CuaComputerUseDriver(pid=1, window_id=1)
+        driver._capture = _Capture(window_id=1, click_width=1000, click_height=1000)
+        return driver
+
+    def test_modifier_combo_uses_hotkey(self, monkeypatch):
+        driver = self._driver(monkeypatch)
+        result = driver.execute("key_press", json.dumps({"key": "ctrl+c"}))
+        assert not result.startswith("[ERROR]")
+        assert self.calls[0][0] == "hotkey"
+        assert self.calls[0][1]["keys"] == ["cmd", "c"]  # ctrl->cmd by default
+
+    def test_bare_punctuation_falls_back_to_text(self, monkeypatch):
+        driver = self._driver(monkeypatch)
+        result = driver.execute("key_press", json.dumps({"key": "."}))
+        assert not result.startswith("[ERROR]")
+        assert self.calls[0][0] == "type_text"
+        assert self.calls[0][1]["text"] == "."
+
+    def test_literal_plus_key_falls_back_to_text(self, monkeypatch):
+        # A lone "+" must not split into empty parts and error; it is a key.
+        driver = self._driver(monkeypatch)
+        result = driver.execute("key_press", json.dumps({"key": "+"}))
+        assert not result.startswith("[ERROR]")
+        assert self.calls[0][0] == "type_text"
+        assert self.calls[0][1]["text"] == "+"
+
+    def test_modifier_plus_punctuation_is_rejected(self, monkeypatch):
+        # cua-driver can't hotkey a punctuation key; don't silently drop the
+        # modifier via a bare type_text.
+        driver = self._driver(monkeypatch)
+        for spec in ("shift+plus", "ctrl++", "cmd+/"):
+            self.calls.clear()
+            result = driver.execute("key_press", json.dumps({"key": spec}))
+            assert result.startswith("[ERROR]"), spec
+            assert "punctuation" in result
+            assert not self.calls, spec
+
+    def test_combo_ending_in_modifier_errors(self, monkeypatch):
+        driver = self._driver(monkeypatch)
+        result = driver.execute("key_press", json.dumps({"key": "ctrl+shift"}))
+        assert result.startswith("[ERROR]")
+        assert "ends in a modifier" in result
+
+    def test_hold_key_notes_unsupported_hold(self, monkeypatch):
+        # hold_key collapses to a single tap; the result must say the hold
+        # duration was not applied rather than imply the key was held.
+        driver = self._driver(monkeypatch)
+        result = driver.execute(
+            "hold_key", json.dumps({"key": "shift", "duration": 5})
+        )
+        assert self.calls[0][0] == "press_key"
+        assert self.calls[0][1]["key"] == "shift"
+        assert "not supported" in result and "duration" in result
+
+    def test_key_press_does_not_add_hold_note(self, monkeypatch):
+        driver = self._driver(monkeypatch)
+        result = driver.execute("key_press", json.dumps({"key": "enter"}))
+        assert "not supported" not in result
+        assert self.calls[0][1]["key"] == "return"
+
+
 class TestPruneScreenshots:
     def _message_with_image(self, tag):
         return {

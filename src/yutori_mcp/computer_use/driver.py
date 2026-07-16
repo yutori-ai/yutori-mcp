@@ -158,32 +158,62 @@ class CuaComputerUseDriver:
             ok_text,
         )
 
+    @staticmethod
+    def _split_key_spec(spec: str) -> list[str]:
+        """Split a key spec into modifier tokens followed by the final key.
+
+        Splits on ``+`` but preserves a literal ``+`` as the final key. A naive
+        ``spec.split("+")`` turns the ``+`` key into empty tokens — so ``"+"``
+        yields no key at all and ``"ctrl++"`` drops the key and looks
+        modifier-only — so a spec that ends in ``+`` means the final key is
+        itself ``+``.
+        """
+        stripped = spec.strip()
+        if not stripped:
+            return []
+        parts = [part for part in (p.strip() for p in stripped.split("+")) if part]
+        if stripped.endswith("+"):
+            parts.append("+")
+        return parts
+
     def _press_key_spec(self, spec: str) -> str:
-        parts = [part for part in (p.strip() for p in spec.split("+")) if part]
+        parts = self._split_key_spec(spec)
         if not parts:
             return "[ERROR] key_press requires a key"
-        modifiers = [normalize_modifier(p, self.ctrl_to_cmd) for p in parts[:-1]]
-        if len(parts) > 1 and parts[-1].lower() in _MODIFIER_NAMES:
+        *modifier_tokens, key_token = parts
+        if modifier_tokens and key_token.lower() in _MODIFIER_NAMES:
             return f'[ERROR] key combo "{spec}" ends in a modifier'
-        key = normalize_key(parts[-1])
+        modifiers = [normalize_modifier(p, self.ctrl_to_cmd) for p in modifier_tokens]
+        key = normalize_key(key_token)
         window_id = self._capture.window_id if self._capture else None
-        if modifiers:
-            return self._run(
-                "hotkey",
-                {"pid": self.pid, "window_id": window_id, "keys": [*modifiers, key]},
-                f"Pressed {'+'.join([*modifiers, key])}.",
-            )
         # cua-driver's press_key/hotkey know named keys and alphanumerics only
-        # ("Unknown key name: +"), so bare punctuation falls back to a text
-        # insert. That path can no-op in apps without a text field (verified
-        # against Calculator), so the result tells the model to check the
-        # screenshot rather than claiming the keystroke landed.
+        # ("Unknown key name: +"), so any punctuation key has to use a text
+        # insert instead of the key tools.
         if len(key) == 1 and not key.isalnum():
+            if modifiers:
+                # A punctuation key held with modifiers (e.g. cmd+/) can't go
+                # through the key tools, and a bare type_text would silently
+                # drop the modifiers — so surface it instead of sending a
+                # keystroke that doesn't match what the model asked for.
+                return (
+                    f'[ERROR] key combo "{spec}" is not supported: cua-driver '
+                    "cannot send punctuation together with modifier keys."
+                )
+            # Bare punctuation falls back to a text insert. That path can no-op
+            # in apps without a text field (verified against Calculator), so the
+            # result tells the model to check the screenshot rather than
+            # claiming the keystroke landed.
             return self._run(
                 "type_text",
                 {"pid": self.pid, "window_id": window_id, "text": key},
                 f"Sent '{key}' as text input (best effort — verify in the screenshot; "
                 "click the on-screen control if it did not register).",
+            )
+        if modifiers:
+            return self._run(
+                "hotkey",
+                {"pid": self.pid, "window_id": window_id, "keys": [*modifiers, key]},
+                f"Pressed {'+'.join([*modifiers, key])}.",
             )
         return self._run(
             "press_key",
@@ -309,7 +339,18 @@ class CuaComputerUseDriver:
                     if result.startswith("[ERROR]"):
                         break
                     time.sleep(0.06)
-                return " ".join(results)
+                summary = " ".join(results)
+                # cua-driver has no key-down/hold primitive, so a hold_key
+                # collapses to a single tap. Say so rather than imply the key
+                # was held for the requested duration (key-repeat, held
+                # modifiers) — the model can adapt (e.g. repeat the press).
+                if action == "hold_key" and not summary.startswith("[ERROR]"):
+                    summary += (
+                        " (Note: press-and-hold is not supported on this "
+                        "desktop; the key was tapped once and any hold "
+                        "duration was ignored.)"
+                    )
+                return summary
 
             if action == "wait":
                 requested = args.get("duration") if isinstance(args.get("duration"), (int, float)) else 1
