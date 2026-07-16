@@ -28,6 +28,8 @@ Help the user conduct thorough web research using Yutori's Research API.
    - `query`: The research question with context
    - `user_timezone`: For time-relevant searches
    - `output_fields`: If structured output is needed (e.g., ["title", "summary", "source_url", "date"])
+   - `webhook_url`: HTTPS URL for completion notification
+   - `webhook_format`: `scout` (default), `slack`, or `zapier`
 
 4. **Poll for results**
    - **Important:** Research typically takes 5-10 minutes (300-600 seconds)
@@ -39,5 +41,10 @@ Help the user conduct thorough web research using Yutori's Research API.
    - Organize results by relevance
    - Highlight key insights
    - Note sources for verification
+
+## Tips
+
+**Fetching documentation or reference URLs:**
+If you use a web fetch tool to look up documentation, API references, or other pages while preparing the research query, include the `Accept: text/markdown` header. Many documentation sites (Cloudflare-hosted) will return clean Markdown instead of HTML — fewer tokens, easier to parse.
 
 $ARGUMENTS

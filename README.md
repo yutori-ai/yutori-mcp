@@ -20,7 +20,9 @@ You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and 
 
 ## Installation
 
-### Requirements
+<details>
+<summary>Requirements</summary>
+
 If you don't already have `uv` installed, install it (it includes `uvx`):
 
 ```bash
@@ -36,8 +38,19 @@ brew install uv
 Python 3.10 or higher is required (`uv` manages this automatically for most installs).
 
 For the quickstart below, Node.js is also required (for `npx`).
+</details>
 
-### Quick install (recommended)
+### AI agent install (recommended)
+
+Paste this into Claude Code, Codex, Cursor, Windsurf, or another coding agent:
+
+```text
+Use https://yutori.com/api/llms.txt and set up Yutori for me.
+```
+
+### Manual quick install
+
+![MCP server installation](assets/mcp-server-install.gif)
 
 1. Run in terminal:
 
@@ -68,17 +81,28 @@ For the quickstart below, Node.js is also required (for `npx`).
 
     Pick the clients you want to configure.
 
-3. (Optional) Install workflow skills using [skills.sh](https://skills.sh) (requires Node.js):
+3. Install workflow skills using [skills.sh](https://skills.sh) (requires Node.js):
    ```
-   npx skills add yutori-ai/yutori-mcp
+   npx skills add yutori-ai/yutori-mcp -g
    ```
 
-    Adds slash-command shortcuts like `/yutori-scout`, `/yutori-research`, and more. Skip if you only need the MCP tools.
+    Adds slash-command shortcuts like `/yutori-scout`, `/yutori-research`, and more.
+
+    `-g` installs them at user scope. Omit `-g` if you want a project-local install instead.
+
+   <details>
+   <summary>To list or remove skills later:</summary>
+
+   ```bash
+   npx skills ls -g
+   npx skills remove -g yutori-login
+   ```
+   </details>
 
 4. Restart the tool you are using.
 
 
-### Manual per-client setup
+### Manual per-client install
 
 <details>
 <summary>Claude Code</summary>
@@ -106,6 +130,11 @@ For the quickstart below, Node.js is also required (for `npx`).
    > claude mcp remove yutori -s user   # if installed at user scope
    > claude mcp remove yutori -s local  # if installed at local/project scope
    > ```
+
+   To uninstall the plugin later:
+   ```
+   /plugin uninstall yutori@yutori-plugins -s user
+   ```
 
 2. **MCP Only** (if you prefer not to use the plugin)
 
@@ -238,6 +267,8 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
    git clone https://github.com/yutori-ai/yutori-mcp /tmp/yutori-mcp
    cp -rL /tmp/yutori-mcp/.agents/skills/* ~/.agents/skills/
    ```
+
+   To uninstall manually copied skills, delete the matching directories from `~/.agents/skills/`. When updating this way, remove old Yutori skill directories first, since `cp -rL` will not delete renamed or removed skills.
 
    Restart Codex after installing skills.
 

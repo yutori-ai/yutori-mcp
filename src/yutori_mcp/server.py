@@ -4,367 +4,587 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, NoReturn
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
+from mcp.types import ToolAnnotations
+from pydantic import BaseModel, ValidationError
 
 from . import __version__
 from .adapter import MCPClientAdapter, YutoriAPIError
-from .formatters import format_response
+from .formatters import TASK_TYPE_BROWSING, TASK_TYPE_RESEARCH, format_response
+from .schema_utils import output_fields_to_output_schema
 from .schemas import (
+    DEFAULT_LIST_LIMIT,
+    BrowserChoice,
     BrowsingTaskInput,
     ComputerUseTaskInput,
     CreateScoutInput,
     EditScoutInput,
     GetUpdatesInput,
     ListScoutsInput,
+    ListTasksInput,
     ResearchTaskInput,
     ScoutIdInput,
+    ScoutStatus,
     TaskIdInput,
+    TaskListStatus,
+    UsageInput,
+    UsagePeriod,
+    WebhookFormat,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def _simplify_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Simplify JSON Schema for MCP clients by flattening anyOf with null.
+class _StrictArgsFastMCP(FastMCP):
+    """FastMCP that rejects tool calls containing unknown argument names.
 
-    Pydantic generates `anyOf: [{type: X}, {type: null}]` for optional fields.
-    MCP clients don't always understand this, showing "unknown" for types.
-    This function converts such patterns to just `{type: X}` while preserving
-    other properties like default, description, minimum, maximum, enum, etc.
+    FastMCP's own tool-call binding silently drops any argument name it
+    doesn't recognize (it disables the low-level Server's jsonschema
+    additionalProperties:false check "for backwards compatibility" - see
+    mcp.server.fastmcp.server.FastMCP._setup_handlers), which defeats the
+    extra="forbid" intent documented on schemas.ToolInput. This restores
+    that rejection at the one point that still sees the client's raw
+    argument dict, before FastMCP's own binding drops anything unknown.
+    `tool.parameters`/`_tool_manager` are undocumented FastMCP internals;
+    if a future `mcp` release renames them, fail open (skip validation)
+    rather than break the server.
     """
-    if not isinstance(schema, dict):
-        return schema
 
-    result = {}
-    for key, value in schema.items():
-        if key == "anyOf" and isinstance(value, list) and len(value) == 2:
-            # Check if this is the pattern: [{actual_type}, {type: null}]
-            non_null = [
-                v
-                for v in value
-                if not (isinstance(v, dict) and v.get("type") == "null")
-            ]
-            null_types = [
-                v for v in value if isinstance(v, dict) and v.get("type") == "null"
-            ]
-
-            if len(non_null) == 1 and len(null_types) == 1:
-                # Flatten: merge the non-null type's properties into result
-                for k, v in _simplify_schema(non_null[0]).items():
-                    result[k] = v
-                continue
-
-        # Recursively simplify nested structures
-        if isinstance(value, dict):
-            result[key] = _simplify_schema(value)
-        elif isinstance(value, list):
-            result[key] = [
-                _simplify_schema(item) if isinstance(item, dict) else item
-                for item in value
-            ]
-        else:
-            result[key] = value
-
-    return result
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        try:
+            tool = self._tool_manager.get_tool(name)
+            unknown = (
+                set(arguments) - set(tool.parameters.get("properties", {}))
+                if tool
+                else set()
+            )
+        except AttributeError:
+            logger.warning(
+                "Could not validate tool arguments against %r; skipping strict-args check",
+                name,
+            )
+            unknown = set()
+        if unknown:
+            raise ToolError(
+                f"Unknown argument(s) for tool {name!r}: {', '.join(sorted(unknown))}"
+            )
+        return await super().call_tool(name, arguments)
 
 
-def _get_simplified_schema(model: type) -> dict[str, Any]:
-    """Get a simplified JSON Schema from a Pydantic model."""
-    return _simplify_schema(model.model_json_schema())
+mcp = _StrictArgsFastMCP("yutori-mcp")
 
 
-def _output_fields_to_output_schema(
-    output_fields: list[str] | None,
-) -> dict[str, Any] | None:
-    """Convert simple output_fields list to JSON Schema for output_schema parameter.
+def _format_api_error(e: YutoriAPIError) -> str:
+    """Render a YutoriAPIError in the stable `API Error (status): message` text shape.
 
-    Args:
-        output_fields: List of field names, e.g. ['headline', 'summary', 'url']
-
-    Returns:
-        JSON Schema dict for API output_schema parameter, or None if output_fields is None.
+    Single source of truth for this string: `_invoke()` uses it to build the
+    RuntimeError message that becomes the MCP tool result's error text, and
+    tests assert against this function directly instead of re-deriving the
+    format inline (which previously let a test believe it was covering the
+    format while never exercising it).
     """
-    if output_fields is None:
-        return None
-
-    properties = {field: {"type": "string"} for field in output_fields}
-
-    return {
-        "type": "array",
-        "items": {
-            "type": "object",
-            "properties": properties,
-        },
-    }
+    return f"API Error ({e.status_code}): {e.message}"
 
 
-# Tool definitions with annotations
-TOOLS = [
-    # Read operations
-    Tool(
-        name="list_scouts",
-        description=(
-            "List all scouts for the authenticated user. "
-            "Returns basic metadata; use get_scout_detail for full fields."
-        ),
-        inputSchema=_get_simplified_schema(ListScoutsInput),
-        annotations={"readOnlyHint": True},
+async def _invoke(tool_name: str, args: dict[str, Any]) -> str:
+    """Invoke a tool handler and return the formatted response text.
+
+    Centralizes error handling: YutoriAPIError → RuntimeError so the MCP
+    framework marks the result isError=True; ValidationError re-raised as-is;
+    unexpected exceptions logged and re-raised.
+    """
+    handler = _TOOL_HANDLERS[tool_name]
+    try:
+        async with MCPClientAdapter() as client:
+            result, context = await handler(client, args)
+        return format_response(tool_name, result, **context)
+    except YutoriAPIError as e:
+        raise RuntimeError(_format_api_error(e)) from e
+    except ValidationError:
+        raise
+    except Exception:
+        logger.exception(f"Error handling tool {tool_name}")
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Tool definitions. Each @mcp.tool function is a thin wrapper that forwards
+# its typed parameters to _invoke, which routes through _TOOL_HANDLERS
+# (unchanged from the prior Server-based implementation). Each wrapper's body
+# is a single `return await _invoke(name, locals())` statement, so `locals()`
+# at that point contains exactly the function's parameters -- no other names
+# are ever bound first. This keeps the per-tool parameter list written once
+# (in the signature) instead of duplicated in a hand-written dict literal that
+# could silently drift out of sync with the signature. If a stray local were
+# ever introduced before the return, the affected input schema's
+# `extra="forbid"` config (see schemas.ToolInput) would raise immediately
+# rather than silently misforwarding it.
+# ---------------------------------------------------------------------------
+
+_READ_ONLY = ToolAnnotations(readOnlyHint=True)
+_IDEMPOTENT = ToolAnnotations(idempotentHint=True)
+_DESTRUCTIVE = ToolAnnotations(destructiveHint=True)
+
+
+def _list_tasks_description(task_label: str, get_tool: str) -> str:
+    """Build the shared list_*_tasks tool description.
+
+    list_browsing_tasks and list_research_tasks share identical boilerplate
+    describing pagination/status filtering and pointing at the matching
+    get_*_task_result tool for authoritative status; only the task label and
+    get-tool name differ. Mirrors the ``_output_fields_description`` helper
+    in schemas.py, which extracts the same kind of repeated tool-facing prose.
+    """
+    return (
+        f"List one-time {task_label} tasks for the authenticated user. "
+        "Supports cursor pagination and status filtering. List status is approximate "
+        f"(running also covers queued and not-yet-reconciled tasks); call "
+        f"{get_tool} for a task's authoritative status."
+    )
+
+
+def _get_task_result_description(task_label: str) -> str:
+    """Build the shared get_*_task_result tool description.
+
+    get_browsing_task_result and get_research_task_result share identical
+    text apart from the task label.
+    """
+    return f"Poll for {task_label} task status and result. Call until status is 'succeeded' or 'failed'."
+
+
+@mcp.tool(
+    description=(
+        "Get API usage statistics including active scout counts, rate limits, and activity metrics."
     ),
-    Tool(
-        name="get_scout_detail",
-        description="Get detailed information about a specific scout.",
-        inputSchema=_get_simplified_schema(ScoutIdInput),
-        annotations={"readOnlyHint": True},
+    annotations=_READ_ONLY,
+)
+async def list_api_usage(
+    period: UsagePeriod = None,
+) -> str:
+    return await _invoke("list_api_usage", locals())
+
+
+@mcp.tool(
+    description=(
+        "List all scouts for the authenticated user. "
+        "Returns basic metadata; use get_scout_detail for full fields."
     ),
-    Tool(
-        name="get_scout_updates",
-        description="Get paginated updates/reports for a scout. Each update contains findings from a run.",
-        inputSchema=_get_simplified_schema(GetUpdatesInput),
-        annotations={"readOnlyHint": True},
+    annotations=_READ_ONLY,
+)
+async def list_scouts(
+    limit: int | None = DEFAULT_LIST_LIMIT,
+    status: ScoutStatus = None,
+    cursor: str | None = None,
+) -> str:
+    return await _invoke("list_scouts", locals())
+
+
+@mcp.tool(
+    description="Get detailed information about a specific scout.",
+    annotations=_READ_ONLY,
+)
+async def get_scout_detail(scout_id: str) -> str:
+    return await _invoke("get_scout_detail", locals())
+
+
+@mcp.tool(
+    description="Get paginated updates/reports for a scout. Each update contains findings from a run.",
+    annotations=_READ_ONLY,
+)
+async def get_scout_updates(
+    scout_id: str,
+    cursor: str | None = None,
+    limit: int | None = None,
+) -> str:
+    return await _invoke("get_scout_updates", locals())
+
+
+@mcp.tool(
+    description=(
+        "Create a monitoring scout for continuous web monitoring. Scouts track changes relevant to "
+        "a query and alert you. Examples: 'news about Yutori', 'H100 pricing below $1.50'."
     ),
-    # Scout lifecycle
-    Tool(
-        name="create_scout",
-        description=(
-            "Create a monitoring scout for continuous web monitoring. Scouts track changes relevant to "
-            "a query and alert you. Examples: 'news about Yutori', 'H100 pricing below $1.50'."
-        ),
-        inputSchema=_get_simplified_schema(CreateScoutInput),
+)
+async def create_scout(
+    query: str,
+    output_interval: int | None = None,
+    webhook_url: str | None = None,
+    webhook_format: WebhookFormat = None,
+    output_fields: list[str] | None = None,
+    user_timezone: str | None = None,
+    skip_email: bool | None = None,
+    start_timestamp: int | None = None,
+    user_location: str | None = None,
+    is_public: bool | None = None,
+) -> str:
+    return await _invoke("create_scout", locals())
+
+
+@mcp.tool(
+    description=(
+        "Update an existing scout's query, schedule, webhook configuration, or status. "
+        "Use status='paused' to pause, 'active' to resume, or 'done' to archive."
     ),
-    Tool(
-        name="edit_scout",
-        description=(
-            "Update an existing scout's query, schedule, webhook configuration, or status. "
-            "Use status='paused' to pause, 'active' to resume, or 'done' to archive."
-        ),
-        inputSchema=_get_simplified_schema(EditScoutInput),
-        annotations={"idempotentHint": True},
+    annotations=_IDEMPOTENT,
+)
+async def edit_scout(
+    scout_id: str,
+    status: ScoutStatus = None,
+    query: str | None = None,
+    output_interval: int | None = None,
+    webhook_url: str | None = None,
+    webhook_format: WebhookFormat = None,
+    output_fields: list[str] | None = None,
+    skip_email: bool | None = None,
+    user_timezone: str | None = None,
+    user_location: str | None = None,
+    is_public: bool | None = None,
+) -> str:
+    return await _invoke("edit_scout", locals())
+
+
+@mcp.tool(
+    description="Permanently delete a scout and all its data. This action cannot be undone.",
+    annotations=_DESTRUCTIVE,
+)
+async def delete_scout(scout_id: str) -> str:
+    return await _invoke("delete_scout", locals())
+
+
+@mcp.tool(
+    description=(
+        "Execute a one-time web browsing task. The navigator agent runs a browser and "
+        "operates it like a person. Returns a task_id for polling. Example: 'list employees'. "
+        "Set browser='local' to use the desktop app with the user's logged-in sessions."
     ),
-    Tool(
-        name="delete_scout",
-        description="Permanently delete a scout and all its data. This action cannot be undone.",
-        inputSchema=_get_simplified_schema(ScoutIdInput),
-        annotations={"destructiveHint": True},
+)
+async def run_browsing_task(
+    task: str,
+    start_url: str,
+    max_steps: int | None = None,
+    require_auth: bool | None = None,
+    browser: BrowserChoice = None,
+    output_fields: list[str] | None = None,
+    webhook_url: str | None = None,
+    webhook_format: WebhookFormat = None,
+) -> str:
+    return await _invoke("run_browsing_task", locals())
+
+
+@mcp.tool(
+    description=_list_tasks_description("browsing", "get_browsing_task_result"),
+    annotations=_READ_ONLY,
+)
+async def list_browsing_tasks(
+    limit: int | None = DEFAULT_LIST_LIMIT,
+    status: TaskListStatus = None,
+    cursor: str | None = None,
+) -> str:
+    return await _invoke("list_browsing_tasks", locals())
+
+
+@mcp.tool(
+    description=_get_task_result_description("browsing"),
+    annotations=_READ_ONLY,
+)
+async def get_browsing_task_result(task_id: str) -> str:
+    return await _invoke("get_browsing_task_result", locals())
+
+
+@mcp.tool(
+    description=(
+        "Execute a one-time deep web research task. The research agent searches, "
+        "reads, and synthesizes information from across the web. Returns a task_id for polling. "
+        "Example: 'latest AI startup funding announcements'."
     ),
-    # Browsing operations
-    Tool(
-        name="run_browsing_task",
-        description=(
-            "Execute a one-time web browsing task. The navigator agent runs a cloud browser and "
-            "operates it like a person. Returns a task_id for polling. Example: 'list employees'."
-        ),
-        inputSchema=_get_simplified_schema(BrowsingTaskInput),
+)
+async def run_research_task(
+    query: str,
+    user_timezone: str | None = None,
+    user_location: str | None = None,
+    output_fields: list[str] | None = None,
+    webhook_url: str | None = None,
+    webhook_format: WebhookFormat = None,
+) -> str:
+    return await _invoke("run_research_task", locals())
+
+
+@mcp.tool(
+    description=_list_tasks_description("research", "get_research_task_result"),
+    annotations=_READ_ONLY,
+)
+async def list_research_tasks(
+    limit: int | None = DEFAULT_LIST_LIMIT,
+    status: TaskListStatus = None,
+    cursor: str | None = None,
+) -> str:
+    return await _invoke("list_research_tasks", locals())
+
+
+@mcp.tool(
+    description=_get_task_result_description("research"),
+    annotations=_READ_ONLY,
+)
+async def get_research_task_result(task_id: str) -> str:
+    return await _invoke("get_research_task_result", locals())
+
+
+@mcp.tool(
+    description=(
+        "Drive a native macOS app on THIS machine with Yutori's n2 "
+        "computer-use model (preview). The app is launched hidden and "
+        "operated in the background via cua-driver — the user's cursor "
+        "and focus are untouched. Runs synchronously and returns the "
+        "outcome; budget a few minutes. Requires macOS with cua-driver "
+        "installed and its daemon running. Prefer this over browsing "
+        "tasks for work inside local desktop apps (Calculator, Notes, "
+        "Finder, ...)."
     ),
-    Tool(
-        name="get_browsing_task_result",
-        description="Poll for browsing task status and result. Call until status is 'succeeded' or 'failed'.",
-        inputSchema=_get_simplified_schema(TaskIdInput),
-        annotations={"readOnlyHint": True},
-    ),
-    # Research operations
-    Tool(
-        name="run_research_task",
-        description=(
-            "Execute a one-time deep web research task. The research agent searches, "
-            "reads, and synthesizes information from across the web. Returns a task_id for polling. "
-            "Example: 'latest AI startup funding announcements'."
-        ),
-        inputSchema=_get_simplified_schema(ResearchTaskInput),
-    ),
-    Tool(
-        name="get_research_task_result",
-        description="Poll for research task status and result. Call until status is 'succeeded' or 'failed'.",
-        inputSchema=_get_simplified_schema(TaskIdInput),
-        annotations={"readOnlyHint": True},
-    ),
-    # Local computer use (preview)
-    Tool(
-        name="computer_use_task",
-        description=(
-            "Drive a native macOS app on THIS machine with Yutori's n2 "
-            "computer-use model (preview). The app is launched hidden and "
-            "operated in the background via cua-driver — the user's cursor "
-            "and focus are untouched. Runs synchronously and returns the "
-            "outcome; budget a few minutes. Requires macOS with cua-driver "
-            "installed and its daemon running. Prefer this over browsing "
-            "tasks for work inside local desktop apps (Calculator, Notes, "
-            "Finder, ...)."
-        ),
-        inputSchema=_get_simplified_schema(ComputerUseTaskInput),
-    ),
+)
+async def computer_use_task(
+    task: str,
+    app: str,
+    minutes: float = 3,
+    start_url: str | None = None,
+    keep_ctrl: bool = False,
+) -> str:
+    # Unlike the other tools, this does not route through _invoke/_TOOL_HANDLERS:
+    # it talks to cua-driver and the chat completions API directly (no SDK
+    # client). The loop blocks for minutes, so it runs in a worker thread to
+    # avoid stalling the stdio server's event loop. `locals()` here holds
+    # exactly this function's parameters (nothing else is bound yet), matching
+    # the `_invoke(..., locals())` pattern used by the tools above.
+    return await asyncio.to_thread(_run_computer_use, locals())
+
+
+# Signature for tool handlers registered in _TOOL_HANDLERS.
+ToolHandler = Callable[
+    [MCPClientAdapter, dict[str, Any]],
+    Awaitable[tuple[dict[str, Any], dict[str, Any]]],
 ]
 
 
-def create_server() -> Server:
-    """Create and configure the MCP server."""
-    server = Server("yutori-mcp")
+def _output_schema_kwargs(
+    params: BaseModel, extra_exclude: set[str] | None = None
+) -> dict[str, Any]:
+    """Convert a Pydantic input model into adapter kwargs.
 
-    @server.list_tools()
-    async def list_tools() -> list[Tool]:
-        return TOOLS
-
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-        try:
-            if name == "computer_use_task":
-                # Talks to cua-driver and the chat completions API directly —
-                # no SDK client involved. Runs in a thread: the loop blocks
-                # for minutes and must not stall the stdio server.
-                text = await asyncio.to_thread(_run_computer_use, arguments)
-                return [TextContent(type="text", text=text)]
-            with MCPClientAdapter() as client:
-                result, context = _handle_tool(client, name, arguments)
-                formatted = format_response(name, result, **context)
-                return [TextContent(type="text", text=formatted)]
-        except YutoriAPIError as e:
-            return [
-                TextContent(
-                    type="text", text=f"API Error ({e.status_code}): {e.message}"
-                )
-            ]
-        except Exception as e:
-            logger.exception(f"Error handling tool {name}")
-            return [TextContent(type="text", text=f"Error: {e!s}")]
-
-    return server
-
-
-def _handle_tool(client: MCPClientAdapter, name: str, arguments: dict) -> tuple[dict, dict]:
-    """Route tool calls to the appropriate client method.
-
-    Returns:
-        Tuple of (result, context) where context contains extra info for formatting.
+    Drops None fields — callers relying on an empty result when no config
+    fields were provided (e.g. _apply_edit_config) should confirm that still
+    holds — and transforms `output_fields` into the API's `output_schema`
+    format when present. This is the single kwargs-building step shared by
+    every handler built via ``_make_handler`` below: input classes without an
+    `output_fields` field simply skip the transform, since
+    `exclude={"output_fields", ...}` on a model without that field is a
+    no-op. Callers can pass `extra_exclude` to drop additional fields (e.g.
+    control fields that should not be forwarded to the adapter method).
     """
-    match name:
-        # Read operations
-        case "list_scouts":
-            params = ListScoutsInput(**arguments)
-            result = client.list_scouts(limit=params.limit, status=params.status)
-            return result, {}
-        case "get_scout_detail":
-            params = ScoutIdInput(**arguments)
-            return client.get_scout_detail(params.scout_id), {}
-        case "get_scout_updates":
-            params = GetUpdatesInput(**arguments)
-            result = client.get_scout_updates(
-                scout_id=params.scout_id,
-                cursor=params.cursor,
-                limit=params.limit,
-            )
-            return result, {}
-
-        # Scout lifecycle
-        case "create_scout":
-            params = CreateScoutInput(**arguments)
-            result = client.create_scout(
-                query=params.query,
-                output_interval=params.output_interval,
-                webhook_url=params.webhook_url,
-                webhook_format=params.webhook_format,
-                output_schema=_output_fields_to_output_schema(params.output_fields),
-                user_timezone=params.user_timezone,
-                skip_email=params.skip_email,
-                start_timestamp=params.start_timestamp,
-                user_location=params.user_location,
-                is_public=params.is_public,
-            )
-            return result, {}
-
-        case "edit_scout":
-            params = EditScoutInput(**arguments)
-
-            # Fetch current state for diff (also validates scout exists)
-            old_scout = client.get_scout_detail(params.scout_id)
-
-            # Apply config updates (so they take effect before status change)
-            config_kwargs: dict[str, Any] = {}
-            if params.query is not None:
-                config_kwargs["query"] = params.query
-            if params.output_interval is not None:
-                config_kwargs["output_interval"] = params.output_interval
-            if params.webhook_url is not None:
-                config_kwargs["webhook_url"] = params.webhook_url
-            if params.webhook_format is not None:
-                config_kwargs["webhook_format"] = params.webhook_format
-            if params.output_fields is not None:
-                config_kwargs["output_schema"] = _output_fields_to_output_schema(params.output_fields)
-            if params.skip_email is not None:
-                config_kwargs["skip_email"] = params.skip_email
-            if params.user_timezone is not None:
-                config_kwargs["user_timezone"] = params.user_timezone
-            if params.user_location is not None:
-                config_kwargs["user_location"] = params.user_location
-            if params.is_public is not None:
-                config_kwargs["is_public"] = params.is_public
-
-            if config_kwargs:
-                client.edit_scout(scout_id=params.scout_id, **config_kwargs)
-
-            # Apply status change after config updates
-            if params.status is not None:
-                client.edit_scout(scout_id=params.scout_id, status=params.status)
-
-            # Return old and new state for diff
-            new_scout = client.get_scout_detail(params.scout_id)
-            return {"old": old_scout, "new": new_scout}, {}
-        case "delete_scout":
-            params = ScoutIdInput(**arguments)
-            result = client.delete_scout(params.scout_id)
-            return result, {"scout_id": params.scout_id}
-
-        # Browsing operations
-        case "run_browsing_task":
-            params = BrowsingTaskInput(**arguments)
-            result = client.run_browsing_task(
-                task=params.task,
-                start_url=params.start_url,
-                max_steps=params.max_steps,
-                output_schema=_output_fields_to_output_schema(params.output_fields),
-                webhook_url=params.webhook_url,
-                webhook_format=params.webhook_format,
-            )
-            return result, {"task_type": "Browsing"}
-        case "get_browsing_task_result":
-            params = TaskIdInput(**arguments)
-            return client.get_browsing_task(params.task_id), {"task_type": "Browsing"}
-
-        # Research operations
-        case "run_research_task":
-            params = ResearchTaskInput(**arguments)
-            result = client.run_research_task(
-                query=params.query,
-                user_timezone=params.user_timezone,
-                user_location=params.user_location,
-                output_schema=_output_fields_to_output_schema(params.output_fields),
-                webhook_url=params.webhook_url,
-                webhook_format=params.webhook_format,
-            )
-            return result, {"task_type": "Research"}
-        case "get_research_task_result":
-            params = TaskIdInput(**arguments)
-            return client.get_research_task(params.task_id), {"task_type": "Research"}
-
-        case _:
-            raise ValueError(f"Unknown tool: {name}")
+    exclude = {"output_fields"} | (extra_exclude or set())
+    kwargs = params.model_dump(exclude=exclude, exclude_none=True)
+    if getattr(params, "output_fields", None) is not None:
+        kwargs["output_schema"] = output_fields_to_output_schema(params.output_fields)
+    return kwargs
 
 
-async def run_server() -> None:
-    """Run the MCP server using stdio transport."""
-    server = create_server()
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream, write_stream, server.create_initialization_options()
-        )
+# -----------------------------------------------------------------------------
+# Per-tool handlers. Each handler parses arguments via its input schema, calls
+# the appropriate adapter method, and returns (result, context) for the
+# formatter registry in formatters.py.
+# -----------------------------------------------------------------------------
+
+
+def _make_handler(
+    input_class: type[BaseModel],
+    client_method: str,
+    context: dict[str, Any] | Callable[[BaseModel], dict[str, Any]] | None = None,
+) -> ToolHandler:
+    """Build a handler that parses an input schema and forwards it as adapter kwargs.
+
+    Shared shape for tools whose handler body is the one-liner
+    ``client.METHOD(**_output_schema_kwargs(params))``: parse a schema, call the
+    adapter method, and stamp a formatter context onto the result. ``context``
+    is either a static dict (e.g. ``{"task_type": "Browsing"}`` for the
+    list_*_tasks tools), a callable that derives the context from the parsed
+    params (e.g. ``run_browsing_task`` needs ``params.browser`` so
+    ``format_task_started`` can annotate the local/cloud distinction), or
+    omitted entirely for tools whose formatter needs no context (e.g.
+    ``create_scout``, which has no task-type concept). Generating these from
+    one factory keeps the registry as the single place that pairs the tool
+    name with its input schema, adapter method, and context.
+    """
+
+    async def handler(
+        client: MCPClientAdapter, arguments: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        params = input_class(**arguments)
+        ctx = context(params) if callable(context) else dict(context or {})
+        return await getattr(client, client_method)(
+            **_output_schema_kwargs(params)
+        ), ctx
+
+    return handler
+
+
+async def _apply_edit_config(
+    client: MCPClientAdapter, params: EditScoutInput
+) -> dict[str, Any]:
+    """Build and apply edit_scout's config kwargs (query, schedule, webhook, etc.).
+
+    Excludes control fields (scout_id is passed explicitly; status is applied
+    separately by _apply_edit_status). Returns the applied kwargs so the
+    caller can tell whether a config update happened, which _apply_edit_status
+    needs to distinguish a partial failure from a plain one.
+    """
+    config_kwargs = _output_schema_kwargs(params, extra_exclude={"scout_id", "status"})
+    if config_kwargs:
+        await client.edit_scout(scout_id=params.scout_id, **config_kwargs)
+    return config_kwargs
+
+
+async def _apply_edit_status(
+    client: MCPClientAdapter, params: EditScoutInput, config_kwargs: dict[str, Any]
+) -> None:
+    """Apply edit_scout's status change, if any, after config updates.
+
+    The API requires status and config to be updated in separate calls, so
+    the operation is not atomic: if the status call fails after a config
+    update succeeded, say so explicitly instead of reporting a plain failure.
+    """
+    if params.status is None:
+        return
+    try:
+        await client.edit_scout(scout_id=params.scout_id, status=params.status)
+    except YutoriAPIError as e:
+        if config_kwargs:
+            raise YutoriAPIError(
+                message=(
+                    "Scout config changes were applied, but the status "
+                    f"change to '{params.status}' failed: {e.message}. "
+                    "Retry with edit_scout(scout_id, status=...) only."
+                ),
+                status_code=e.status_code,
+            ) from e
+        raise
+
+
+async def _handle_edit_scout(
+    client: MCPClientAdapter, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    params = EditScoutInput(**arguments)
+
+    # Fetch current state for diff (also validates scout exists)
+    old_scout = await client.get_scout_detail(params.scout_id)
+
+    config_kwargs = await _apply_edit_config(client, params)
+    await _apply_edit_status(client, params, config_kwargs)
+
+    # Return old and new state for diff. Every mutation already succeeded at
+    # this point, so a failed read-back must not surface as a failed edit —
+    # the formatter renders a success message without the diff instead.
+    try:
+        new_scout = await client.get_scout_detail(params.scout_id)
+    except YutoriAPIError:
+        new_scout = {}
+    return {"old": old_scout, "new": new_scout}, {}
+
+
+# Tool-name -> handler registry, consulted by _invoke() above. Mirrors
+# the _TOOL_FORMATTERS registry in formatters.py so the parse/dispatch side
+# of the MCP tool lifecycle is structured the same way as the format side.
+_TOOL_HANDLERS: dict[str, ToolHandler] = {
+    "list_api_usage": _make_handler(UsageInput, "get_usage"),
+    "list_scouts": _make_handler(ListScoutsInput, "list_scouts"),
+    "get_scout_detail": _make_handler(ScoutIdInput, "get_scout_detail"),
+    "get_scout_updates": _make_handler(GetUpdatesInput, "get_scout_updates"),
+    "create_scout": _make_handler(CreateScoutInput, "create_scout"),
+    "edit_scout": _handle_edit_scout,
+    "delete_scout": _make_handler(
+        ScoutIdInput,
+        "delete_scout",
+        lambda params: {"scout_id": params.scout_id},  # type: ignore[attr-defined]
+    ),
+    "list_browsing_tasks": _make_handler(
+        ListTasksInput, "list_browsing_tasks", {"task_type": TASK_TYPE_BROWSING}
+    ),
+    "run_browsing_task": _make_handler(
+        BrowsingTaskInput,
+        "run_browsing_task",
+        lambda params: {"task_type": TASK_TYPE_BROWSING, "browser": params.browser},  # type: ignore[attr-defined]
+    ),
+    "get_browsing_task_result": _make_handler(
+        TaskIdInput, "get_browsing_task", {"task_type": TASK_TYPE_BROWSING}
+    ),
+    "list_research_tasks": _make_handler(
+        ListTasksInput, "list_research_tasks", {"task_type": TASK_TYPE_RESEARCH}
+    ),
+    "run_research_task": _make_handler(
+        ResearchTaskInput, "run_research_task", {"task_type": TASK_TYPE_RESEARCH}
+    ),
+    "get_research_task_result": _make_handler(
+        TaskIdInput, "get_research_task", {"task_type": TASK_TYPE_RESEARCH}
+    ),
+}
+
+
+# CLI auth subcommand name -> argparse `help` text. Iterated over to register
+# subparsers and consulted to decide whether to dispatch to _handle_auth_command.
+_AUTH_SUBCOMMANDS: dict[str, str] = {
+    "login": "Log in and save API key",
+    "logout": "Remove saved API key",
+    "status": "Show authentication status",
+}
+
+
+def _handle_auth_command(command: str) -> NoReturn:
+    """Run an auth subcommand (login/logout/status) and exit.
+
+    Imports ``yutori.auth`` lazily so the default ``yutori-mcp`` server-startup
+    path does not pay the auth-flow import cost. Always raises ``SystemExit``;
+    the ``NoReturn`` annotation lets ``main()`` rely on that contract instead
+    of guarding the call with a ``return``.
+    """
+    from yutori.auth import clear_config, get_auth_status, run_login_flow
+
+    if command == "login":
+        result = run_login_flow(key_source="yutori-mcp")
+        if result.success:
+            print("Successfully authenticated!")
+        else:
+            print(f"Authentication failed: {result.error}")
+            if result.auth_url:
+                print(f"\nIf the browser didn't open, visit:\n  {result.auth_url}")
+        raise SystemExit(0 if result.success else 1)
+
+    if command == "logout":
+        clear_config()
+        print("Logged out successfully.")
+        raise SystemExit(0)
+
+    if command == "status":
+        status = get_auth_status()
+        if status.authenticated:
+            print(f"Authenticated (API key: {status.masked_key})")
+            if status.source == "config_file":
+                print(f"  Source: {status.config_path}")
+            elif status.source == "env_var":
+                print("  Source: YUTORI_API_KEY environment variable")
+        else:
+            print("Not authenticated. Run 'uvx yutori-mcp login' to authenticate.")
+            raise SystemExit(1)
+        raise SystemExit(0)
+
+    # Defensive: every name in _AUTH_SUBCOMMANDS must have a branch above.
+    # Reaching here means the dispatch table and this helper drifted apart.
+    raise ValueError(f"Unhandled auth subcommand: {command!r}")
 
 
 def main() -> None:
     """Entry point for the yutori-mcp command."""
     import argparse
-    import asyncio
 
     parser = argparse.ArgumentParser(prog="yutori-mcp")
     parser.add_argument(
@@ -374,43 +594,15 @@ def main() -> None:
         help="Show version and exit",
     )
     subparsers = parser.add_subparsers(dest="command")
-
-    subparsers.add_parser("login", help="Log in and save API key")
-    subparsers.add_parser("logout", help="Remove saved API key")
-    subparsers.add_parser("status", help="Show authentication status")
+    for name, help_text in _AUTH_SUBCOMMANDS.items():
+        subparsers.add_parser(name, help=help_text)
 
     args = parser.parse_args()
 
-    if args.command in {"login", "logout", "status"}:
-        from yutori.auth import clear_config, get_auth_status, run_login_flow
+    if args.command in _AUTH_SUBCOMMANDS:
+        _handle_auth_command(args.command)
 
-        if args.command == "login":
-            result = run_login_flow(key_source="yutori-mcp")
-            if result.success:
-                print("Successfully authenticated!")
-            else:
-                print(f"Authentication failed: {result.error}")
-                if result.auth_url:
-                    print(f"\nIf the browser didn't open, visit:\n  {result.auth_url}")
-            raise SystemExit(0 if result.success else 1)
-        if args.command == "logout":
-            clear_config()
-            print("Logged out successfully.")
-            raise SystemExit(0)
-        if args.command == "status":
-            status = get_auth_status()
-            if status.authenticated:
-                print(f"Authenticated (API key: {status.masked_key})")
-                if status.source == "config_file":
-                    print(f"  Source: {status.config_path}")
-                elif status.source == "env_var":
-                    print("  Source: YUTORI_API_KEY environment variable")
-            else:
-                print("Not authenticated. Run 'uvx yutori-mcp login' to authenticate.")
-                raise SystemExit(1)
-            raise SystemExit(0)
-
-    asyncio.run(run_server())
+    mcp.run(transport="stdio")
 
 
 def _run_computer_use(arguments: dict) -> str:

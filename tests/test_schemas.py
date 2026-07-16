@@ -3,16 +3,92 @@
 import pytest
 from pydantic import ValidationError
 
+from yutori_mcp.formatters import _SCOUT_EDIT_FIELDS
 from yutori_mcp.schemas import (
     BrowsingTaskInput,
     CreateScoutInput,
     EditScoutInput,
     GetUpdatesInput,
     ListScoutsInput,
+    ListTasksInput,
     ResearchTaskInput,
     ScoutIdInput,
     TaskIdInput,
+    UsageInput,
+    _output_fields_description,
 )
+
+# Minimal required kwargs for each input class that supports webhook/output_fields.
+# Used by parametrized cross-class validation tests — add a row here when a new
+# input class is introduced that shares these shared validators.
+_ALL_INPUT_CLASSES = [
+    pytest.param(CreateScoutInput, {"query": "Test"}, id="CreateScoutInput"),
+    pytest.param(EditScoutInput, {"scout_id": "abc-123"}, id="EditScoutInput"),
+    pytest.param(
+        BrowsingTaskInput,
+        {"task": "Test", "start_url": "https://example.com"},
+        id="BrowsingTaskInput",
+    ),
+    pytest.param(ResearchTaskInput, {"query": "Test"}, id="ResearchTaskInput"),
+]
+
+# Boundary cases for the shared `_limit_field()` 1-100 range, used by
+# ListScoutsInput's and ListTasksInput's `test_limit_range` below. Centralizing
+# the (limit, is_valid) pairs here means the two classes' boundary checks can't
+# silently drift apart. GetUpdatesInput also uses `_limit_field()` but has no
+# equivalent boundary test, so it intentionally doesn't participate here.
+_LIMIT_BOUNDARY_CASES = [
+    pytest.param(1, True, id="min-valid"),
+    pytest.param(100, True, id="max-valid"),
+    pytest.param(0, False, id="below-min"),
+    pytest.param(101, False, id="above-max"),
+]
+
+
+def _assert_limit_boundary(cls, limit, is_valid):
+    if is_valid:
+        assert cls(limit=limit).limit == limit
+    else:
+        with pytest.raises(ValidationError):
+            cls(limit=limit)
+
+
+class TestUsageInput:
+    def test_default_period(self):
+        """Period defaults to None."""
+        data = UsageInput()
+        assert data.period is None
+
+    @pytest.mark.parametrize("period", ["24h", "7d", "30d", "90d"])
+    def test_valid_periods(self, period):
+        """All valid period values are accepted."""
+        data = UsageInput(period=period)
+        assert data.period == period
+
+    def test_invalid_period_rejected(self):
+        """Invalid period values are rejected."""
+        with pytest.raises(ValidationError):
+            UsageInput(period="1h")
+
+
+class TestWebhookUrlValidation:
+    """Tests for the shared _check_webhook_https validator across all schemas."""
+
+    @pytest.mark.parametrize("cls,required_kwargs", _ALL_INPUT_CLASSES)
+    def test_http_url_rejected(self, cls, required_kwargs):
+        """Every input class rejects non-HTTPS webhook URLs."""
+        with pytest.raises(ValidationError, match="webhook_url must use HTTPS"):
+            cls(**required_kwargs, webhook_url="http://example.com/webhook")
+
+    def test_https_url_accepted(self):
+        """HTTPS webhook URLs are accepted across all schemas."""
+        data = CreateScoutInput(query="Test", webhook_url="https://example.com/webhook")
+        assert data.webhook_url == "https://example.com/webhook"
+
+    def test_none_url_accepted(self):
+        """None webhook URL passes validation."""
+        data = CreateScoutInput(query="Test", webhook_url=None)
+        assert data.webhook_url is None
 
 
 class TestCreateScoutInput:
@@ -84,20 +160,11 @@ class TestEditScoutInput:
         assert data.scout_id == "abc-123"
         assert data.query is None
 
-    def test_status_paused(self):
-        """Status can be set to paused."""
-        data = EditScoutInput(scout_id="abc-123", status="paused")
-        assert data.status == "paused"
-
-    def test_status_active(self):
-        """Status can be set to active."""
-        data = EditScoutInput(scout_id="abc-123", status="active")
-        assert data.status == "active"
-
-    def test_status_done(self):
-        """Status can be set to done."""
-        data = EditScoutInput(scout_id="abc-123", status="done")
-        assert data.status == "done"
+    @pytest.mark.parametrize("status", ["paused", "active", "done"])
+    def test_status_valid(self, status):
+        """Status can be set to any of the valid literal values."""
+        data = EditScoutInput(scout_id="abc-123", status=status)
+        assert data.status == status
 
     def test_status_invalid(self):
         """Invalid status values are rejected."""
@@ -128,6 +195,25 @@ class TestEditScoutInput:
         )
         assert data.output_fields == ["title", "description"]
 
+    def test_diff_fields_match_schema(self):
+        """_SCOUT_EDIT_FIELDS must list every editable field on EditScoutInput.
+
+        Drift guard: when a new field is added to EditScoutInput, it must
+        also be added to _SCOUT_EDIT_FIELDS in formatters.py so that edits
+        to it appear in the per-field diff that format_scout_edited returns
+        to the LLM client. Otherwise the change is silently invisible.
+        """
+        diff_fields = {field for field, _label, _fmt in _SCOUT_EDIT_FIELDS}
+        editable_fields = set(EditScoutInput.model_fields) - {"scout_id"}
+        # The output_fields input is sent to (and returned by) the API as
+        # output_schema; the diff table uses the response-side name.
+        editable_fields = (editable_fields - {"output_fields"}) | {"output_schema"}
+        assert diff_fields == editable_fields, (
+            "Mismatch between _SCOUT_EDIT_FIELDS and EditScoutInput. "
+            f"Missing from _SCOUT_EDIT_FIELDS: {editable_fields - diff_fields}. "
+            f"Extra in _SCOUT_EDIT_FIELDS: {diff_fields - editable_fields}."
+        )
+
 
 class TestBrowsingTaskInput:
     def test_required_fields(self):
@@ -138,6 +224,8 @@ class TestBrowsingTaskInput:
         )
         assert data.task == "Find AAPL stock price"
         assert data.start_url == "https://finance.yahoo.com"
+        assert data.require_auth is None
+        assert data.browser is None
 
     def test_missing_task(self):
         """task is required."""
@@ -174,6 +262,19 @@ class TestBrowsingTaskInput:
         data = BrowsingTaskInput(task="Test", start_url="https://example.com")
         assert data.output_fields is None
 
+    def test_full_input(self):
+        """Local browser, auth, and zapier webhook are accepted."""
+        data = BrowsingTaskInput(
+            task="Log in and export data",
+            start_url="https://example.com/login",
+            require_auth=True,
+            browser="local",
+            webhook_format="zapier",
+        )
+        assert data.require_auth is True
+        assert data.browser == "local"
+        assert data.webhook_format == "zapier"
+
 
 class TestScoutIdInput:
     def test_scout_id_required(self):
@@ -194,30 +295,16 @@ class TestListScoutsInput:
         data = ListScoutsInput(limit=50)
         assert data.limit == 50
 
-    def test_limit_range(self):
+    @pytest.mark.parametrize("limit,is_valid", _LIMIT_BOUNDARY_CASES)
+    def test_limit_range(self, limit, is_valid):
         """Limit must be between 1 and 100."""
-        data = ListScoutsInput(limit=1)
-        assert data.limit == 1
+        _assert_limit_boundary(ListScoutsInput, limit, is_valid)
 
-        data = ListScoutsInput(limit=100)
-        assert data.limit == 100
-
-        with pytest.raises(ValidationError):
-            ListScoutsInput(limit=0)
-
-        with pytest.raises(ValidationError):
-            ListScoutsInput(limit=101)
-
-    def test_status_filter(self):
+    @pytest.mark.parametrize("status", ["active", "paused", "done"])
+    def test_status_filter(self, status):
         """Status filter works with valid values."""
-        data = ListScoutsInput(status="active")
-        assert data.status == "active"
-
-        data = ListScoutsInput(status="paused")
-        assert data.status == "paused"
-
-        data = ListScoutsInput(status="done")
-        assert data.status == "done"
+        data = ListScoutsInput(status=status)
+        assert data.status == status
 
     def test_status_invalid(self):
         """Invalid status values are rejected."""
@@ -229,6 +316,81 @@ class TestListScoutsInput:
         data = ListScoutsInput(limit=20, status="active")
         assert data.limit == 20
         assert data.status == "active"
+
+    def test_cursor_defaults_none_and_is_settable(self):
+        """Cursor defaults to None and accepts a pagination token."""
+        assert ListScoutsInput().cursor is None
+        assert ListScoutsInput(cursor="next-page").cursor == "next-page"
+
+
+class TestListTasksInput:
+    def test_default_values(self):
+        """Default limit is 10, status and cursor are None."""
+        data = ListTasksInput()
+        assert data.limit == 10
+        assert data.status is None
+        assert data.cursor is None
+
+    def test_custom_limit_and_cursor(self):
+        """Limit and cursor can be set together."""
+        data = ListTasksInput(limit=50, cursor="next-page")
+        assert data.limit == 50
+        assert data.cursor == "next-page"
+
+    @pytest.mark.parametrize("limit,is_valid", _LIMIT_BOUNDARY_CASES)
+    def test_limit_range(self, limit, is_valid):
+        """Limit must be between 1 and 100."""
+        _assert_limit_boundary(ListTasksInput, limit, is_valid)
+
+    @pytest.mark.parametrize("status", ["running", "succeeded", "failed"])
+    def test_status_filter(self, status):
+        """Status filter accepts the task-list statuses from the REST API."""
+        assert ListTasksInput(status=status).status == status
+
+    def test_status_invalid(self):
+        """Detail-only statuses are rejected for list filters."""
+        with pytest.raises(ValidationError):
+            ListTasksInput(status="queued")
+
+
+class TestCursorFieldSharedDescription:
+    """ListScoutsInput and ListTasksInput share the same `_cursor_field()` construction.
+
+    Drift guard: both schemas' `cursor` field must keep the identical
+    description text so the two call sites cannot silently diverge.
+    """
+
+    def test_descriptions_match(self):
+        assert (
+            ListScoutsInput.model_fields["cursor"].description
+            == ListTasksInput.model_fields["cursor"].description
+        )
+
+
+class TestScoutIdFieldSharedDescription:
+    """EditScoutInput, ScoutIdInput, and GetUpdatesInput share `_scout_id_field()`.
+
+    Drift guard: all three schemas' `scout_id` field must keep the identical
+    description text (and stay required) so the call sites cannot silently
+    diverge.
+    """
+
+    def test_descriptions_match(self):
+        description = EditScoutInput.model_fields["scout_id"].description
+        assert ScoutIdInput.model_fields["scout_id"].description == description
+        assert GetUpdatesInput.model_fields["scout_id"].description == description
+
+    @pytest.mark.parametrize(
+        "cls,extra_kwargs",
+        [
+            pytest.param(EditScoutInput, {"query": "q"}, id="EditScoutInput"),
+            pytest.param(ScoutIdInput, {}, id="ScoutIdInput"),
+            pytest.param(GetUpdatesInput, {}, id="GetUpdatesInput"),
+        ],
+    )
+    def test_scout_id_required(self, cls, extra_kwargs):
+        with pytest.raises(ValidationError):
+            cls(**extra_kwargs)
 
 
 class TestTaskIdInput:
@@ -287,3 +449,92 @@ class TestResearchTaskInput:
         """output_fields is optional."""
         data = ResearchTaskInput(query="Research AI")
         assert data.output_fields is None
+
+
+class TestOutputFieldsDescription:
+    """Tests for the _output_fields_description helper extracted in PR #94."""
+
+    def test_without_docs_slug(self):
+        """Output omits the trailing docs link when docs_slug is None."""
+        result = _output_fields_description(["headline", "summary", "url"])
+        assert "Optional: Extract structured data" in result
+        assert "['headline', 'summary', 'url']" in result
+        assert "https://docs.yutori.com" not in result
+        assert not result.endswith(".")
+
+    def test_with_docs_slug(self):
+        """Output includes the full docs URL when docs_slug is provided."""
+        result = _output_fields_description(
+            ["name", "title", "email"],
+            docs_slug="browsing-create#using-webhooks-and-a-structured-output-schema",
+        )
+        assert "['name', 'title', 'email']" in result
+        assert (
+            "https://docs.yutori.com/reference/browsing-create#using-webhooks-and-a-structured-output-schema"
+            in result
+        )
+        assert result.endswith(".")
+
+    @pytest.mark.parametrize(
+        "model_cls",
+        [CreateScoutInput, EditScoutInput, BrowsingTaskInput, ResearchTaskInput],
+    )
+    def test_all_schemas_use_helper(self, model_cls):
+        """Each output_fields description is produced by the helper."""
+        desc = model_cls.model_fields["output_fields"].description
+        assert desc is not None
+        assert "Optional: Extract structured data" in desc, (
+            f"{model_cls.__name__}.output_fields description does not use _output_fields_description"
+        )
+
+
+class TestInvalidBrowserRejected:
+    """Verify that invalid browser values are rejected."""
+
+    def test_browsing_task_rejects_invalid_browser(self):
+        """BrowsingTaskInput rejects browser='remote'."""
+        with pytest.raises(ValidationError):
+            BrowsingTaskInput(
+                task="Test task",
+                start_url="https://example.com",
+                browser="remote",
+            )
+
+
+@pytest.mark.parametrize("cls,required_kwargs", _ALL_INPUT_CLASSES)
+def test_invalid_webhook_format_rejected(cls, required_kwargs):
+    """Every input class rejects invalid webhook_format values."""
+    with pytest.raises(ValidationError):
+        cls(**required_kwargs, webhook_format="discord")
+
+
+class TestExtraFieldsRejected:
+    """Unknown arguments must fail validation instead of being silently dropped."""
+
+    def test_create_scout_rejects_unknown_field(self):
+        with pytest.raises(ValidationError):
+            CreateScoutInput(query="Test", frequency="daily")
+
+
+@pytest.mark.parametrize("cls,required_kwargs", _ALL_INPUT_CLASSES)
+def test_empty_output_fields_rejected(cls, required_kwargs):
+    """An empty output_fields list would produce a degenerate output schema."""
+    with pytest.raises(ValidationError):
+        cls(**required_kwargs, output_fields=[])
+
+
+class TestWebhookUrlRequiresHost:
+    def test_https_without_host_rejected(self):
+        with pytest.raises(ValidationError, match="webhook_url must use HTTPS"):
+            CreateScoutInput(query="Test", webhook_url="https://")
+
+    def test_https_with_host_accepted(self):
+        data = CreateScoutInput(query="Test", webhook_url="https://example.com")
+        assert data.webhook_url == "https://example.com"
+
+
+class TestEditScoutIsPublic:
+    def test_is_public_accepted(self):
+        """is_public is editable (SDK >=0.8.0 forwards it to the PATCH route)."""
+        data = EditScoutInput(scout_id="abc-123", is_public=False)
+        assert data.is_public is False

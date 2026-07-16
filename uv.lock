@@ -271,7 +271,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -1347,22 +1347,23 @@ wheels = [
 
 [[package]]
 name = "yutori"
-version = "0.3.5"
+version = "0.8.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "openai" },
+    { name = "pillow" },
     { name = "rich" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2f/e4/661f69ba06aef7a13aea9da7c2ff05950c029e46743c04bb93024f31160a/yutori-0.3.5.tar.gz", hash = "sha256:8726d29467f15b7266b33290c2711c8381c48ff51aba3b32f1c23e71b4a3e9bf", size = 35169, upload-time = "2026-02-10T06:19:39.262Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c5/7d/341f4059d2323dd9eb914205126fc4ef2db967576a08e7beae161fe4eda4/yutori-0.8.1.tar.gz", hash = "sha256:fe325f2c2a99a128f33e7452c2c16064cb1f77f2c0e8d225e6aa9d92c4c19514", size = 134645, upload-time = "2026-06-25T23:55:31.074Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a7/92/01094b8f13da953d41d61e664b79fddc0556e6b12e37db984b0821034795/yutori-0.3.5-py3-none-any.whl", hash = "sha256:307d8c2f727a676036d3185c45377543a9b092459378f0378c5d239814cb3504", size = 37884, upload-time = "2026-02-10T06:19:38.349Z" },
+    { url = "https://files.pythonhosted.org/packages/45/74/0c71e50a6acd1dfdc6f1f366246ff46209e59438c7d8536f317ac4a2adee/yutori-0.8.1-py3-none-any.whl", hash = "sha256:88ec386247489e428258399fe5acda62d71cce60a7a882c5a5bf77dd35a0e788", size = 109544, upload-time = "2026-06-25T23:55:29.896Z" },
 ]
 
 [[package]]
 name = "yutori-mcp"
-version = "0.2.6"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -1386,6 +1387,6 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
-    { name = "yutori", specifier = ">=0.3.0,<0.4.0" },
+    { name = "yutori", specifier = ">=0.8.1" },
 ]
 provides-extras = ["dev"]

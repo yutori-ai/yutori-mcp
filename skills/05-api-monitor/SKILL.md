@@ -42,3 +42,6 @@ After creation, explain:
 - Scout will check twice daily for changes
 - Critical for staying ahead of breaking changes
 - Can set up webhook for immediate notifications
+
+**Fetching API documentation or changelogs:**
+If you use a web fetch tool to look up the service's changelog, API reference, or developer docs while preparing the query, include the `Accept: text/markdown` header. Many developer documentation sites (Cloudflare-hosted) will return clean Markdown instead of HTML — fewer tokens, easier to parse.

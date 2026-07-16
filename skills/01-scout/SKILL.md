@@ -79,4 +79,7 @@ Help the user set up a Yutori Scout for continuous web monitoring.
 - Missing context about the monitoring goal
 - No output format specification
 
+**Fetching documentation or source URLs:**
+If you use a web fetch tool to look up source URLs, documentation, or reference pages while preparing the query, include the `Accept: text/markdown` header. Many documentation sites (Cloudflare-hosted) will return clean Markdown instead of HTML — fewer tokens, easier to parse.
+
 $ARGUMENTS

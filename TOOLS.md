@@ -2,6 +2,52 @@
 
 All tool outputs are formatted as human-readable text optimized for LLM consumption.
 
+All tool inputs enforce validation: webhook URLs must use HTTPS, and `output_fields` (where supported) must contain at least one entry. Unknown/extra fields are rejected.
+
+## Usage
+
+### list_api_usage
+
+Get API usage statistics including active scout counts, rate limits, and activity metrics.
+
+```json
+{
+  "period": "7d"
+}
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `period` | No | Activity time range: `24h` (default), `7d`, `30d`, or `90d` |
+
+Example response:
+
+```
+Active Scouts: 5
+  - a1b2c3d4-e5f6-7890-abcd-ef1234567890
+  - b2c3d4e5-f6a7-8901-bcde-f12345678901
+  ... and 3 more
+
+API Rate Limits (available):
+  Requests today: 1250
+  Daily limit: 10000
+  Remaining: 8750
+  Resets at: 2026-03-04T00:00:00+00:00
+
+Navigator API Rate Limits:
+  Requests today: 342
+  Daily limit: 50000
+  Remaining: 49658
+  Per-second limit: 20
+  Resets at: 2026-03-04T00:00:00+00:00
+
+Activity (7d):
+  Scout runs: 47
+  Browsing tasks: 12
+  Research tasks: 8
+  Navigator API calls: 1523
+```
+
 ## Scout Tools
 
 ### list_scouts
@@ -19,6 +65,7 @@ List scouts for the user with optional filtering.
 |-----------|----------|-------------|
 | `limit` | No | Max scouts to return (1-100). Default: 10 |
 | `status` | No | Filter by `active`, `paused`, or `done` |
+| `cursor` | No | Pagination cursor from a previous response's `next_cursor` |
 
 Example response:
 
@@ -30,11 +77,13 @@ Showing 10 of 87:
 1. Yutori news and updates (active)
    Query: "Tell me about the latest news, product updates, or..."
    ID: 690bd26c-0ef8-42f4-99e4-8fca6ea20e6f
+   URL: https://platform.yutori.com/scouting/tasks/690bd26c-0ef8-42f4-99e4-8fca6ea20e6f
    Runs daily | Next: 2026-01-16
 
 2. Yutori API changelog (paused)
    Query: "Monitor Yutori API changelog for breaking changes"
    ID: 36d178a0-591f-4567-8019-32d24f9e55ba
+   URL: https://platform.yutori.com/scouting/tasks/36d178a0-591f-4567-8019-32d24f9e55ba
    Runs every 12 hours | Next: 2026-01-10
 
 ... (8 more)
@@ -59,6 +108,7 @@ Example response:
 ```
 Scout: Yutori news and updates
 ID: 690bd26c-0ef8-42f4-99e4-8fca6ea20e6f
+URL: https://platform.yutori.com/scouting/tasks/690bd26c-0ef8-42f4-99e4-8fca6ea20e6f
 Status: active
 
 Query: "Tell me about the latest news, product updates, or announcements about Yutori"
@@ -108,6 +158,7 @@ Scout created successfully.
 
 Name: Yutori news and updates
 ID: 3d1d5e2a-5b6c-4a9c-8f8c-2f2e3b4a5c6d
+URL: https://platform.yutori.com/scouting/tasks/3d1d5e2a-5b6c-4a9c-8f8c-2f2e3b4a5c6d
 Status: active
 
 Query: "Tell me about the latest news, product updates, press releases, social..."
@@ -119,12 +170,12 @@ First run: 2026-01-07 03:10 UTC
 |-----------|----------|-------------|
 | `query` | Yes | Natural language description of what to monitor |
 | `output_interval` | No | Seconds between runs (min: 1800). Default: 86400 |
-| `webhook_url` | No | URL for webhook notifications |
+| `webhook_url` | No | HTTPS URL for webhook notifications |
 | `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
 | `output_fields` | No | List of field names for structured output as array of objects |
 | `user_timezone` | No | Timezone for scheduling |
 | `skip_email` | No | Skip email notifications |
-| `start_timestamp` | No | ISO timestamp for when monitoring should start |
+| `start_timestamp` | No | Unix timestamp for when monitoring should start (0 = immediately) |
 | `user_location` | No | Location for geo-relevant searches |
 | `is_public` | No | Whether scout results are publicly accessible |
 
@@ -168,6 +219,7 @@ Scout updated successfully.
 
 Name: Yutori API changelog
 ID: 7c8692c3-c637-4302-a982-b9f4f7b49407
+URL: https://platform.yutori.com/scouting/tasks/7c8692c3-c637-4302-a982-b9f4f7b49407
 
 Changes applied:
   • Status: paused → active
@@ -180,12 +232,12 @@ Changes applied:
 | `status` | No | `active` (resume), `paused` (pause), or `done` (archive) |
 | `query` | No | Updated monitoring query |
 | `output_interval` | No | Seconds between runs (min 1800) |
-| `webhook_url` | No | Webhook notification URL |
+| `webhook_url` | No | HTTPS URL for webhook notifications |
 | `webhook_format` | No | `scout`, `slack`, or `zapier` |
 | `output_fields` | No | List of field names for structured output |
 | `user_timezone` | No | Timezone for scheduling |
 | `user_location` | No | Location for geo-relevant searches |
-| `is_public` | No | Whether results are public |
+| `is_public` | No | Whether scout results are publicly accessible |
 | `skip_email` | No | Skip email notifications |
 
 ### delete_scout
@@ -219,6 +271,12 @@ Get paginated updates from a scout.
 }
 ```
 
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `scout_id` | Yes | The scout's unique identifier (UUID) |
+| `cursor` | No | Pagination cursor from a previous response |
+| `limit` | No | Maximum number of updates to return (1-100) |
+
 Example response:
 
 ```
@@ -238,6 +296,40 @@ No new findings since last update.
 ```
 
 ## Research Tools
+
+### list_research_tasks
+
+List one-time research tasks for the user with optional filtering and cursor pagination.
+
+```json
+{
+  "limit": 10,
+  "status": "succeeded"
+}
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `limit` | No | Max tasks to return (1-100). Default: 10 |
+| `status` | No | Filter by `running`, `succeeded`, or `failed` |
+| `cursor` | No | Cursor from a previous response |
+
+Example response:
+
+```
+Found 248 research tasks: 0 running, 245 succeeded, 3 failed.
+
+Showing 10 of 245 matching tasks (248 total):
+
+1. Competitive landscape for AI code assistants (succeeded)
+   ID: ae27a17c-a4ed-4c69-8b2a-4bec330fc935
+   URL: https://platform.yutori.com/research/tasks/ae27a17c-a4ed-4c69-8b2a-4bec330fc935
+   Created: 2026-06-25
+
+More tasks available. Use list_research_tasks(cursor="eyJjcmVhdGVkX2F0...") to load more.
+Use list_research_tasks(status="succeeded") to list tasks with retrievable results.
+Use get_research_task_result(task_id) for full details.
+```
 
 ### run_research_task
 
@@ -280,7 +372,7 @@ Poll with get_research_task_result(task_id="ae27a17c-a4ed-4c69-8b2a-4bec330fc935
 | `user_timezone` | No | Timezone for context. Default: 'America/Los_Angeles' |
 | `user_location` | No | Location for context. Default: 'San Francisco, CA, US' |
 | `output_fields` | No | List of field names for structured output as array of objects |
-| `webhook_url` | No | URL for completion notification |
+| `webhook_url` | No | HTTPS URL for completion notification |
 | `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
 
 ### get_research_task_result
@@ -326,9 +418,43 @@ and an industry appearance from January 12–19, 2026.
 
 ## Browsing Tools
 
+### list_browsing_tasks
+
+List one-time browsing tasks for the user with optional filtering and cursor pagination.
+
+```json
+{
+  "limit": 10,
+  "status": "succeeded"
+}
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `limit` | No | Max tasks to return (1-100). Default: 10 |
+| `status` | No | Filter by `running`, `succeeded`, or `failed` |
+| `cursor` | No | Cursor from a previous response |
+
+Example response:
+
+```
+Found 42 browsing tasks: 1 running, 39 succeeded, 2 failed.
+
+Showing 10 of 39 matching tasks (42 total):
+
+1. Give me a list of all employees of Yutori. (succeeded)
+   ID: 54fb19fd-277e-4098-ab72-5a9f8a4347fc
+   URL: https://platform.yutori.com/browsing/tasks/54fb19fd-277e-4098-ab72-5a9f8a4347fc
+   Created: 2026-06-25
+
+More tasks available. Use list_browsing_tasks(cursor="eyJjcmVhdGVkX2F0...") to load more.
+Use list_browsing_tasks(status="succeeded") to list tasks with retrievable results.
+Use get_browsing_task_result(task_id) for full details.
+```
+
 ### run_browsing_task
 
-Execute a one-time web browsing task using the navigator agent. The agent runs a cloud browser and operates it like a person - clicking, typing, scrolling, and navigating for you.
+Execute a one-time web browsing task using the navigator agent. The agent runs either a cloud browser or Yutori Local on the desktop and operates it like a person - clicking, typing, scrolling, and navigating for you.
 
 **Basic example:**
 
@@ -343,9 +469,10 @@ Execute a one-time web browsing task using the navigator agent. The agent runs a
 
 ```json
 {
-  "task": "Give me a list of all employees (names and titles) of Yutori.",
-  "start_url": "https://yutori.com",
+  "task": "Log in and export the latest invoice.",
+  "start_url": "https://example.com/login",
   "max_steps": 75,
+  "require_auth": true,
   "webhook_url": "https://example.com/webhook",
   "output_fields": ["name", "title"]
 }
@@ -368,9 +495,11 @@ Poll with get_browsing_task_result(task_id="54fb19fd-277e-4098-ab72-5a9f8a4347fc
 | `task` | Yes | Natural language instruction for the navigator |
 | `start_url` | Yes | URL where browsing begins |
 | `max_steps` | No | Max browser actions (1-100). Default: 25 |
+| `require_auth` | No | If true, use an auth-optimized cloud browser provider for login flows. Only applies when browser is `cloud` (default) |
+| `browser` | No | `cloud` (default) or `local` to use Yutori Local with the user's logged-in desktop browser |
 | `output_fields` | No | List of field names for structured output as array of objects |
-| `webhook_url` | No | URL for completion notification |
-| `webhook_format` | No | `scout` (default) or `slack` |
+| `webhook_url` | No | HTTPS URL for completion notification |
+| `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
 
 ### get_browsing_task_result
 
@@ -428,7 +557,7 @@ Tools include hints for client behavior:
 
 | Tool | Annotation |
 |------|------------|
-| `list_scouts`, `get_scout_detail`, `get_scout_updates`, `get_browsing_task_result`, `get_research_task_result` | `readOnlyHint: true` |
+| `list_api_usage`, `list_scouts`, `get_scout_detail`, `get_scout_updates`, `list_browsing_tasks`, `get_browsing_task_result`, `list_research_tasks`, `get_research_task_result` | `readOnlyHint: true` |
 | `edit_scout` | `idempotentHint: true` |
 | `delete_scout` | `destructiveHint: true` |
 
