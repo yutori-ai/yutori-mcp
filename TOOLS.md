@@ -431,3 +431,46 @@ Tools include hints for client behavior:
 | `list_scouts`, `get_scout_detail`, `get_scout_updates`, `get_browsing_task_result`, `get_research_task_result` | `readOnlyHint: true` |
 | `edit_scout` | `idempotentHint: true` |
 | `delete_scout` | `destructiveHint: true` |
+
+## Computer Use Tools (preview)
+
+### computer_use_task
+
+Drive a native macOS app on the local machine with Yutori's n2 computer-use
+model. The app is launched hidden and operated in the background via
+[cua-driver](https://github.com/trycua/cua) — the user's cursor and focus are
+untouched. Runs synchronously and returns the outcome plus an action log.
+
+Requirements: macOS, cua-driver installed with its daemon running
+(`open -n -g -a CuaDriver --args serve`), and an API key with n2 preview
+access (the tool currently targets the dev API; override the base URL with
+`YUTORI_N2_API_BASE`).
+
+```json
+{
+  "task": "Compute 240000 * 12 and report the result",
+  "app": "com.apple.calculator",
+  "minutes": 3
+}
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `task` | Yes | Natural language instruction for the computer-use agent |
+| `app` | Yes | Bundle id (`com.apple.calculator`) or display name (`Notes`) |
+| `minutes` | No | Time budget in minutes (default 3, max 15) |
+| `start_url` | No | URL or file path handed to the app at launch |
+| `keep_ctrl` | No | Do not remap ctrl key combos to cmd |
+
+Example response:
+
+```
+Outcome: completed
+App: Calculator (pid 46191)
+
+The result of 240000 * 12 is 2,880,000.
+
+Actions taken (8):
+  [left_click] Clicked at (383, 385).
+  ...
+```

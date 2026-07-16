@@ -315,3 +315,38 @@ class ResearchTaskInput(BaseModel):
         if v is not None and not v.startswith("https://"):
             raise ValueError("webhook_url must use HTTPS (https://)")
         return v
+
+
+class ComputerUseTaskInput(BaseModel):
+    """Input for driving a local macOS app with the n2 computer-use model."""
+
+    task: str = Field(
+        ...,
+        description=(
+            "Natural language instruction for the computer-use agent. Examples: "
+            "'Compute 240000 * 12 and report the result', "
+            "'Create a note titled Groceries listing milk and eggs'"
+        ),
+    )
+    app: str = Field(
+        ...,
+        description=(
+            "macOS app to drive: a bundle id ('com.apple.calculator') or a "
+            "display name ('Notes'). The app is launched hidden and driven in "
+            "the background."
+        ),
+    )
+    minutes: float = Field(
+        default=3,
+        gt=0,
+        le=15,
+        description="Time budget in minutes (default 3, max 15)",
+    )
+    start_url: str | None = Field(
+        default=None,
+        description="Optional URL or file path handed to the app at launch",
+    )
+    keep_ctrl: bool = Field(
+        default=False,
+        description="Do not remap ctrl key combos to cmd (macOS convention)",
+    )

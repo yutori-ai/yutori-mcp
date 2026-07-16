@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -14,6 +15,7 @@ from .adapter import MCPClientAdapter, YutoriAPIError
 from .formatters import format_response
 from .schemas import (
     BrowsingTaskInput,
+    ComputerUseTaskInput,
     CreateScoutInput,
     EditScoutInput,
     GetUpdatesInput,
@@ -179,6 +181,21 @@ TOOLS = [
         inputSchema=_get_simplified_schema(TaskIdInput),
         annotations={"readOnlyHint": True},
     ),
+    # Local computer use (preview)
+    Tool(
+        name="computer_use_task",
+        description=(
+            "Drive a native macOS app on THIS machine with Yutori's n2 "
+            "computer-use model (preview). The app is launched hidden and "
+            "operated in the background via cua-driver — the user's cursor "
+            "and focus are untouched. Runs synchronously and returns the "
+            "outcome; budget a few minutes. Requires macOS with cua-driver "
+            "installed and its daemon running. Prefer this over browsing "
+            "tasks for work inside local desktop apps (Calculator, Notes, "
+            "Finder, ...)."
+        ),
+        inputSchema=_get_simplified_schema(ComputerUseTaskInput),
+    ),
 ]
 
 
@@ -193,6 +210,12 @@ def create_server() -> Server:
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         try:
+            if name == "computer_use_task":
+                # Talks to cua-driver and the chat completions API directly —
+                # no SDK client involved. Runs in a thread: the loop blocks
+                # for minutes and must not stall the stdio server.
+                text = await asyncio.to_thread(_run_computer_use, arguments)
+                return [TextContent(type="text", text=text)]
             with MCPClientAdapter() as client:
                 result, context = _handle_tool(client, name, arguments)
                 formatted = format_response(name, result, **context)
@@ -392,3 +415,42 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def _run_computer_use(arguments: dict) -> str:
+    """Validate input, resolve credentials, and run the n2 computer-use loop."""
+    from yutori.auth.credentials import resolve_api_key
+
+    from .computer_use import ComputerUseError, run_computer_use_task
+
+    params = ComputerUseTaskInput(**arguments)
+    api_key = resolve_api_key()
+    if not api_key:
+        raise ValueError(ERROR_NO_API_KEY_COMPUTER_USE)
+    try:
+        result = run_computer_use_task(
+            task=params.task,
+            app=params.app,
+            api_key=api_key,
+            minutes=params.minutes,
+            start_url=params.start_url,
+            keep_ctrl=params.keep_ctrl,
+        )
+    except ComputerUseError as e:
+        return f"Computer-use task could not run: {e}"
+    lines = [
+        f"Outcome: {result.outcome}",
+        f"App: {result.app_name} (pid {result.pid})",
+        "",
+        result.final_text,
+    ]
+    if result.steps:
+        lines += ["", f"Actions taken ({len(result.steps)}):"]
+        lines += [f"  {step}" for step in result.steps[-30:]]
+    return "\n".join(lines)
+
+
+ERROR_NO_API_KEY_COMPUTER_USE = (
+    "API key required. Run 'uvx yutori-mcp login' or set YUTORI_API_KEY. "
+    "Note: computer_use_task currently targets the n2 preview on the dev API."
+)
