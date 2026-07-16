@@ -250,7 +250,7 @@ class CuaComputerUseDriver:
 
             if action in ("drag", "left_click_drag"):
                 start = _coord(args.get("start_coordinates") or args.get("start_coordinate"))
-                end = point or _coord(args.get("end_coordinates"))
+                end = point or _coord(args.get("end_coordinates") or args.get("end_coordinate"))
                 if not start or not end:
                     return "[ERROR] drag requires start and end coordinates"
                 from_x, from_y = self._to_click_pixels(start)

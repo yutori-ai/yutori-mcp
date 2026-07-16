@@ -413,10 +413,6 @@ def main() -> None:
     asyncio.run(run_server())
 
 
-if __name__ == "__main__":
-    main()
-
-
 def _run_computer_use(arguments: dict) -> str:
     """Validate input, resolve credentials, and run the n2 computer-use loop."""
     from yutori.auth.credentials import resolve_api_key
@@ -454,3 +450,11 @@ ERROR_NO_API_KEY_COMPUTER_USE = (
     "API key required. Run 'uvx yutori-mcp login' or set YUTORI_API_KEY. "
     "Note: computer_use_task currently targets the n2 preview on the dev API."
 )
+
+
+# Kept at the very end so every module-level name (including the computer-use
+# helpers above) is bound before main() blocks running the server. Under
+# `python -m yutori_mcp.server`, main() never returns, so anything defined
+# after this guard would never be bound and computer_use_task would NameError.
+if __name__ == "__main__":
+    main()

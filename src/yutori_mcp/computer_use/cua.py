@@ -228,6 +228,14 @@ def pick_best_window(windows: list[CuaWindow]) -> CuaWindow | None:
     ]
     if usable:
         return max(usable, key=lambda w: w.z_index)
-    # No qualifying window (hidden-launched app, everything off-Space): fall
-    # back to the largest window anywhere so there's still something to drive.
+    # Hidden-launched app (this tool's normal mode) or everything off-Space: no
+    # window reports on-screen/on-current-space, so the primary filter is empty.
+    # Still honor the edge floor here — otherwise menu-bar strips (Calculator's
+    # 2560x30 helpers) can outrank the real window on area alone on large
+    # displays — and keep the frontmost-first rule among the real windows.
+    sized = [w for w in windows if w.min_edge >= MIN_OBSERVABLE_EDGE]
+    if sized:
+        return max(sized, key=lambda w: w.z_index)
+    # Nothing clears the floor: fall back to the largest window anywhere so
+    # there's still something to drive.
     return max(windows, key=lambda w: w.area)

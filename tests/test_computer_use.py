@@ -53,6 +53,15 @@ class TestPickBestWindow:
         off = _window(2, 800, 600, z_index=10, on_screen=False)
         assert pick_best_window([small, off]).window_id == 2
 
+    def test_fallback_honors_edge_floor_for_hidden_app(self):
+        # Hidden-launched app (this tool's normal mode): nothing reports
+        # on-screen/on-current-space, so the primary filter is empty. A wide
+        # menu-bar strip has the largest area but must still lose to the real
+        # window because the edge floor applies to the fallback too.
+        strip = _window(1, 3840, 30, z_index=99, on_screen=False, on_space=False)
+        real = _window(2, 230, 408, z_index=10, on_screen=False, on_space=False)
+        assert pick_best_window([strip, real]).window_id == 2
+
 
 class TestKeyNormalization:
     def test_key_names(self):
@@ -95,6 +104,47 @@ class TestDenormalization:
         assert driver.execute("left_click", "{}") == "[ERROR] click requires coordinates"
 
 
+class TestDrag:
+    def _driver(self, monkeypatch):
+        import yutori_mcp.computer_use.driver as driver_mod
+
+        self.calls = []
+
+        class _Result:
+            is_error = False
+            text = ""
+            structured = None
+
+        def fake_cua_call(tool, args):
+            self.calls.append((tool, args))
+            return _Result()
+
+        monkeypatch.setattr(driver_mod, "cua_call", fake_cua_call)
+        driver = CuaComputerUseDriver(pid=1, window_id=1)
+        driver._capture = _Capture(window_id=1, click_width=1000, click_height=1000)
+        return driver
+
+    def test_accepts_singular_start_and_end_coordinate(self, monkeypatch):
+        # n2 may send singular `start_coordinate`/`end_coordinate`; both must be
+        # honored symmetrically and reach cua-driver.
+        driver = self._driver(monkeypatch)
+        result = driver.execute(
+            "drag",
+            json.dumps({"start_coordinate": [100, 200], "end_coordinate": [300, 400]}),
+        )
+        assert not result.startswith("[ERROR]")
+        assert self.calls and self.calls[0][0] == "drag"
+        args = self.calls[0][1]
+        assert (args["from_x"], args["from_y"]) == (100, 200)
+        assert (args["to_x"], args["to_y"]) == (300, 400)
+
+    def test_requires_start_and_end(self, monkeypatch):
+        driver = self._driver(monkeypatch)
+        result = driver.execute("drag", json.dumps({"start_coordinate": [100, 200]}))
+        assert result == "[ERROR] drag requires start and end coordinates"
+        assert not self.calls
+
+
 class TestPruneScreenshots:
     def _message_with_image(self, tag):
         return {
@@ -122,3 +172,31 @@ class TestPruneScreenshots:
             part.get("type") != "image_url" for part in messages[0]["content"]
         )
         assert "[Earlier screenshot omitted.]" in json.dumps(messages[0])
+
+
+class TestServerModuleOrdering:
+    def test_main_guard_is_last_top_level_statement(self):
+        # main() blocks forever under `python -m yutori_mcp.server`, so any
+        # top-level def/assignment after the `if __name__ == "__main__"` guard
+        # (e.g. _run_computer_use) would never bind and computer_use_task would
+        # raise NameError. The guard must be the final top-level statement.
+        import ast
+        import inspect
+
+        import yutori_mcp.server as server_mod
+
+        tree = ast.parse(inspect.getsource(server_mod))
+        guard_index = None
+        for i, node in enumerate(tree.body):
+            if (
+                isinstance(node, ast.If)
+                and isinstance(node.test, ast.Compare)
+                and isinstance(node.test.left, ast.Name)
+                and node.test.left.id == "__name__"
+            ):
+                guard_index = i
+        assert guard_index is not None, "no `if __name__ == '__main__'` guard found"
+        assert guard_index == len(tree.body) - 1, (
+            "`if __name__ == '__main__'` must be the last top-level statement so "
+            "computer-use helpers are bound before main() blocks"
+        )
