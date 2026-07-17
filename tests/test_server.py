@@ -307,44 +307,42 @@ class TestCallToolErrorContract:
         assert result.root.isError is False
         assert "Found 0 scouts" in result.root.content[0].text
 
-    async def test_list_browsing_tasks_dispatches_with_filters(self):
+    @pytest.mark.parametrize(
+        "tool_name,request_args,expected_kwargs,expected_label",
+        [
+            pytest.param(
+                "list_browsing_tasks",
+                {"limit": 20, "status": "succeeded", "cursor": "cur-1"},
+                {"limit": 20, "status": "succeeded", "cursor": "cur-1"},
+                "browsing",
+                id="browsing",
+            ),
+            pytest.param(
+                "list_research_tasks",
+                {"status": "failed"},
+                {"limit": 10, "status": "failed"},
+                "research",
+                id="research",
+            ),
+        ],
+    )
+    async def test_list_tasks_dispatches_with_filters(
+        self, tool_name, request_args, expected_kwargs, expected_label
+    ):
         handler = _call_tool_handler()
         with _patched_adapter() as client:
-            client.list_browsing_tasks.return_value = {
+            mock_method = getattr(client, tool_name)
+            mock_method.return_value = {
                 "tasks": [],
                 "total": 0,
                 "filtered_total": 0,
                 "summary": {"running": 0, "succeeded": 0, "failed": 0},
             }
-            result = await handler(
-                _call_tool_request(
-                    "list_browsing_tasks",
-                    {"limit": 20, "status": "succeeded", "cursor": "cur-1"},
-                )
-            )
+            result = await handler(_call_tool_request(tool_name, request_args))
 
-        client.list_browsing_tasks.assert_awaited_once_with(
-            limit=20, status="succeeded", cursor="cur-1"
-        )
+        mock_method.assert_awaited_once_with(**expected_kwargs)
         assert result.root.isError is False
-        assert "Found 0 browsing tasks" in result.root.content[0].text
-
-    async def test_list_research_tasks_dispatches_with_filters(self):
-        handler = _call_tool_handler()
-        with _patched_adapter() as client:
-            client.list_research_tasks.return_value = {
-                "tasks": [],
-                "total": 0,
-                "filtered_total": 0,
-                "summary": {"running": 0, "succeeded": 0, "failed": 0},
-            }
-            result = await handler(
-                _call_tool_request("list_research_tasks", {"status": "failed"})
-            )
-
-        client.list_research_tasks.assert_awaited_once_with(limit=10, status="failed")
-        assert result.root.isError is False
-        assert "Found 0 research tasks" in result.root.content[0].text
+        assert f"Found 0 {expected_label} tasks" in result.root.content[0].text
 
     async def test_delete_scout_dispatches_with_scout_id(self):
         handler = _call_tool_handler()
