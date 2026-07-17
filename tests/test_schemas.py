@@ -80,14 +80,27 @@ class TestWebhookUrlValidation:
         with pytest.raises(ValidationError, match="webhook_url must use HTTPS"):
             cls(**required_kwargs, webhook_url="http://example.com/webhook")
 
-    def test_https_url_accepted(self):
+    @pytest.mark.parametrize("cls,required_kwargs", _ALL_INPUT_CLASSES)
+    def test_https_url_accepted(self, cls, required_kwargs):
         """HTTPS webhook URLs are accepted across all schemas."""
-        data = CreateScoutInput(query="Test", webhook_url="https://example.com/webhook")
+        data = cls(**required_kwargs, webhook_url="https://example.com/webhook")
         assert data.webhook_url == "https://example.com/webhook"
 
-    def test_none_url_accepted(self):
-        """None webhook URL passes validation."""
-        data = CreateScoutInput(query="Test", webhook_url=None)
+    @pytest.mark.parametrize("cls,required_kwargs", _ALL_INPUT_CLASSES)
+    def test_none_url_accepted(self, cls, required_kwargs):
+        """None webhook URL passes validation across all schemas.
+
+        EditScoutInput additionally requires at least one changed field, and
+        `exclude_none=True` treats an explicit `webhook_url=None` as no value
+        provided; add `query` so this test isolates the webhook validator's
+        None-handling branch instead of tripping that unrelated check.
+        """
+        kwargs = (
+            {**required_kwargs, "query": "Test"}
+            if cls is EditScoutInput
+            else required_kwargs
+        )
+        data = cls(**kwargs, webhook_url=None)
         assert data.webhook_url is None
 
 
