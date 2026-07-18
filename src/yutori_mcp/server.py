@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, NoReturn
+from typing import Any, NoReturn, TypeVar
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
@@ -337,6 +337,11 @@ ToolHandler = Callable[
     Awaitable[tuple[dict[str, Any], dict[str, Any]]],
 ]
 
+# Bound to BaseModel so _make_handler can tie its `context` callable's
+# parameter type to the specific input_class passed at each call site
+# (see _make_handler below), instead of widening it to plain BaseModel.
+_InputT = TypeVar("_InputT", bound=BaseModel)
+
 
 def _output_schema_kwargs(
     params: BaseModel, extra_exclude: set[str] | None = None
@@ -355,8 +360,9 @@ def _output_schema_kwargs(
     """
     exclude = {"output_fields"} | (extra_exclude or set())
     kwargs = params.model_dump(exclude=exclude, exclude_none=True)
-    if getattr(params, "output_fields", None) is not None:
-        kwargs["output_schema"] = output_fields_to_output_schema(params.output_fields)
+    output_fields = getattr(params, "output_fields", None)
+    if output_fields is not None:
+        kwargs["output_schema"] = output_fields_to_output_schema(output_fields)
     return kwargs
 
 
@@ -368,9 +374,9 @@ def _output_schema_kwargs(
 
 
 def _make_handler(
-    input_class: type[BaseModel],
+    input_class: type[_InputT],
     client_method: str,
-    context: dict[str, Any] | Callable[[BaseModel], dict[str, Any]] | None = None,
+    context: dict[str, Any] | Callable[[_InputT], dict[str, Any]] | None = None,
 ) -> ToolHandler:
     """Build a handler that parses an input schema and forwards it as adapter kwargs.
 
@@ -385,6 +391,12 @@ def _make_handler(
     ``create_scout``, which has no task-type concept). Generating these from
     one factory keeps the registry as the single place that pairs the tool
     name with its input schema, adapter method, and context.
+
+    ``input_class``/``context`` share the ``_InputT`` type variable so a
+    context callable can access fields specific to the ``input_class`` passed
+    at the same call site (e.g. ``lambda params: {"browser": params.browser}``
+    for ``BrowsingTaskInput``) without a type checker widening ``params`` to
+    plain ``BaseModel``.
     """
 
     async def handler(
@@ -475,7 +487,7 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
     "delete_scout": _make_handler(
         ScoutIdInput,
         "delete_scout",
-        lambda params: {"scout_id": params.scout_id},  # type: ignore[attr-defined]
+        lambda params: {"scout_id": params.scout_id},
     ),
     "list_browsing_tasks": _make_handler(
         ListTasksInput, "list_browsing_tasks", {"task_type": TASK_TYPE_BROWSING}
@@ -483,7 +495,7 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
     "run_browsing_task": _make_handler(
         BrowsingTaskInput,
         "run_browsing_task",
-        lambda params: {"task_type": TASK_TYPE_BROWSING, "browser": params.browser},  # type: ignore[attr-defined]
+        lambda params: {"task_type": TASK_TYPE_BROWSING, "browser": params.browser},
     ),
     "get_browsing_task_result": _make_handler(
         TaskIdInput, "get_browsing_task", {"task_type": TASK_TYPE_BROWSING}
