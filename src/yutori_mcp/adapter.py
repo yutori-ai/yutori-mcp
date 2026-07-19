@@ -9,6 +9,7 @@ used so slow Yutori API calls never block the MCP server's event loop.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from yutori import AsyncYutoriClient
@@ -121,7 +122,9 @@ class MCPClientAdapter:
     # -------------------------------------------------------------------------
 
     @staticmethod
-    async def _call(fn: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def _call(
+        fn: Callable[..., Awaitable[dict[str, Any]]], *args: Any, **kwargs: Any
+    ) -> dict[str, Any]:
         """Await an SDK method, converting SDK APIError to MCP YutoriAPIError.
 
         Filters None-valued kwargs before forwarding so callers can pass
