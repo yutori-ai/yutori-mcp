@@ -182,6 +182,17 @@ def _append_more_indicator(
         lines.append(f"{indent}... and {remaining} more")
 
 
+def _append_external_block(lines: list[str], body: list[str], *, header: str | None = None) -> None:
+    """Append a blank line, an optional header, then ``body`` wrapped in external-content markers.
+
+    Shared by ``format_scout_updates``'s content block and ``_append_result_content``.
+    """
+    lines.append("")
+    if header:
+        lines.append(header)
+    lines.extend(_wrap_external(body))
+
+
 def _pagination_state(response: dict[str, Any]) -> tuple[bool, str | None]:
     """Return the shared `(has_more, next_cursor)` pagination pair from a list-style response.
 
@@ -526,8 +537,7 @@ def format_scout_updates(response: dict[str, Any], **context: Any) -> str:
                     body.append("  ... (truncated)")
             elif isinstance(content, dict):
                 body.append(dict_to_markdown(content, level=1))
-            lines.append("")
-            lines.extend(_wrap_external(body))
+            _append_external_block(lines, body)
 
         findings = update.get("findings", [])
         if findings:
@@ -853,9 +863,7 @@ def _append_result_content(lines: list[str], response: dict[str, Any]) -> None:
                     body.append("")
                 else:
                     body.append(f"- {item}")
-        lines.append("")
-        lines.append("Result:")
-        lines.extend(_wrap_external(body))
+        _append_external_block(lines, body, header="Result:")
 
     lines.extend(_format_sources(response, indent=""))
 
