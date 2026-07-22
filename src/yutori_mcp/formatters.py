@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Protocol
 
 from .schema_utils import output_schema_field_names
 
@@ -180,6 +180,17 @@ def _append_more_indicator(
     remaining = total - shown
     if remaining > 0:
         lines.append(f"{indent}... and {remaining} more")
+
+
+def _append_external_block(lines: list[str], body: list[str], *, header: str | None = None) -> None:
+    """Append a blank line, an optional header, then ``body`` wrapped in external-content markers.
+
+    Shared by ``format_scout_updates``'s content block and ``_append_result_content``.
+    """
+    lines.append("")
+    if header:
+        lines.append(header)
+    lines.extend(_wrap_external(body))
 
 
 def _pagination_state(response: dict[str, Any]) -> tuple[bool, str | None]:
@@ -526,8 +537,7 @@ def format_scout_updates(response: dict[str, Any], **context: Any) -> str:
                     body.append("  ... (truncated)")
             elif isinstance(content, dict):
                 body.append(dict_to_markdown(content, level=1))
-            lines.append("")
-            lines.extend(_wrap_external(body))
+            _append_external_block(lines, body)
 
         findings = update.get("findings", [])
         if findings:
@@ -853,9 +863,7 @@ def _append_result_content(lines: list[str], response: dict[str, Any]) -> None:
                     body.append("")
                 else:
                     body.append(f"- {item}")
-        lines.append("")
-        lines.append("Result:")
-        lines.extend(_wrap_external(body))
+        _append_external_block(lines, body, header="Result:")
 
     lines.extend(_format_sources(response, indent=""))
 
@@ -904,10 +912,25 @@ _TASK_TOOLS: dict[str, tuple[str, str]] = {
     TASK_TYPE_BROWSING: ("list_browsing_tasks", "get_browsing_task_result"),
 }
 
+
+class ResponseFormatter(Protocol):
+    """Shape shared by every tool-name -> formatter mapping in `_TOOL_FORMATTERS`.
+
+    Each formatter takes the raw API response dict plus arbitrary per-tool
+    context kwargs (e.g. `task_type`, `browser`) stamped by server.py's
+    `_make_handler`, and renders the MCP tool result text. Mirrors
+    server.py's `ToolHandler` type on the dispatch/handler side, so both
+    halves of the tool-name -> function registry pattern are typed the same
+    way instead of only one being annotated.
+    """
+
+    def __call__(self, response: dict[str, Any], **context: Any) -> str: ...
+
+
 # Tool-name -> formatter registry, referenced by format_response() above.
 # Defined at module scope (after all formatters) so the dict is built once at
 # import time rather than rebuilt on every call.
-_TOOL_FORMATTERS = {
+_TOOL_FORMATTERS: dict[str, ResponseFormatter] = {
     "list_api_usage": format_usage,
     "list_scouts": format_list_scouts,
     "get_scout_detail": format_scout_detail,

@@ -218,6 +218,58 @@ class TestMainVersionFlag:
         assert output == f"yutori-mcp {__version__}"
 
 
+class TestMainEnvSelection:
+    """`--env` / YUTORI_ENV select the API environment before the server runs."""
+
+    @staticmethod
+    @contextmanager
+    def _run_main(argv, env=None):
+        """Run main() with a patched mcp.run and a scrubbed YUTORI_ENV.
+
+        Yields the mcp.run mock. patch.dict restores os.environ afterwards,
+        so the env-var write main() performs never leaks into other tests.
+        """
+        import os
+
+        environ = {k: v for k, v in os.environ.items() if k != "YUTORI_ENV"}
+        environ.update(env or {})
+        with (
+            patch.dict("os.environ", environ, clear=True),
+            patch("sys.argv", ["yutori-mcp", *argv]),
+            patch.object(mcp, "run") as mock_run,
+        ):
+            yield mock_run
+
+    def test_env_flag_sets_env_var_and_runs_server(self):
+        import os
+
+        with self._run_main(["--env", "dev"]) as mock_run:
+            main()
+            assert os.environ["YUTORI_ENV"] == "dev"
+        mock_run.assert_called_once_with(transport="stdio")
+
+    def test_dev_env_prints_target_notice_to_stderr(self, capsys):
+        with self._run_main(["--env", "dev"]):
+            main()
+        assert "api.dev.yutori.com" in capsys.readouterr().err
+
+    def test_prod_default_prints_no_notice(self, capsys):
+        with self._run_main([]) as mock_run:
+            main()
+        assert capsys.readouterr().err == ""
+        mock_run.assert_called_once_with(transport="stdio")
+
+    def test_invalid_env_flag_rejected_by_argparse(self):
+        with self._run_main(["--env", "staging"]):
+            _assert_main_exits(2)
+
+    def test_invalid_env_var_fails_at_startup(self, capsys):
+        with self._run_main([], env={"YUTORI_ENV": "staging"}) as mock_run:
+            _assert_main_exits(2)
+        mock_run.assert_not_called()
+        assert "Unknown Yutori environment 'staging'" in capsys.readouterr().err
+
+
 class TestEditScoutPartialFailure:
     """The API needs separate config/status calls, so a mid-sequence failure
     must report that the config portion was already applied."""
@@ -307,44 +359,42 @@ class TestCallToolErrorContract:
         assert result.root.isError is False
         assert "Found 0 scouts" in result.root.content[0].text
 
-    async def test_list_browsing_tasks_dispatches_with_filters(self):
+    @pytest.mark.parametrize(
+        "tool_name,request_args,expected_kwargs,expected_label",
+        [
+            pytest.param(
+                "list_browsing_tasks",
+                {"limit": 20, "status": "succeeded", "cursor": "cur-1"},
+                {"limit": 20, "status": "succeeded", "cursor": "cur-1"},
+                "browsing",
+                id="browsing",
+            ),
+            pytest.param(
+                "list_research_tasks",
+                {"status": "failed"},
+                {"limit": 10, "status": "failed"},
+                "research",
+                id="research",
+            ),
+        ],
+    )
+    async def test_list_tasks_dispatches_with_filters(
+        self, tool_name, request_args, expected_kwargs, expected_label
+    ):
         handler = _call_tool_handler()
         with _patched_adapter() as client:
-            client.list_browsing_tasks.return_value = {
+            mock_method = getattr(client, tool_name)
+            mock_method.return_value = {
                 "tasks": [],
                 "total": 0,
                 "filtered_total": 0,
                 "summary": {"running": 0, "succeeded": 0, "failed": 0},
             }
-            result = await handler(
-                _call_tool_request(
-                    "list_browsing_tasks",
-                    {"limit": 20, "status": "succeeded", "cursor": "cur-1"},
-                )
-            )
+            result = await handler(_call_tool_request(tool_name, request_args))
 
-        client.list_browsing_tasks.assert_awaited_once_with(
-            limit=20, status="succeeded", cursor="cur-1"
-        )
+        mock_method.assert_awaited_once_with(**expected_kwargs)
         assert result.root.isError is False
-        assert "Found 0 browsing tasks" in result.root.content[0].text
-
-    async def test_list_research_tasks_dispatches_with_filters(self):
-        handler = _call_tool_handler()
-        with _patched_adapter() as client:
-            client.list_research_tasks.return_value = {
-                "tasks": [],
-                "total": 0,
-                "filtered_total": 0,
-                "summary": {"running": 0, "succeeded": 0, "failed": 0},
-            }
-            result = await handler(
-                _call_tool_request("list_research_tasks", {"status": "failed"})
-            )
-
-        client.list_research_tasks.assert_awaited_once_with(limit=10, status="failed")
-        assert result.root.isError is False
-        assert "Found 0 research tasks" in result.root.content[0].text
+        assert f"Found 0 {expected_label} tasks" in result.root.content[0].text
 
     async def test_delete_scout_dispatches_with_scout_id(self):
         handler = _call_tool_handler()

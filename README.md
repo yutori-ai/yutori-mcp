@@ -357,6 +357,36 @@ yutori-mcp login    # authenticate (one-time)
 yutori-mcp          # run the server (or: python -m yutori_mcp.server)
 ```
 
+### Targeting the dev environment
+
+The server hits the production API (`https://api.yutori.com/v1`) by default.
+For testing, point it at the dev stack (`https://api.dev.yutori.com/v1`) with
+the `--env` flag or the `YUTORI_ENV` environment variable (the flag wins if
+both are set):
+
+```bash
+yutori-mcp --env dev
+```
+
+Or in an MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "yutori-dev": {
+      "command": "uvx",
+      "args": ["yutori-mcp", "--env", "dev"]
+    }
+  }
+}
+```
+
+Setting `"env": {"YUTORI_ENV": "dev"}` in the server config works too. An
+unknown environment name fails at startup rather than silently falling back
+to production. Note that the `login`/`logout`/`status` auth subcommands
+always talk to production; use a `YUTORI_API_KEY` valid for dev when
+targeting it.
+
 ### Debugging with MCP Inspector
 
 ```bash

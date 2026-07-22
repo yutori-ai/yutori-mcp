@@ -9,15 +9,48 @@ used so slow Yutori API calls never block the MCP server's event loop.
 from __future__ import annotations
 
 import logging
+import os
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from yutori import AsyncYutoriClient
 from yutori.auth.credentials import resolve_api_key
+from yutori.config import DEFAULT_BASE_URL
 from yutori.exceptions import APIConnectionError, APIError, AuthenticationError
 
 logger = logging.getLogger(__name__)
 
 ERROR_NO_API_KEY = "API key required. Run 'uvx yutori-mcp login' or set YUTORI_API_KEY."
+
+# Environment selection: name -> API base URL. `prod` must stay the default
+# so existing installs keep hitting the production API unchanged; `dev` exists
+# to point the server at the development stack for testing. server.py's
+# `--env` flag derives its choices from this dict, so adding an environment
+# here is the only change needed to expose it on the CLI.
+ENVIRONMENT_BASE_URLS: dict[str, str] = {
+    "prod": DEFAULT_BASE_URL,
+    "dev": "https://api.dev.yutori.com/v1",
+}
+DEFAULT_ENVIRONMENT = "prod"
+ENV_VAR_ENVIRONMENT = "YUTORI_ENV"
+
+
+def resolve_base_url(environment: str | None = None) -> str:
+    """Return the API base URL for an environment name.
+
+    Resolution order: explicit ``environment`` argument, then the
+    ``YUTORI_ENV`` environment variable, then prod. Raises ``ValueError``
+    for names not in ENVIRONMENT_BASE_URLS so a typo fails loudly instead
+    of silently targeting production.
+    """
+    name = environment or os.environ.get(ENV_VAR_ENVIRONMENT) or DEFAULT_ENVIRONMENT
+    try:
+        return ENVIRONMENT_BASE_URLS[name]
+    except KeyError:
+        valid = ", ".join(sorted(ENVIRONMENT_BASE_URLS))
+        raise ValueError(
+            f"Unknown Yutori environment {name!r}; expected one of: {valid}"
+        ) from None
 
 
 class YutoriAPIError(Exception):
@@ -37,11 +70,13 @@ class MCPClientAdapter:
     can't accidentally skip the filter.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, base_url: str | None = None) -> None:
         api_key = resolve_api_key()
         if not api_key:
             raise ValueError(ERROR_NO_API_KEY)
-        self._client = AsyncYutoriClient(api_key=api_key)
+        self._client = AsyncYutoriClient(
+            api_key=api_key, base_url=base_url or resolve_base_url()
+        )
 
     async def close(self) -> None:
         await self._client.close()
@@ -121,7 +156,9 @@ class MCPClientAdapter:
     # -------------------------------------------------------------------------
 
     @staticmethod
-    async def _call(fn: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def _call(
+        fn: Callable[..., Awaitable[dict[str, Any]]], *args: Any, **kwargs: Any
+    ) -> dict[str, Any]:
         """Await an SDK method, converting SDK APIError to MCP YutoriAPIError.
 
         Filters None-valued kwargs before forwarding so callers can pass

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, NoReturn
+from typing import Any, NoReturn, TypeVar
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
@@ -13,7 +13,14 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ValidationError
 
 from . import __version__
-from .adapter import MCPClientAdapter, YutoriAPIError
+from .adapter import (
+    DEFAULT_ENVIRONMENT,
+    ENV_VAR_ENVIRONMENT,
+    ENVIRONMENT_BASE_URLS,
+    MCPClientAdapter,
+    YutoriAPIError,
+    resolve_base_url,
+)
 from .formatters import TASK_TYPE_BROWSING, TASK_TYPE_RESEARCH, format_response
 from .schema_utils import output_fields_to_output_schema
 from .schemas import (
@@ -367,6 +374,11 @@ ToolHandler = Callable[
     Awaitable[tuple[dict[str, Any], dict[str, Any]]],
 ]
 
+# Bound to BaseModel so _make_handler can tie its `context` callable's
+# parameter type to the specific input_class passed at each call site
+# (see _make_handler below), instead of widening it to plain BaseModel.
+_InputT = TypeVar("_InputT", bound=BaseModel)
+
 
 def _output_schema_kwargs(
     params: BaseModel, extra_exclude: set[str] | None = None
@@ -385,8 +397,9 @@ def _output_schema_kwargs(
     """
     exclude = {"output_fields"} | (extra_exclude or set())
     kwargs = params.model_dump(exclude=exclude, exclude_none=True)
-    if getattr(params, "output_fields", None) is not None:
-        kwargs["output_schema"] = output_fields_to_output_schema(params.output_fields)
+    output_fields = getattr(params, "output_fields", None)
+    if output_fields is not None:
+        kwargs["output_schema"] = output_fields_to_output_schema(output_fields)
     return kwargs
 
 
@@ -398,9 +411,9 @@ def _output_schema_kwargs(
 
 
 def _make_handler(
-    input_class: type[BaseModel],
+    input_class: type[_InputT],
     client_method: str,
-    context: dict[str, Any] | Callable[[BaseModel], dict[str, Any]] | None = None,
+    context: dict[str, Any] | Callable[[_InputT], dict[str, Any]] | None = None,
 ) -> ToolHandler:
     """Build a handler that parses an input schema and forwards it as adapter kwargs.
 
@@ -415,6 +428,12 @@ def _make_handler(
     ``create_scout``, which has no task-type concept). Generating these from
     one factory keeps the registry as the single place that pairs the tool
     name with its input schema, adapter method, and context.
+
+    ``input_class``/``context`` share the ``_InputT`` type variable so a
+    context callable can access fields specific to the ``input_class`` passed
+    at the same call site (e.g. ``lambda params: {"browser": params.browser}``
+    for ``BrowsingTaskInput``) without a type checker widening ``params`` to
+    plain ``BaseModel``.
     """
 
     async def handler(
@@ -505,7 +524,7 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
     "delete_scout": _make_handler(
         ScoutIdInput,
         "delete_scout",
-        lambda params: {"scout_id": params.scout_id},  # type: ignore[attr-defined]
+        lambda params: {"scout_id": params.scout_id},
     ),
     "list_browsing_tasks": _make_handler(
         ListTasksInput, "list_browsing_tasks", {"task_type": TASK_TYPE_BROWSING}
@@ -513,7 +532,7 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
     "run_browsing_task": _make_handler(
         BrowsingTaskInput,
         "run_browsing_task",
-        lambda params: {"task_type": TASK_TYPE_BROWSING, "browser": params.browser},  # type: ignore[attr-defined]
+        lambda params: {"task_type": TASK_TYPE_BROWSING, "browser": params.browser},
     ),
     "get_browsing_task_result": _make_handler(
         TaskIdInput, "get_browsing_task", {"task_type": TASK_TYPE_BROWSING}
@@ -585,6 +604,8 @@ def _handle_auth_command(command: str) -> NoReturn:
 def main() -> None:
     """Entry point for the yutori-mcp command."""
     import argparse
+    import os
+    import sys
 
     parser = argparse.ArgumentParser(prog="yutori-mcp")
     parser.add_argument(
@@ -592,6 +613,16 @@ def main() -> None:
         action="version",
         version=f"%(prog)s {__version__}",
         help="Show version and exit",
+    )
+    parser.add_argument(
+        "--env",
+        choices=tuple(ENVIRONMENT_BASE_URLS),
+        help=(
+            f"Yutori environment to target (default: {DEFAULT_ENVIRONMENT}). "
+            f"Overrides the {ENV_VAR_ENVIRONMENT} environment variable. "
+            "Applies to the MCP server's API calls; the login/logout/status "
+            "auth subcommands always use production."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command")
     for name, help_text in _AUTH_SUBCOMMANDS.items():
@@ -601,6 +632,22 @@ def main() -> None:
 
     if args.command in _AUTH_SUBCOMMANDS:
         _handle_auth_command(args.command)
+
+    # The flag is forwarded via the env var (rather than threaded through to
+    # each per-call MCPClientAdapter()) so adapter.resolve_base_url() stays
+    # the single resolution point whether the environment came from the CLI
+    # or from an MCP client config's `env` block.
+    if args.env:
+        os.environ[ENV_VAR_ENVIRONMENT] = args.env
+    try:
+        base_url = resolve_base_url()
+    except ValueError as e:
+        # An invalid YUTORI_ENV must fail at startup, not on the first tool
+        # call — and never fall back silently to production.
+        parser.error(str(e))
+    if base_url != ENVIRONMENT_BASE_URLS[DEFAULT_ENVIRONMENT]:
+        # stdout carries the stdio MCP transport; stderr is safe for humans.
+        print(f"yutori-mcp: targeting non-default API {base_url}", file=sys.stderr)
 
     mcp.run(transport="stdio")
 
