@@ -12,7 +12,14 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ValidationError
 
 from . import __version__
-from .adapter import MCPClientAdapter, YutoriAPIError
+from .adapter import (
+    DEFAULT_ENVIRONMENT,
+    ENV_VAR_ENVIRONMENT,
+    ENVIRONMENT_BASE_URLS,
+    MCPClientAdapter,
+    YutoriAPIError,
+    resolve_base_url,
+)
 from .formatters import TASK_TYPE_BROWSING, TASK_TYPE_RESEARCH, format_response
 from .schema_utils import output_fields_to_output_schema
 from .schemas import (
@@ -567,6 +574,8 @@ def _handle_auth_command(command: str) -> NoReturn:
 def main() -> None:
     """Entry point for the yutori-mcp command."""
     import argparse
+    import os
+    import sys
 
     parser = argparse.ArgumentParser(prog="yutori-mcp")
     parser.add_argument(
@@ -574,6 +583,16 @@ def main() -> None:
         action="version",
         version=f"%(prog)s {__version__}",
         help="Show version and exit",
+    )
+    parser.add_argument(
+        "--env",
+        choices=tuple(ENVIRONMENT_BASE_URLS),
+        help=(
+            f"Yutori environment to target (default: {DEFAULT_ENVIRONMENT}). "
+            f"Overrides the {ENV_VAR_ENVIRONMENT} environment variable. "
+            "Applies to the MCP server's API calls; the login/logout/status "
+            "auth subcommands always use production."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command")
     for name, help_text in _AUTH_SUBCOMMANDS.items():
@@ -583,6 +602,22 @@ def main() -> None:
 
     if args.command in _AUTH_SUBCOMMANDS:
         _handle_auth_command(args.command)
+
+    # The flag is forwarded via the env var (rather than threaded through to
+    # each per-call MCPClientAdapter()) so adapter.resolve_base_url() stays
+    # the single resolution point whether the environment came from the CLI
+    # or from an MCP client config's `env` block.
+    if args.env:
+        os.environ[ENV_VAR_ENVIRONMENT] = args.env
+    try:
+        base_url = resolve_base_url()
+    except ValueError as e:
+        # An invalid YUTORI_ENV must fail at startup, not on the first tool
+        # call — and never fall back silently to production.
+        parser.error(str(e))
+    if base_url != ENVIRONMENT_BASE_URLS[DEFAULT_ENVIRONMENT]:
+        # stdout carries the stdio MCP transport; stderr is safe for humans.
+        print(f"yutori-mcp: targeting non-default API {base_url}", file=sys.stderr)
 
     mcp.run(transport="stdio")
 

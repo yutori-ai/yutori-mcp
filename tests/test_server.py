@@ -218,6 +218,58 @@ class TestMainVersionFlag:
         assert output == f"yutori-mcp {__version__}"
 
 
+class TestMainEnvSelection:
+    """`--env` / YUTORI_ENV select the API environment before the server runs."""
+
+    @staticmethod
+    @contextmanager
+    def _run_main(argv, env=None):
+        """Run main() with a patched mcp.run and a scrubbed YUTORI_ENV.
+
+        Yields the mcp.run mock. patch.dict restores os.environ afterwards,
+        so the env-var write main() performs never leaks into other tests.
+        """
+        import os
+
+        environ = {k: v for k, v in os.environ.items() if k != "YUTORI_ENV"}
+        environ.update(env or {})
+        with (
+            patch.dict("os.environ", environ, clear=True),
+            patch("sys.argv", ["yutori-mcp", *argv]),
+            patch.object(mcp, "run") as mock_run,
+        ):
+            yield mock_run
+
+    def test_env_flag_sets_env_var_and_runs_server(self):
+        import os
+
+        with self._run_main(["--env", "dev"]) as mock_run:
+            main()
+            assert os.environ["YUTORI_ENV"] == "dev"
+        mock_run.assert_called_once_with(transport="stdio")
+
+    def test_dev_env_prints_target_notice_to_stderr(self, capsys):
+        with self._run_main(["--env", "dev"]):
+            main()
+        assert "api.dev.yutori.com" in capsys.readouterr().err
+
+    def test_prod_default_prints_no_notice(self, capsys):
+        with self._run_main([]) as mock_run:
+            main()
+        assert capsys.readouterr().err == ""
+        mock_run.assert_called_once_with(transport="stdio")
+
+    def test_invalid_env_flag_rejected_by_argparse(self):
+        with self._run_main(["--env", "staging"]):
+            _assert_main_exits(2)
+
+    def test_invalid_env_var_fails_at_startup(self, capsys):
+        with self._run_main([], env={"YUTORI_ENV": "staging"}) as mock_run:
+            _assert_main_exits(2)
+        mock_run.assert_not_called()
+        assert "Unknown Yutori environment 'staging'" in capsys.readouterr().err
+
+
 class TestEditScoutPartialFailure:
     """The API needs separate config/status calls, so a mid-sequence failure
     must report that the config portion was already applied."""
