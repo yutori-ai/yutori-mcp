@@ -5,7 +5,15 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from yutori.exceptions import APIConnectionError, APIError, AuthenticationError
-from yutori_mcp.adapter import MCPClientAdapter, YutoriAPIError, _strip_none
+from yutori_mcp.adapter import (
+    DEFAULT_ENVIRONMENT,
+    ENV_VAR_ENVIRONMENT,
+    ENVIRONMENT_BASE_URLS,
+    MCPClientAdapter,
+    YutoriAPIError,
+    _strip_none,
+    resolve_base_url,
+)
 from yutori_mcp.server import _format_api_error
 
 
@@ -114,19 +122,79 @@ class TestAdapterInit:
             with pytest.raises(ValueError, match="API key required"):
                 MCPClientAdapter()
 
-    def test_creates_client_with_resolved_key(self):
+    def test_creates_client_with_resolved_key(self, monkeypatch):
+        monkeypatch.delenv(ENV_VAR_ENVIRONMENT, raising=False)
         with (
             patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-key"),
             patch("yutori_mcp.adapter.AsyncYutoriClient") as mock_client_cls,
         ):
             MCPClientAdapter()
-            mock_client_cls.assert_called_once_with(api_key="yt-key")
+            mock_client_cls.assert_called_once_with(
+                api_key="yt-key",
+                base_url=ENVIRONMENT_BASE_URLS[DEFAULT_ENVIRONMENT],
+            )
+
+    def test_env_var_selects_dev_base_url(self, monkeypatch):
+        monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
+        with (
+            patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-key"),
+            patch("yutori_mcp.adapter.AsyncYutoriClient") as mock_client_cls,
+        ):
+            MCPClientAdapter()
+            mock_client_cls.assert_called_once_with(
+                api_key="yt-key", base_url=ENVIRONMENT_BASE_URLS["dev"]
+            )
+
+    def test_explicit_base_url_wins_over_env_var(self, monkeypatch):
+        monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
+        with (
+            patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-key"),
+            patch("yutori_mcp.adapter.AsyncYutoriClient") as mock_client_cls,
+        ):
+            MCPClientAdapter(base_url="http://localhost:8000/v1")
+            mock_client_cls.assert_called_once_with(
+                api_key="yt-key", base_url="http://localhost:8000/v1"
+            )
 
     async def test_context_manager_closes_client(self, adapter):
         adapter._client.close = AsyncMock()
         async with adapter:
             pass
         adapter._client.close.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# resolve_base_url
+# ---------------------------------------------------------------------------
+
+
+class TestResolveBaseUrl:
+    """Environment-name -> base-URL resolution used to switch prod/dev."""
+
+    def test_defaults_to_prod(self, monkeypatch):
+        monkeypatch.delenv(ENV_VAR_ENVIRONMENT, raising=False)
+        assert resolve_base_url() == ENVIRONMENT_BASE_URLS["prod"]
+
+    @pytest.mark.parametrize("env", sorted(ENVIRONMENT_BASE_URLS))
+    def test_explicit_argument_maps_to_url(self, env):
+        assert resolve_base_url(env) == ENVIRONMENT_BASE_URLS[env]
+
+    def test_env_var_used_when_no_argument(self, monkeypatch):
+        monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
+        assert resolve_base_url() == ENVIRONMENT_BASE_URLS["dev"]
+
+    def test_argument_overrides_env_var(self, monkeypatch):
+        monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
+        assert resolve_base_url("prod") == ENVIRONMENT_BASE_URLS["prod"]
+
+    def test_empty_env_var_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "")
+        assert resolve_base_url() == ENVIRONMENT_BASE_URLS[DEFAULT_ENVIRONMENT]
+
+    def test_unknown_environment_raises_instead_of_hitting_prod(self, monkeypatch):
+        monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "staging")
+        with pytest.raises(ValueError, match="Unknown Yutori environment 'staging'"):
+            resolve_base_url()
 
 
 # ---------------------------------------------------------------------------
