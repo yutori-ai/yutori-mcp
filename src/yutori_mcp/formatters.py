@@ -664,15 +664,25 @@ def format_scout_deleted(response: dict[str, Any], **context: Any) -> str:
 # -----------------------------------------------------------------------------
 
 
-def _task_status_lines(message: str, *, task_id: str, footer: str) -> list[str]:
+def _task_status_lines(
+    message: str, *, task_id: str, footer: str, rejection_reason: str | None = None
+) -> list[str]:
     """Build the shared `<message>` / blank / `Task ID: ...` / `<footer>` preamble.
 
     Used by both task formatters (``format_task_started`` and
     ``format_task_result``) where this 4-line block repeats verbatim across
     every status branch. ``footer`` is typically ``f"Status: {status}"`` or
     ``f"Error: {error}"``.
+
+    ``rejection_reason`` folds in the ``_append_rejection_reason`` call that
+    otherwise immediately follows this helper in every branch that reports
+    one; branches with no rejection reason to show simply omit the argument,
+    and ``_append_rejection_reason``'s own no-op-when-falsy behavior keeps
+    that a plain no-op.
     """
-    return [message, "", f"Task ID: {task_id}", footer]
+    lines = [message, "", f"Task ID: {task_id}", footer]
+    _append_rejection_reason(lines, rejection_reason)
+    return lines
 
 
 def format_task_started(response: dict[str, Any], **context: Any) -> str:
@@ -696,8 +706,8 @@ def format_task_started(response: dict[str, Any], **context: Any) -> str:
             f"{task_type} task failed to start{browser_note}.",
             task_id=task_id,
             footer=f"Status: {status}",
+            rejection_reason=response.get("rejection_reason"),
         )
-        _append_rejection_reason(lines, response.get("rejection_reason"))
         if view_url:
             lines.append(f"View details: {view_url}")
         return "\n".join(lines)
@@ -706,8 +716,8 @@ def format_task_started(response: dict[str, Any], **context: Any) -> str:
         f"{task_type} task started{browser_note}.",
         task_id=task_id,
         footer=f"Status: {status}",
+        rejection_reason=response.get("rejection_reason"),
     )
-    _append_rejection_reason(lines, response.get("rejection_reason"))
 
     if view_url:
         lines.append(f"View progress: {view_url}")
@@ -747,8 +757,8 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
             "Task failed.",
             task_id=task_id,
             footer=f"Error: {error}",
+            rejection_reason=response.get("rejection_reason"),
         )
-        _append_rejection_reason(lines, response.get("rejection_reason"))
         return "\n".join(lines)
 
     # Handle completed state
@@ -767,8 +777,8 @@ def format_task_result(response: dict[str, Any], **context: Any) -> str:
         f"Task ended with unrecognized status '{status}' (not completed).",
         task_id=task_id,
         footer=f"Status: {status}",
+        rejection_reason=response.get("rejection_reason"),
     )
-    _append_rejection_reason(lines, response.get("rejection_reason"))
     error = _get_first(response, "error", "message")
     if error:
         lines.append(f"Error: {error}")
