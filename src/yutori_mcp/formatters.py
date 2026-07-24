@@ -182,15 +182,27 @@ def _append_more_indicator(
         lines.append(f"{indent}... and {remaining} more")
 
 
-def _append_external_block(lines: list[str], body: list[str], *, header: str | None = None) -> None:
-    """Append a blank line, an optional header, then ``body`` wrapped in external-content markers.
+def _external_block(body: list[str], *, header: str | None = None) -> list[str]:
+    """Build a blank line, an optional header, then ``body`` wrapped in external-content markers.
 
-    Shared by ``format_scout_updates``'s content block and ``_append_result_content``.
+    Single source of truth for the "separator + label + marker-wrapped payload"
+    shape used by every block that surfaces remote text: the scout-update
+    content and findings blocks, task result bodies, and the sources list.
+    Callers that append to a running ``lines`` list use
+    ``_append_external_block``; ``_format_sources`` returns its block instead,
+    so it stays composable via ``lines.extend(...)``.
+
+    Keeping the marker wrap inside this one helper means no call site can
+    render web-derived text while forgetting the markers that tell the
+    downstream LLM the payload is data, not instructions.
     """
-    lines.append("")
-    if header:
-        lines.append(header)
-    lines.extend(_wrap_external(body))
+    header_lines = [header] if header else []
+    return ["", *header_lines, *_wrap_external(body)]
+
+
+def _append_external_block(lines: list[str], body: list[str], *, header: str | None = None) -> None:
+    """Append ``_external_block(body, header=header)`` to ``lines``."""
+    lines.extend(_external_block(body, header=header))
 
 
 def _pagination_state(response: dict[str, Any]) -> tuple[bool, str | None]:
@@ -336,7 +348,7 @@ def _format_sources(
         else:
             body.append(f"{indent}- {source}")
     _append_more_indicator(body, len(sources), max_items, indent=indent)
-    return ["", "Sources:", *_wrap_external(body)]
+    return _external_block(body, header="Sources:")
 
 
 # -----------------------------------------------------------------------------
@@ -549,8 +561,7 @@ def format_scout_updates(response: dict[str, Any], **context: Any) -> str:
                 else:
                     body.append(f"  • {_truncate(str(finding), 80)}")
             _append_more_indicator(body, len(findings), 5)
-            lines.append(f"\nFindings ({len(findings)}):")
-            lines.extend(_wrap_external(body))
+            _append_external_block(lines, body, header=f"Findings ({len(findings)}):")
 
         lines.extend(_format_sources(update))
 
