@@ -420,6 +420,12 @@ def format_usage(response: dict[str, Any], **context: Any) -> str:
 # -----------------------------------------------------------------------------
 
 
+# Shared across format_list_scouts (appended standalone, after the pagination
+# hints) and format_scout_edited (extended with a leading blank line, in the
+# no-diff-available branch) so the two call sites can't drift on the wording.
+_GET_SCOUT_DETAIL_HINT = "Use get_scout_detail(scout_id) for full details."
+
+
 def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
     """Format list_scouts response as readable text."""
     scouts = response.get("scouts", [])
@@ -466,7 +472,7 @@ def format_list_scouts(response: dict[str, Any], **context: Any) -> str:
     elif has_more:
         lines.append("Use list_scouts(limit=50) to see more.")
     lines.append('Use list_scouts(status="active") to filter by status.')
-    lines.append("Use get_scout_detail(scout_id) for full details.")
+    lines.append(_GET_SCOUT_DETAIL_HINT)
 
     return "\n".join(lines)
 
@@ -616,7 +622,7 @@ def format_scout_edited(response: dict[str, Any], **context: Any) -> str:
             _scout_identity_lines(**identity, status=new.get("status", "unknown"))
         )
         _append_rejection_reason(lines, new.get("rejection_reason"))
-        lines.extend(["", "Use get_scout_detail(scout_id) for full details."])
+        lines.extend(["", _GET_SCOUT_DETAIL_HINT])
         return "\n".join(lines)
 
     # Edit succeeded but the post-edit read-back failed: report success
