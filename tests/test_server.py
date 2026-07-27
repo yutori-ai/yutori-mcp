@@ -1,6 +1,7 @@
 """Tests for server helper functions."""
 
 from contextlib import contextmanager
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -320,6 +321,12 @@ def _call_tool_request(name, arguments):
     )
 
 
+async def _call_tool(name: str, arguments: dict) -> Any:
+    """Invoke the registered tools/call handler for `name` with `arguments`."""
+    handler = _call_tool_handler()
+    return await handler(_call_tool_request(name, arguments))
+
+
 @contextmanager
 def _patched_adapter():
     """Patch MCPClientAdapter and yield the mock used as the async-with client."""
@@ -336,25 +343,23 @@ class TestCallToolErrorContract:
     that contract end-to-end through the registered request handler."""
 
     async def test_api_error_returns_iserror_with_formatted_message(self):
-        handler = _call_tool_handler()
         with _patched_adapter() as client:
             client.list_scouts.side_effect = YutoriAPIError(
                 message="boom", status_code=500
             )
-            result = await handler(_call_tool_request("list_scouts", {}))
+            result = await _call_tool("list_scouts", {})
 
         assert result.root.isError is True
         assert "API Error (500): boom" in result.root.content[0].text
 
     async def test_success_returns_formatted_text_without_error_flag(self):
-        handler = _call_tool_handler()
         with _patched_adapter() as client:
             client.list_scouts.return_value = {
                 "scouts": [],
                 "total": 0,
                 "summary": {"active": 0, "paused": 0, "done": 0},
             }
-            result = await handler(_call_tool_request("list_scouts", {}))
+            result = await _call_tool("list_scouts", {})
 
         assert result.root.isError is False
         assert "Found 0 scouts" in result.root.content[0].text
@@ -381,7 +386,6 @@ class TestCallToolErrorContract:
     async def test_list_tasks_dispatches_with_filters(
         self, tool_name, request_args, expected_kwargs, expected_label
     ):
-        handler = _call_tool_handler()
         with _patched_adapter() as client:
             mock_method = getattr(client, tool_name)
             mock_method.return_value = {
@@ -390,19 +394,16 @@ class TestCallToolErrorContract:
                 "filtered_total": 0,
                 "summary": {"running": 0, "succeeded": 0, "failed": 0},
             }
-            result = await handler(_call_tool_request(tool_name, request_args))
+            result = await _call_tool(tool_name, request_args)
 
         mock_method.assert_awaited_once_with(**expected_kwargs)
         assert result.root.isError is False
         assert f"Found 0 {expected_label} tasks" in result.root.content[0].text
 
     async def test_delete_scout_dispatches_with_scout_id(self):
-        handler = _call_tool_handler()
         with _patched_adapter() as client:
             client.delete_scout.return_value = {}
-            result = await handler(
-                _call_tool_request("delete_scout", {"scout_id": "scout-1"})
-            )
+            result = await _call_tool("delete_scout", {"scout_id": "scout-1"})
 
         client.delete_scout.assert_awaited_once_with(scout_id="scout-1")
         assert result.root.isError is False
@@ -415,23 +416,21 @@ class TestCallToolErrorContract:
         # restores the old Server-based additionalProperties:false-style
         # rejection by checking the raw argument dict before FastMCP's own
         # binding drops anything unrecognized.
-        handler = _call_tool_handler()
         with _patched_adapter() as client:
-            result = await handler(_call_tool_request("list_scouts", {"bogus": 1}))
+            result = await _call_tool("list_scouts", {"bogus": 1})
 
         client.list_scouts.assert_not_awaited()
         assert result.root.isError is True
         assert "bogus" in result.root.content[0].text
 
     async def test_known_arguments_still_accepted(self):
-        handler = _call_tool_handler()
         with _patched_adapter() as client:
             client.list_scouts.return_value = {
                 "scouts": [],
                 "total": 0,
                 "summary": {"active": 0, "paused": 0, "done": 0},
             }
-            result = await handler(_call_tool_request("list_scouts", {"limit": 5}))
+            result = await _call_tool("list_scouts", {"limit": 5})
 
         assert result.root.isError is False
 
