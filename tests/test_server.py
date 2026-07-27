@@ -322,11 +322,15 @@ def _call_tool_request(name, arguments):
 
 @contextmanager
 def _patched_adapter():
-    """Patch MCPClientAdapter and yield the mock used as the async-with client."""
-    with patch("yutori_mcp.server.MCPClientAdapter") as adapter_cls:
+    """Patch server.get_adapter and yield the mock instance it returns.
+
+    _invoke() reuses a process-lifetime adapter singleton via get_adapter()
+    instead of constructing a fresh MCPClientAdapter per call, so tests patch
+    the accessor function rather than the MCPClientAdapter class.
+    """
+    with patch("yutori_mcp.server.get_adapter") as get_adapter_mock:
         instance = AsyncMock()
-        adapter_cls.return_value = instance
-        instance.__aenter__.return_value = instance
+        get_adapter_mock.return_value = instance
         yield instance
 
 
