@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from typing import Any, NoReturn, TypeVar
 
 from mcp.server.fastmcp import FastMCP
@@ -80,7 +81,48 @@ class _StrictArgsFastMCP(FastMCP):
         return await super().call_tool(name, arguments)
 
 
-mcp = _StrictArgsFastMCP("yutori-mcp")
+# Process-lifetime MCPClientAdapter singleton. Constructing MCPClientAdapter
+# spins up an httpx.AsyncClient, so a fresh one per tool call means a fresh
+# connection pool per call in what is otherwise a long-running stdio session.
+# get_adapter() lazily creates it once and reuses it for every subsequent
+# call; _lifespan() closes it when the server shuts down. Sharing one
+# instance across calls is safe: mcp.server.lowlevel.Server.run() starts one
+# asyncio task per incoming request (so tool calls can run concurrently), and
+# httpx.AsyncClient is designed to be shared and used concurrently across
+# tasks in the same event loop (that's what its connection pooling is for).
+_adapter: MCPClientAdapter | None = None
+
+
+def get_adapter() -> MCPClientAdapter:
+    """Return the shared MCPClientAdapter, creating it on first use."""
+    global _adapter
+    if _adapter is None:
+        _adapter = MCPClientAdapter()
+    return _adapter
+
+
+@asynccontextmanager
+async def _lifespan(_: FastMCP) -> AsyncIterator[None]:
+    """Close the shared adapter when the server shuts down.
+
+    Registered as FastMCP's `lifespan` so it runs inside the same event loop
+    as `mcp.run()` (the low-level Server enters this context manager once,
+    around the whole request loop). A plain try/finally wrapped around the
+    synchronous `mcp.run()` call in main() would not work here: `mcp.run()`
+    drives `anyio.run(...)`, which tears its event loop down before returning
+    control to the caller, leaving no valid loop left to close an
+    asyncio-bound httpx client from.
+    """
+    try:
+        yield
+    finally:
+        global _adapter
+        if _adapter is not None:
+            await _adapter.close()
+            _adapter = None
+
+
+mcp = _StrictArgsFastMCP("yutori-mcp", lifespan=_lifespan)
 
 
 def _format_api_error(e: YutoriAPIError) -> str:
@@ -103,9 +145,9 @@ async def _invoke(tool_name: str, args: dict[str, Any]) -> str:
     unexpected exceptions logged and re-raised.
     """
     handler = _TOOL_HANDLERS[tool_name]
+    client = get_adapter()
     try:
-        async with MCPClientAdapter() as client:
-            result, context = await handler(client, args)
+        result, context = await handler(client, args)
         return format_response(tool_name, result, **context)
     except YutoriAPIError as e:
         raise RuntimeError(_format_api_error(e)) from e
