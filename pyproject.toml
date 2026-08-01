@@ -25,7 +25,10 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "mcp>=1.0.0",
+    # <2.0.0: mcp 2.0.0 restructured mcp.server.fastmcp (the FastMCP/ToolAnnotations
+    # API server.py builds on) into a different layout, so an unpinned upper bound
+    # breaks the install as soon as 2.x resolves.
+    "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
     # 0.8.1 adds browsing/research task list methods on both sync and async clients
     "yutori>=0.8.1",

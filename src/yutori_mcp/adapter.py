@@ -8,7 +8,6 @@ used so slow Yutori API calls never block the MCP server's event loop.
 
 from __future__ import annotations
 
-import logging
 import os
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -17,8 +16,6 @@ from yutori import AsyncYutoriClient
 from yutori.auth.credentials import resolve_api_key
 from yutori.config import DEFAULT_BASE_URL
 from yutori.exceptions import APIConnectionError, APIError, AuthenticationError
-
-logger = logging.getLogger(__name__)
 
 ERROR_NO_API_KEY = "API key required. Run 'uvx yutori-mcp login' or set YUTORI_API_KEY."
 
@@ -68,6 +65,12 @@ class MCPClientAdapter:
     _call() strips None-valued kwargs before forwarding to the SDK, so
     callers can pass optional fields unconditionally and new methods
     can't accidentally skip the filter.
+
+    Process-lifetime singleton: server.py's get_adapter() constructs one of
+    these and reuses it for every tool call, closing it explicitly via
+    close() from a FastMCP lifespan hook on shutdown. There is no
+    async-context-manager protocol here (no __aenter__/__aexit__) — nothing
+    scopes a single call to one adapter instance anymore.
     """
 
     def __init__(self, base_url: str | None = None) -> None:
@@ -80,19 +83,6 @@ class MCPClientAdapter:
 
     async def close(self) -> None:
         await self._client.close()
-
-    async def __aenter__(self) -> MCPClientAdapter:
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
-        try:
-            await self.close()
-        except Exception:
-            # A close failure must not replace an in-flight handler error —
-            # that would mask the real failure in the tool result.
-            if exc_type is None:
-                raise
-            logger.warning("Failed to close Yutori client", exc_info=True)
 
     # -------------------------------------------------------------------------
     # Usage
