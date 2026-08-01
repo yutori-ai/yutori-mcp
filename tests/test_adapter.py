@@ -156,10 +156,9 @@ class TestAdapterInit:
                 api_key="yt-key", base_url="http://localhost:8000/v1"
             )
 
-    async def test_context_manager_closes_client(self, adapter):
+    async def test_close_closes_underlying_client(self, adapter):
         adapter._client.close = AsyncMock()
-        async with adapter:
-            pass
+        await adapter.close()
         adapter._client.close.assert_awaited_once()
 
 
@@ -342,30 +341,6 @@ class TestBrowsingAndResearchForwarding:
         assert kwargs["require_auth"] is True
         assert kwargs["browser"] == "local"
         assert kwargs["webhook_format"] == "zapier"
-
-
-class TestContextManagerErrorPaths:
-    """__aexit__ must close the client on error paths without masking the
-    in-flight exception."""
-
-    async def test_client_closed_when_body_raises(self, adapter):
-        adapter._client.close = AsyncMock()
-        with pytest.raises(YutoriAPIError):
-            async with adapter:
-                raise YutoriAPIError(message="boom", status_code=500)
-        adapter._client.close.assert_awaited_once()
-
-    async def test_close_failure_does_not_mask_handler_error(self, adapter):
-        adapter._client.close = AsyncMock(side_effect=RuntimeError("close failed"))
-        with pytest.raises(YutoriAPIError, match="boom"):
-            async with adapter:
-                raise YutoriAPIError(message="boom", status_code=500)
-
-    async def test_close_failure_on_clean_exit_propagates(self, adapter):
-        adapter._client.close = AsyncMock(side_effect=RuntimeError("close failed"))
-        with pytest.raises(RuntimeError, match="close failed"):
-            async with adapter:
-                pass
 
 
 class TestTransportErrorMapping:

@@ -8,7 +8,6 @@ used so slow Yutori API calls never block the MCP server's event loop.
 
 from __future__ import annotations
 
-import logging
 import os
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -17,8 +16,6 @@ from yutori import AsyncYutoriClient
 from yutori.auth.credentials import resolve_api_key
 from yutori.config import DEFAULT_BASE_URL
 from yutori.exceptions import APIConnectionError, APIError, AuthenticationError
-
-logger = logging.getLogger(__name__)
 
 ERROR_NO_API_KEY = "API key required. Run 'uvx yutori-mcp login' or set YUTORI_API_KEY."
 
@@ -80,19 +77,6 @@ class MCPClientAdapter:
 
     async def close(self) -> None:
         await self._client.close()
-
-    async def __aenter__(self) -> MCPClientAdapter:
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
-        try:
-            await self.close()
-        except Exception:
-            # A close failure must not replace an in-flight handler error —
-            # that would mask the real failure in the tool result.
-            if exc_type is None:
-                raise
-            logger.warning("Failed to close Yutori client", exc_info=True)
 
     # -------------------------------------------------------------------------
     # Usage
