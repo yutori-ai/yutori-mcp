@@ -646,9 +646,10 @@ def main() -> None:
         _handle_auth_command(args.command)
 
     # The flag is forwarded via the env var (rather than threaded through to
-    # each per-call MCPClientAdapter()) so adapter.resolve_base_url() stays
-    # the single resolution point whether the environment came from the CLI
-    # or from an MCP client config's `env` block.
+    # get_adapter()'s lazily-constructed, process-lifetime MCPClientAdapter)
+    # so adapter.resolve_base_url() stays the single resolution point
+    # whether the environment came from the CLI or from an MCP client
+    # config's `env` block.
     if args.env:
         os.environ[ENV_VAR_ENVIRONMENT] = args.env
     try:
