@@ -182,6 +182,28 @@ def _append_more_indicator(
         lines.append(f"{indent}... and {remaining} more")
 
 
+def _format_truncated_block(
+    items: list[Any],
+    *,
+    header: str,
+    max_items: int,
+    render_item: Callable[[Any], str],
+    indent: str = "  ",
+) -> list[str]:
+    """Build an external-content block listing up to ``max_items`` of ``items``.
+
+    Shared shape behind ``_format_sources`` (bullet: ``- title: url``) and
+    ``format_scout_updates``'s findings block (bullet: ``• title``): render
+    each of the first ``max_items`` entries via ``render_item``, append the
+    ``... and N more`` indicator when truncated, then wrap the result in the
+    external-content markers under ``header``. Centralizing this keeps the
+    truncate/render/wrap sequence from drifting between the two call sites.
+    """
+    body = [render_item(item) for item in items[:max_items]]
+    _append_more_indicator(body, len(items), max_items, indent=indent)
+    return _external_block(body, header=header)
+
+
 def _external_block(body: list[str], *, header: str | None = None) -> list[str]:
     """Build a blank line, an optional header, then ``body`` wrapped in external-content markers.
 
@@ -339,16 +361,16 @@ def _format_sources(
     if not sources:
         return []
 
-    body: list[str] = []
-    for source in sources[:max_items]:
+    def render(source: Any) -> str:
         if isinstance(source, dict):
             url = source.get("url", "")
             title = source.get("title", url)
-            body.append(f"{indent}- {title}: {url}")
-        else:
-            body.append(f"{indent}- {source}")
-    _append_more_indicator(body, len(sources), max_items, indent=indent)
-    return _external_block(body, header="Sources:")
+            return f"{indent}- {title}: {url}"
+        return f"{indent}- {source}"
+
+    return _format_truncated_block(
+        sources, header="Sources:", max_items=max_items, render_item=render, indent=indent
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -559,15 +581,23 @@ def format_scout_updates(response: dict[str, Any], **context: Any) -> str:
 
         findings = update.get("findings", [])
         if findings:
-            body = []
-            for finding in findings[:5]:  # Limit to 5
-                if isinstance(finding, dict):
-                    title = _get_first(finding, "title", "summary", default="")
-                    body.append(f"  • {_truncate(title, 80)}")
-                else:
-                    body.append(f"  • {_truncate(str(finding), 80)}")
-            _append_more_indicator(body, len(findings), 5)
-            _append_external_block(lines, body, header=f"Findings ({len(findings)}):")
+
+            def render_finding(finding: Any) -> str:
+                title = (
+                    _get_first(finding, "title", "summary", default="")
+                    if isinstance(finding, dict)
+                    else str(finding)
+                )
+                return f"  • {_truncate(title, 80)}"
+
+            lines.extend(
+                _format_truncated_block(
+                    findings,
+                    header=f"Findings ({len(findings)}):",
+                    max_items=5,
+                    render_item=render_finding,
+                )
+            )
 
         lines.extend(_format_sources(update))
 
