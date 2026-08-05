@@ -94,6 +94,16 @@ def cua_call(tool: str, args: dict | None = None) -> CuaResult:
         parsed = json.loads(stdout)
     except json.JSONDecodeError as e:
         raise CuaCliError(f"cua-driver {tool} returned non-JSON: {stdout[:400]}") from e
+    # cua-driver >= 0.16 emits the bare tool payload; older builds wrapped it
+    # in an MCP envelope (content/structuredContent/isError).
+    if "content" not in parsed and "structuredContent" not in parsed:
+        refusal = parsed.get("refusal")
+        is_error = bool(refusal) or parsed.get("status") == "refused"
+        return CuaResult(
+            text=json.dumps(refusal) if refusal else stdout,
+            structured=None if is_error else parsed,
+            is_error=is_error,
+        )
     content = parsed.get("content") or []
     text = "\n".join(
         block["text"]
@@ -116,7 +126,7 @@ def daemon_running() -> bool:
 
 
 def cua_screenshot(
-    window_id: int, quality: int, max_long_side: int
+    pid: int, window_id: int, quality: int, max_long_side: int
 ) -> tuple[bytes, int, int]:
     """Capture one window as JPEG and return ``(bytes, width, height)``.
 
@@ -125,11 +135,13 @@ def cua_screenshot(
     image — which is also cua-driver's click coordinate space (the driver caps
     its own get_window_state PNG at ``max_image_dimension``).
     """
-    out_file = Path(tempfile.gettempdir()) / f"n2-cua-{uuid.uuid4().hex}.jpg"
+    out_file = Path(tempfile.gettempdir()) / f"n2-cua-{uuid.uuid4().hex}.png"
+    # cua-driver >= 0.16 has no standalone screenshot tool; get_window_state
+    # honours --screenshot-out-file and writes the same window-local capture.
     args = [
         "call",
-        "screenshot",
-        json.dumps({"window_id": window_id, "format": "jpeg", "quality": quality}),
+        "get_window_state",
+        json.dumps({"pid": pid, "window_id": window_id, "include_screenshot": True}),
         "--screenshot-out-file",
         str(out_file),
     ]
