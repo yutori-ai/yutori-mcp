@@ -124,7 +124,7 @@ class CuaComputerUseDriver:
         """Capture the current observation and return it as a data URL."""
         window_id = self._resolve_window()
         data, width, height = cua_screenshot(
-            window_id, SCREENSHOT_QUALITY, MAX_IMAGE_LONG_SIDE
+            self.pid, window_id, SCREENSHOT_QUALITY, MAX_IMAGE_LONG_SIDE
         )
         self._capture = _Capture(window_id, width, height)
         return f"data:image/jpeg;base64,{base64.b64encode(data).decode()}"
