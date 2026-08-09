@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
+import os
+import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any, NoReturn, TypeVar
@@ -615,10 +618,6 @@ def _handle_auth_command(command: str) -> NoReturn:
 
 def main() -> None:
     """Entry point for the yutori-mcp command."""
-    import argparse
-    import os
-    import sys
-
     parser = argparse.ArgumentParser(prog="yutori-mcp")
     parser.add_argument(
         "--version",
