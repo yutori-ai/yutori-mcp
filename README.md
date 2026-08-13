@@ -10,6 +10,22 @@ You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and 
 - **Scouting** — Monitor the web continuously for anything you care about at a desired frequency
 - **Research** — Run one-time deep web research tasks
 - **Browsing** — Automate websites with an AI navigator
+- **Computer use preview** — On macOS 15+, opt in to foreground desktop automation against the dev endpoint
+
+### macOS computer-use preview
+
+This development-only preview is available only when the MCP server runs on macOS with
+`YUTORI_ENV=dev`. Install Node 22 (`brew install node@22`), then run:
+
+```bash
+uvx yutori-mcp computer-use setup
+uvx yutori-mcp computer-use doctor
+uvx yutori-mcp computer-use smoke
+```
+
+The `run_computer_use_task` tool controls the visible foreground desktop. Do not touch the
+Mac while it runs. Visible desktop content is sent to Yutori's dev model endpoint. Only one
+task can control a Mac at a time.
 
 **Workflow skills** (for clients that support slash commands):
 - [`/yutori-scout`](skills/01-scout/SKILL.md) — Set up continuous web monitoring

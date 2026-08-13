@@ -30,6 +30,7 @@ from .schemas import (
     DEFAULT_LIST_LIMIT,
     BrowserChoice,
     BrowsingTaskInput,
+    ComputerUseTaskInput,
     CreateScoutInput,
     EditScoutInput,
     GetUpdatesInput,
@@ -148,8 +149,23 @@ async def _invoke(tool_name: str, args: dict[str, Any]) -> str:
     unexpected exceptions logged and re-raised.
     """
     handler = _TOOL_HANDLERS[tool_name]
-    client = get_adapter()
     try:
+        if tool_name == "run_computer_use_task":
+            from .computer_use.result import failure, format_result
+
+            try:
+                result, _ = await handler(None, args)  # type: ignore[arg-type]
+            except ValidationError:
+                raise
+            # MCP callers need the same actionable result shape even when a
+            # platform integration raises an error we cannot classify here.
+            except Exception as error:  # noqa: BLE001
+                logger.error(
+                    "Computer-use task failed before the runner returned a result"
+                )
+                result = failure(str(error))
+            return format_result(result)
+        client = get_adapter()
         result, context = await handler(client, args)
         return format_response(tool_name, result, **context)
     except YutoriAPIError as e:
@@ -178,6 +194,7 @@ async def _invoke(tool_name: str, args: dict[str, Any]) -> str:
 _READ_ONLY = ToolAnnotations(readOnlyHint=True)
 _IDEMPOTENT = ToolAnnotations(idempotentHint=True)
 _DESTRUCTIVE = ToolAnnotations(destructiveHint=True)
+_DESTRUCTIVE_OPEN_WORLD = ToolAnnotations(destructiveHint=True, openWorldHint=True)
 
 
 def _list_tasks_description(task_label: str, get_tool: str) -> str:
@@ -363,6 +380,16 @@ async def run_research_task(
     return await _invoke("run_research_task", locals())
 
 
+async def run_computer_use_task(
+    task: str,
+    app: str | None = None,
+    start_url: str | None = None,
+    minutes: float = 3,
+    max_steps: int = 60,
+) -> str:
+    return await _invoke("run_computer_use_task", locals())
+
+
 @mcp.tool(
     description=_list_tasks_description("research", "get_research_task_result"),
     annotations=_READ_ONLY,
@@ -526,6 +553,32 @@ async def _handle_edit_scout(
     return {"old": old_scout, "new": new_scout}, {}
 
 
+async def _handle_computer_use(
+    _: MCPClientAdapter, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from yutori.auth.credentials import resolve_api_key
+
+    from .computer_use.preflight import find_node, first_blocker
+    from .computer_use.result import failure
+    from .computer_use.supervisor import run_task
+
+    params = ComputerUseTaskInput(**arguments)
+    blocker = first_blocker()
+    if blocker is not None:
+        return failure(f"{blocker.detail} Fix: {blocker.remediation}"), {}
+    node = find_node()
+    if node is None:  # Kept defensive because preflight already checked it.
+        return failure(
+            "Node 22 not found. Install Node 22 with: brew install node@22"
+        ), {}
+    return await run_task(
+        **params.model_dump(),
+        node=str(node),
+        api_key=resolve_api_key(),
+        api_base_url=resolve_base_url(),
+    ), {}
+
+
 # Tool-name -> handler registry, consulted by _invoke() above. Mirrors
 # the _TOOL_FORMATTERS registry in formatters.py so the parse/dispatch side
 # of the MCP tool lifecycle is structured the same way as the format side.
@@ -562,6 +615,42 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
         TaskIdInput, "get_research_task", {"task_type": TASK_TYPE_RESEARCH}
     ),
 }
+
+
+def _computer_use_enabled() -> bool:
+    if sys.platform != "darwin":
+        return False
+    try:
+        return resolve_base_url() == ENVIRONMENT_BASE_URLS["dev"]
+    except ValueError:
+        return False
+
+
+def _register_computer_use_tool() -> None:
+    """Expose the dev-only macOS computer-use tool, if this process should have it.
+
+    Called twice, and it has to be: once at import, which is what an MCP client passing
+    YUTORI_ENV in its config `env` block gets, and again from main() once `--env` has been
+    applied — that flag lands in the environment well after this module is imported, so the
+    import-time call alone left `uvx yutori-mcp --env dev` advertising no such tool. Idempotent,
+    so whichever call arrives second does nothing.
+    """
+    if "run_computer_use_task" in _TOOL_HANDLERS:
+        return
+    if not _computer_use_enabled():
+        return
+    mcp.tool(
+        description=(
+            "Operate the foreground Mac desktop using Yutori's dev n2-preview model. "
+            "Do not touch the Mac during the run. Visible desktop content is sent to "
+            "Yutori's dev model endpoint."
+        ),
+        annotations=_DESTRUCTIVE_OPEN_WORLD,
+    )(run_computer_use_task)
+    _TOOL_HANDLERS["run_computer_use_task"] = _handle_computer_use
+
+
+_register_computer_use_tool()
 
 
 # CLI auth subcommand name -> argparse `help` text. Iterated over to register
@@ -638,11 +727,18 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command")
     for name, help_text in _AUTH_SUBCOMMANDS.items():
         subparsers.add_parser(name, help=help_text)
+    from .computer_use.cli import register_parser
+
+    register_parser(subparsers)
 
     args = parser.parse_args()
 
     if args.command in _AUTH_SUBCOMMANDS:
         _handle_auth_command(args.command)
+    if args.command == "computer-use":
+        from .computer_use.cli import dispatch
+
+        raise SystemExit(dispatch(args.computer_use_command))
 
     # The flag is forwarded via the env var (rather than threaded through to
     # get_adapter()'s lazily-constructed, process-lifetime MCPClientAdapter)
@@ -660,6 +756,10 @@ def main() -> None:
     if base_url != ENVIRONMENT_BASE_URLS[DEFAULT_ENVIRONMENT]:
         # stdout carries the stdio MCP transport; stderr is safe for humans.
         print(f"yutori-mcp: targeting non-default API {base_url}", file=sys.stderr)
+
+    # Re-run now that --env has been applied: the import-time call above saw the pre-flag
+    # environment, so a dev-targeted run would otherwise advertise no computer-use tool.
+    _register_computer_use_tool()
 
     mcp.run(transport="stdio")
 
