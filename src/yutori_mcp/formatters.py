@@ -173,13 +173,34 @@ def _append_more_indicator(
     """Append a ``{indent}... and N more`` line when ``total`` exceeds ``shown``.
 
     Centralizes the "iterate first N items, then summarize the remainder"
-    truncation message used by ``_format_sources``, ``format_usage``'s active
-    scout list, and ``format_scout_updates``'s findings block. No-op when
-    nothing was truncated.
+    truncation message. No-op when nothing was truncated. Used by
+    ``_render_truncated`` below, the single call site every truncated list in
+    this module now goes through.
     """
     remaining = total - shown
     if remaining > 0:
         lines.append(f"{indent}... and {remaining} more")
+
+
+def _render_truncated(
+    items: list[Any],
+    *,
+    max_items: int,
+    render_item: Callable[[Any], str],
+    indent: str = "  ",
+) -> list[str]:
+    """Render up to ``max_items`` of ``items`` plus a trailing ``... and N more`` line.
+
+    Shared truncate/render/summarize sequence behind every "show the first N,
+    then say how many more" list in this module: ``_format_sources`` (bullet:
+    ``- title: url``), ``format_scout_updates``'s findings block (bullet:
+    ``• title``) via ``_format_truncated_block`` below, and ``format_usage``'s
+    active-scout-id list, which has no external-content wrapping to apply.
+    Centralizing this keeps the three call sites from drifting apart.
+    """
+    body = [render_item(item) for item in items[:max_items]]
+    _append_more_indicator(body, len(items), max_items, indent=indent)
+    return body
 
 
 def _format_truncated_block(
@@ -192,15 +213,14 @@ def _format_truncated_block(
 ) -> list[str]:
     """Build an external-content block listing up to ``max_items`` of ``items``.
 
-    Shared shape behind ``_format_sources`` (bullet: ``- title: url``) and
-    ``format_scout_updates``'s findings block (bullet: ``• title``): render
-    each of the first ``max_items`` entries via ``render_item``, append the
-    ``... and N more`` indicator when truncated, then wrap the result in the
-    external-content markers under ``header``. Centralizing this keeps the
-    truncate/render/wrap sequence from drifting between the two call sites.
+    Wraps ``_render_truncated`` in the external-content markers under
+    ``header``, for the two call sites (``_format_sources`` and
+    ``format_scout_updates``'s findings block) whose items are remote,
+    user-controlled text.
     """
-    body = [render_item(item) for item in items[:max_items]]
-    _append_more_indicator(body, len(items), max_items, indent=indent)
+    body = _render_truncated(
+        items, max_items=max_items, render_item=render_item, indent=indent
+    )
     return _external_block(body, header=header)
 
 
@@ -395,9 +415,11 @@ def format_usage(response: dict[str, Any], **context: Any) -> str:
     lines = [f"Active Scouts: {num_active}"]
 
     if active_ids:
-        for sid in active_ids[:5]:
-            lines.append(f"  - {sid}")
-        _append_more_indicator(lines, len(active_ids), 5)
+        lines.extend(
+            _render_truncated(
+                active_ids, max_items=5, render_item=lambda sid: f"  - {sid}"
+            )
+        )
 
     # Rate limits
     rate_limits = response.get("rate_limits", {})
