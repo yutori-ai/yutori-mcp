@@ -1,3 +1,8 @@
+# hatchling refuses PEP 508 direct references unless this is set, and the computer-use
+# runtime is pinned to a private git tag rather than published to an index.
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -32,6 +37,11 @@ dependencies = [
     "pydantic>=2.0.0",
     # 0.8.1 adds browsing/research task list methods on both sync and async clients
     "yutori>=0.8.1",
+    # Private git dependency rather than an index: the runtime is unreleased, so there is no
+    # public PyPI entry and no private index to configure. PEP 508 direct references are the
+    # ordinary way to pin a private Python package, and the tag is what makes the runtime's
+    # own verify_runner() hash check meaningful — never point this at a branch.
+    "yutori-computer-use-runtime @ git+ssh://git@github.com/yutori-ai/yutori-sdk-typescript.git@v0.1.2 ; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]

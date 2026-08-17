@@ -4,6 +4,24 @@ All tool outputs are formatted as human-readable text optimized for LLM consumpt
 
 All tool inputs enforce validation: webhook URLs must use HTTPS, and `output_fields` (where supported) must contain at least one entry. Unknown/extra fields are rejected.
 
+## `run_computer_use_task` (macOS dev preview)
+
+Runs a foreground task on the visible Mac desktop. This tool is listed only on macOS when
+`YUTORI_ENV=dev`; it is absent on Linux and in production. Do not touch the Mac during a run.
+Visible desktop content is sent to Yutori's dev model endpoint.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `task` | Yes | Natural-language desktop task |
+| `app` | No | Application to target; omit for cross-app tasks |
+| `start_url` | No | Starting URL; requires `app` |
+| `minutes` | No | Absolute deadline, 1–15 minutes (default 3) |
+| `max_steps` | No | Maximum actions, 1–100 (default 60) |
+
+First-time setup: install Node 22 with `brew install node@22`, authenticate, then run
+`uvx yutori-mcp computer-use setup` and `uvx yutori-mcp computer-use doctor`. Use
+`uvx yutori-mcp computer-use smoke` for the Calculator smoke test.
+
 ## Usage
 
 ### list_api_usage

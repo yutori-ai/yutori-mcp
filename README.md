@@ -10,6 +10,22 @@ You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and 
 - **Scouting** — Monitor the web continuously for anything you care about at a desired frequency
 - **Research** — Run one-time deep web research tasks
 - **Browsing** — Automate websites with an AI navigator
+- **Computer use preview** — On macOS 15+, opt in to foreground desktop automation against the dev endpoint
+
+### macOS computer-use preview
+
+This development-only preview is available only when the MCP server runs on macOS with
+`YUTORI_ENV=dev`. Install Node 22 (`brew install node@22`), then run:
+
+```bash
+uvx yutori-mcp computer-use setup
+uvx yutori-mcp computer-use doctor
+uvx yutori-mcp computer-use smoke
+```
+
+The `run_computer_use_task` tool controls the visible foreground desktop. Do not touch the
+Mac while it runs. Visible desktop content is sent to Yutori's dev model endpoint. Only one
+task can control a Mac at a time.
 
 **Workflow skills** (for clients that support slash commands):
 - [`/yutori-scout`](skills/01-scout/SKILL.md) — Set up continuous web monitoring
@@ -400,3 +416,21 @@ For full API documentation, visit [docs.yutori.com](https://docs.yutori.com).
 ## License
 
 Apache 2.0
+
+## Computer-use preview: runtime dependency
+
+The macOS computer-use tool runs the TypeScript harness from the private
+[`yutori-ai/yutori-sdk-typescript`](https://github.com/yutori-ai/yutori-sdk-typescript) repo,
+pinned to a tag as a PEP 508 direct reference. It is not on any package index — public or
+private — because the preview is unreleased.
+
+Installing therefore needs SSH access to that repo:
+
+```sh
+ssh -T git@github.com          # must authenticate as a yutori-ai member
+uv sync --extra dev            # resolves the git dependency over SSH
+```
+
+`uvx yutori-mcp` alone will not resolve it without that access. The runtime verifies itself once
+installed — `verify_runner()` checks the manifest version, the protocol version, and the
+SHA-256 of the bundled `runner.mjs`.
