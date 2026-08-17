@@ -3,7 +3,6 @@ from __future__ import annotations
 import fcntl
 from pathlib import Path
 from types import TracebackType
-from typing import Self
 
 
 class ComputerUseBusyError(RuntimeError):
@@ -15,7 +14,9 @@ class DesktopLock:
         self.path = path or Path.home() / ".yutori" / "computer-use.lock"
         self._file = None
 
-    def __enter__(self) -> Self:
+    # Annotated with the class name rather than typing.Self: Self is 3.11+, and this package
+    # supports 3.10. The import alone broke collection there — invisible until CI first ran.
+    def __enter__(self) -> DesktopLock:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._file = self.path.open("a+")
         try:

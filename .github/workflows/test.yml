@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Reused as the gate in publish_to_pypi.yml so releases run the same matrix.
+  # Kept callable so another workflow can reuse this exact matrix as a gate.
   workflow_call:
 
 permissions:
@@ -21,6 +21,29 @@ jobs:
       - uses: actions/checkout@v5
 
       - uses: astral-sh/setup-uv@v6
+
+      # The computer-use runtime is a PEP 508 git reference to a private repo, so uv has to be
+      # able to clone it just to read its metadata — even here on Linux, where the darwin marker
+      # means it is never actually installed. Without this, resolution fails outright and no test
+      # runs at all, which is why this repo has never had a green build.
+      #
+      # Written out by hand rather than pulling in a third-party ssh-agent action: that would be
+      # one more dependency holding a key that can read a private repository.
+      - name: Authorize the private runtime dependency
+        env:
+          SDK_DEPLOY_KEY: ${{ secrets.SDK_DEPLOY_KEY }}
+        run: |
+          if [ -z "${SDK_DEPLOY_KEY:-}" ]; then
+            echo "::error title=Missing SDK_DEPLOY_KEY::Add the read-only deploy key for yutori-sdk-typescript as a repository secret; uv cannot resolve the runtime dependency without it."
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SDK_DEPLOY_KEY" > ~/.ssh/sdk_deploy
+          chmod 600 ~/.ssh/sdk_deploy
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host github.com\n  User git\n  IdentityFile ~/.ssh/sdk_deploy\n  IdentitiesOnly yes\n' > ~/.ssh/config
+          chmod 600 ~/.ssh/config
 
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} --extra dev pytest -q
