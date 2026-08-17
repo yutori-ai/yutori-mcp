@@ -465,7 +465,9 @@ def test_dev_access_treats_only_auth_rejections_as_failure(code, expected):
     """/v1/models 403s for keys that drive n2-preview fine, so probe what a run actually uses."""
     from urllib.error import HTTPError
 
-    with patch.object(preflight, "resolve_api_key", return_value="yt-test"):
+    with patch.object(
+        preflight, "resolve_api_key_for_environment", return_value="yt-test"
+    ):
         with patch.object(
             preflight, "urlopen", side_effect=HTTPError("u", code, "m", {}, None)
         ):
@@ -494,7 +496,9 @@ def test_dev_access_catches_a_billing_error_returned_with_http_200():
         def __exit__(self, *args):
             return False
 
-    with patch.object(preflight, "resolve_api_key", return_value="yt-test"):
+    with patch.object(
+        preflight, "resolve_api_key_for_environment", return_value="yt-test"
+    ):
         with patch.object(preflight, "urlopen", return_value=Response()):
             result = preflight.check_dev_access()
     assert not result.ok
@@ -517,6 +521,19 @@ def test_dev_access_passes_only_on_a_real_completion():
         def __exit__(self, *args):
             return False
 
-    with patch.object(preflight, "resolve_api_key", return_value="yt-test"):
+    with patch.object(
+        preflight, "resolve_api_key_for_environment", return_value="yt-test"
+    ):
         with patch.object(preflight, "urlopen", return_value=Response()):
             assert preflight.check_dev_access().ok
+
+
+def test_lock_module_avoids_apis_newer_than_the_declared_python_floor():
+    """The package declares requires-python >=3.10 but imported typing.Self, which is 3.11+.
+
+    The import alone broke test collection on 3.10, and nothing caught it until CI ran for the
+    first time. Guarding the specific mistake rather than the whole file.
+    """
+    source = pathlib.Path(preflight.__file__).parent.joinpath("lock.py").read_text()
+    assert "from typing import Self" not in source
+    assert "-> Self:" not in source

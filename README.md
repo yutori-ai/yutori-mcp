@@ -417,6 +417,21 @@ For full API documentation, visit [docs.yutori.com](https://docs.yutori.com).
 
 Apache 2.0
 
+## Computer-use preview: authenticating against dev
+
+`login` authenticates against production and saves a production key, which the dev stack
+rejects with a 401. Store a dev key separately:
+
+```sh
+uvx yutori-mcp --env dev login      # prompts for a key from platform.dev.yutori.com
+uvx yutori-mcp --env dev status
+uvx yutori-mcp --env dev logout
+```
+
+That writes an `environments.dev` entry alongside the existing top-level `api_key`, so one
+machine can hold both without either shadowing the other. `YUTORI_API_KEY` still takes
+precedence over both when set.
+
 ## Computer-use preview: runtime dependency
 
 The macOS computer-use tool runs the TypeScript harness from the private

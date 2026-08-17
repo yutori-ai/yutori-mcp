@@ -222,7 +222,9 @@ def _external_block(body: list[str], *, header: str | None = None) -> list[str]:
     return ["", *header_lines, *_wrap_external(body)]
 
 
-def _append_external_block(lines: list[str], body: list[str], *, header: str | None = None) -> None:
+def _append_external_block(
+    lines: list[str], body: list[str], *, header: str | None = None
+) -> None:
     """Append ``_external_block(body, header=header)`` to ``lines``."""
     lines.extend(_external_block(body, header=header))
 
@@ -237,7 +239,9 @@ def _pagination_state(response: dict[str, Any]) -> tuple[bool, str | None]:
     return response.get("has_more", False), response.get("next_cursor")
 
 
-def _found_summary_line(label: str, total: int, breakdown: list[tuple[str, int]] | None) -> str:
+def _found_summary_line(
+    label: str, total: int, breakdown: list[tuple[str, int]] | None
+) -> str:
     """Build the shared `Found N <label>[: a x, b y, c z].` summary line.
 
     ``format_list_scouts`` always supplies a breakdown (defaulting missing
@@ -369,7 +373,11 @@ def _format_sources(
         return f"{indent}- {source}"
 
     return _format_truncated_block(
-        sources, header="Sources:", max_items=max_items, render_item=render, indent=indent
+        sources,
+        header="Sources:",
+        max_items=max_items,
+        render_item=render,
+        indent=indent,
     )
 
 

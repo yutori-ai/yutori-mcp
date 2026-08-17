@@ -556,7 +556,7 @@ async def _handle_edit_scout(
 async def _handle_computer_use(
     _: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    from yutori.auth.credentials import resolve_api_key
+    from .credentials import resolve_api_key_for_environment
 
     from .computer_use.preflight import find_node, first_blocker
     from .computer_use.result import failure
@@ -574,7 +574,9 @@ async def _handle_computer_use(
     return await run_task(
         **params.model_dump(),
         node=str(node),
-        api_key=resolve_api_key(),
+        api_key=resolve_api_key_for_environment(
+            os.environ.get(ENV_VAR_ENVIRONMENT) or DEFAULT_ENVIRONMENT
+        ),
         api_base_url=resolve_base_url(),
     ), {}
 
@@ -662,7 +664,7 @@ _AUTH_SUBCOMMANDS: dict[str, str] = {
 }
 
 
-def _handle_auth_command(command: str) -> NoReturn:
+def _handle_auth_command(command: str, environment: str | None = None) -> NoReturn:
     """Run an auth subcommand (login/logout/status) and exit.
 
     Imports ``yutori.auth`` lazily so the default ``yutori-mcp`` server-startup
@@ -671,6 +673,66 @@ def _handle_auth_command(command: str) -> NoReturn:
     of guarding the call with a ``return``.
     """
     from yutori.auth import clear_config, get_auth_status, run_login_flow
+    from yutori.auth.credentials import get_config_path
+
+    from .credentials import (
+        clear_environment_key,
+        mask,
+        save_environment_key,
+        stored_environment_key,
+    )
+
+    # A non-default environment cannot use the browser flow: that flow authenticates against
+    # production and would save a production key, which the dev stack then rejects as a 401 that
+    # reads like a missing entitlement. Dev keys are issued from the dev dashboard, so the only
+    # honest thing to do is take one and store it.
+    if environment and environment != DEFAULT_ENVIRONMENT:
+        if command == "login":
+            from getpass import getpass
+
+            print(
+                f"Paste a {environment} API key from https://platform.{environment}.yutori.com "
+                "(input is hidden):"
+            )
+            try:
+                key = getpass("API key: ")
+            except (EOFError, KeyboardInterrupt):
+                print("\nCancelled.")
+                raise SystemExit(1) from None
+            if not key.strip():
+                print("No key entered; nothing was saved.")
+                raise SystemExit(1)
+            path = save_environment_key(environment, key)
+            print(f"Saved {environment} API key ({mask(key.strip())}) to {path}")
+            raise SystemExit(0)
+
+        if command == "logout":
+            removed = clear_environment_key(environment)
+            print(
+                f"Removed the {environment} API key."
+                if removed
+                else f"No {environment} API key was stored."
+            )
+            raise SystemExit(0)
+
+        if command == "status":
+            stored = stored_environment_key(environment)
+            override = os.environ.get("YUTORI_API_KEY")
+            if override:
+                print(
+                    f"Authenticated for {environment} via YUTORI_API_KEY ({mask(override)})"
+                )
+            elif stored:
+                print(
+                    f"Authenticated for {environment} ({mask(stored)}) from {get_config_path()}"
+                )
+            else:
+                print(
+                    f"No {environment} credential. Run "
+                    f"'uvx yutori-mcp --env {environment} login'."
+                )
+                raise SystemExit(1)
+            raise SystemExit(0)
 
     if command == "login":
         result = run_login_flow(key_source="yutori-mcp")
@@ -733,8 +795,6 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.command in _AUTH_SUBCOMMANDS:
-        _handle_auth_command(args.command)
     if args.command == "computer-use":
         from .computer_use.cli import dispatch
 
@@ -747,6 +807,17 @@ def main() -> None:
     # config's `env` block.
     if args.env:
         os.environ[ENV_VAR_ENVIRONMENT] = args.env
+
+    # Dispatched after --env is applied, not before: `login --env dev` has to know which
+    # environment it is storing a credential for, and the old ordering ran auth first.
+    #
+    # Only the explicit flag counts here, never the ambient YUTORI_ENV. The README tells people
+    # to export that variable, and letting it reach this line meant a plain `login` silently
+    # became a dev paste prompt instead of the production browser flow, while `logout` cleared a
+    # dev entry instead of the real credential. Auth is an explicit act; it must not change
+    # meaning because of something left set in a shell.
+    if args.command in _AUTH_SUBCOMMANDS:
+        _handle_auth_command(args.command, args.env)
     try:
         base_url = resolve_base_url()
     except ValueError as e:

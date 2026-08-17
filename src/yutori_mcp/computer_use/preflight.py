@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from yutori.auth.credentials import resolve_api_key
+from ..credentials import resolve_api_key_for_environment
 
 from .runtime import RuntimeValidationError, get_manifest
 
@@ -22,7 +22,14 @@ NODE_PATHS = (
     Path("/usr/bin/node"),
 )
 DRIVER_APP = Path("/Applications/CuaDriver.app")
-DEV_ACCESS_REMEDIATION = "Ask Yutori for dev n2-preview access, then retry."
+DEV_ACCESS_REMEDIATION = (
+    "Store a dev key with: yutori-mcp --env dev login "
+    "(a production key is rejected by the dev stack). If it is already a dev key, ask "
+    "Yutori for n2-preview access."
+)
+# Named rather than inlined at both call sites: the previous text blamed missing access for
+# what is almost always a production key offered to dev, sending people to the wrong fix.
+DEV_ENVIRONMENT = "dev"
 DRIVER_PATHS = (
     # ~/.local/bin first: it is where the installer actually puts the CLI, and omitting it made
     # find_cua_driver() return None on a mini that had a working driver at
@@ -330,12 +337,14 @@ def check_capture() -> CheckResult:
 
 
 def check_api_key() -> CheckResult:
-    key = resolve_api_key()
+    key = resolve_api_key_for_environment(DEV_ENVIRONMENT)
     return _result(
         "API key",
         bool(key),
         "resolved" if key else "missing",
-        "Run: uvx yutori-mcp login",
+        # Not plain `login`: that saves a production key, which is the misdiagnosis this
+        # change exists to remove.
+        f"Run: uvx yutori-mcp --env {DEV_ENVIRONMENT} login",
     )
 
 
@@ -348,7 +357,7 @@ def check_dev_access() -> CheckResult:
     every task failed at zero steps with an empty stderr. Status codes alone cannot see that.
     """
     try:
-        key = resolve_api_key()
+        key = resolve_api_key_for_environment(DEV_ENVIRONMENT)
         request = Request(
             "https://api.dev.yutori.com/v1/chat/completions",
             data=json.dumps(

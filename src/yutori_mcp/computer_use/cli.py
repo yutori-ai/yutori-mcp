@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from urllib.request import urlopen
 
-from yutori.auth.credentials import resolve_api_key
+from ..credentials import resolve_api_key_for_environment
 
 from .preflight import (
     check_driver_binary,
@@ -101,7 +101,7 @@ async def _smoke_live() -> int:
         minutes=1,
         max_steps=10,
         node=str(node),
-        api_key=resolve_api_key(),
+        api_key=resolve_api_key_for_environment("dev"),
         api_base_url="https://api.dev.yutori.com/v1",
     )
     print(format_result(result))
