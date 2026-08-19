@@ -24,7 +24,12 @@ from .adapter import (
     YutoriAPIError,
     resolve_base_url,
 )
-from .formatters import TASK_TYPE_BROWSING, TASK_TYPE_RESEARCH, format_response
+from .formatters import (
+    TASK_TOOLS,
+    TASK_TYPE_BROWSING,
+    TASK_TYPE_RESEARCH,
+    format_response,
+)
 from .schema_utils import output_fields_to_output_schema
 from .schemas import (
     DEFAULT_LIST_LIMIT,
@@ -188,6 +193,9 @@ def _list_tasks_description(task_label: str, get_tool: str) -> str:
     get_*_task_result tool for authoritative status; only the task label and
     get-tool name differ. Mirrors the ``_output_fields_description`` helper
     in schemas.py, which extracts the same kind of repeated tool-facing prose.
+    Callers should pass ``get_tool`` from ``formatters.TASK_TOOLS`` rather
+    than a fresh literal, so this description text can't drift from the
+    tool-name hints formatters.py renders into tool results.
     """
     return (
         f"List one-time {task_label} tasks for the authenticated user. "
@@ -326,7 +334,7 @@ async def run_browsing_task(
 
 
 @mcp.tool(
-    description=_list_tasks_description("browsing", "get_browsing_task_result"),
+    description=_list_tasks_description("browsing", TASK_TOOLS[TASK_TYPE_BROWSING][1]),
     annotations=_READ_ONLY,
 )
 async def list_browsing_tasks(
@@ -364,7 +372,7 @@ async def run_research_task(
 
 
 @mcp.tool(
-    description=_list_tasks_description("research", "get_research_task_result"),
+    description=_list_tasks_description("research", TASK_TOOLS[TASK_TYPE_RESEARCH][1]),
     annotations=_READ_ONLY,
 )
 async def list_research_tasks(

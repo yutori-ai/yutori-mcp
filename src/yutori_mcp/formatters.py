@@ -791,7 +791,7 @@ def format_task_started(response: dict[str, Any], **context: Any) -> str:
     if view_url:
         lines.append(f"View progress: {view_url}")
 
-    _, get_tool = _TASK_TOOLS[task_type]
+    _, get_tool = TASK_TOOLS[task_type]
     lines.append("")
     lines.append(f'Poll with {get_tool}(task_id="{task_id}") to check status.')
 
@@ -872,7 +872,7 @@ def format_task_list(response: dict[str, Any], **context: Any) -> str:
     filtered_total = response.get("filtered_total", total)
     summary = response.get("summary") or {}
     has_more, next_cursor = _pagination_state(response)
-    list_tool, get_tool = _TASK_TOOLS[task_type]
+    list_tool, get_tool = TASK_TOOLS[task_type]
 
     breakdown = (
         [
@@ -974,7 +974,7 @@ _SCOUT_EDIT_FIELDS = (
 )
 
 # Canonical task_type labels stamped into the formatter context by server.py's
-# tool handlers (via _make_handler) and consumed as _TASK_TOOLS keys below.
+# tool handlers (via _make_handler) and consumed as TASK_TOOLS keys below.
 # Defined once so server.py and this module can't drift on the literal
 # spelling -- a mismatch would surface as a KeyError in
 # format_task_started()/format_task_list() rather than a statically-checkable
@@ -984,9 +984,10 @@ TASK_TYPE_RESEARCH = "Research"
 
 # Map task_type to its (list_tool, get_tool) names, surfaced in the
 # user-facing hints emitted by format_task_started() and format_task_list().
-# A single table keeps the two formatters from drifting if a tool is ever
-# renamed.
-_TASK_TOOLS: dict[str, tuple[str, str]] = {
+# A single table keeps these formatters, and server.py's tool descriptions
+# (which import this table rather than re-spelling the names), from drifting
+# if a tool is ever renamed.
+TASK_TOOLS: dict[str, tuple[str, str]] = {
     TASK_TYPE_RESEARCH: ("list_research_tasks", "get_research_task_result"),
     TASK_TYPE_BROWSING: ("list_browsing_tasks", "get_browsing_task_result"),
 }
