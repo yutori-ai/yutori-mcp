@@ -21,6 +21,7 @@ from yutori_mcp.schema_utils import (
 )
 from yutori_mcp.schemas import DEFAULT_LIST_LIMIT
 from yutori_mcp.server import (
+    _AUTH_SUBCOMMANDS,
     _get_task_result_description,
     _handle_edit_scout,
     _list_tasks_description,
@@ -184,6 +185,29 @@ class TestMainStatusExitCode:
             patch("yutori.auth.get_auth_status", return_value=status),
         ):
             _assert_main_exits(expected_exit_code)
+
+
+class TestMainAuthDispatch:
+    """Every registered auth subcommand runs the handler paired with it in
+    `_AUTH_SUBCOMMANDS`, so the table is the only place a subcommand's CLI
+    help text and its implementation are tied together."""
+
+    @pytest.mark.parametrize("name", sorted(_AUTH_SUBCOMMANDS))
+    def test_subcommand_runs_its_table_handler(self, name):
+        calls = []
+
+        def fake_handler():
+            calls.append(name)
+            raise SystemExit(0)
+
+        help_text, _ = _AUTH_SUBCOMMANDS[name]
+        table = {**_AUTH_SUBCOMMANDS, name: (help_text, fake_handler)}
+        with (
+            patch("sys.argv", ["yutori-mcp", name]),
+            patch.dict("yutori_mcp.server._AUTH_SUBCOMMANDS", table, clear=True),
+        ):
+            _assert_main_exits(0)
+        assert calls == [name]
 
 
 class TestMainLoginAuthUrl:
