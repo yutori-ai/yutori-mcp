@@ -185,33 +185,43 @@ _IDEMPOTENT = ToolAnnotations(idempotentHint=True)
 _DESTRUCTIVE = ToolAnnotations(destructiveHint=True)
 
 
-def _list_tasks_description(task_label: str, get_tool: str) -> str:
+def _list_tasks_description(task_type: str) -> str:
     """Build the shared list_*_tasks tool description.
 
     list_browsing_tasks and list_research_tasks share identical boilerplate
     describing pagination/status filtering and pointing at the matching
     get_*_task_result tool for authoritative status; only the task label and
-    get-tool name differ. Mirrors the ``_output_fields_description`` helper
-    in schemas.py, which extracts the same kind of repeated tool-facing prose.
-    Callers should pass ``get_tool`` from ``formatters.TASK_TOOLS`` rather
-    than a fresh literal, so this description text can't drift from the
-    tool-name hints formatters.py renders into tool results.
+    get-tool name differ, and both are derivable from the task type. Mirrors
+    the ``_output_fields_description`` helper in schemas.py, which extracts
+    the same kind of repeated tool-facing prose.
+
+    ``task_type`` is a ``formatters.TASK_TOOLS`` key (``TASK_TYPE_BROWSING``
+    or ``TASK_TYPE_RESEARCH``). The prose label and the get-tool name are
+    derived from it here, exactly as ``formatters.format_task_list`` does, so
+    a caller cannot pair one task type's label with another type's tool name,
+    and this text can't drift from the tool-name hints formatters.py renders
+    into tool results.
     """
+    _, get_tool = TASK_TOOLS[task_type]
     return (
-        f"List one-time {task_label} tasks for the authenticated user. "
+        f"List one-time {task_type.lower()} tasks for the authenticated user. "
         "Supports cursor pagination and status filtering. List status is approximate "
         f"(running also covers queued and not-yet-reconciled tasks); call "
         f"{get_tool} for a task's authoritative status."
     )
 
 
-def _get_task_result_description(task_label: str) -> str:
+def _get_task_result_description(task_type: str) -> str:
     """Build the shared get_*_task_result tool description.
 
     get_browsing_task_result and get_research_task_result share identical
-    text apart from the task label.
+    text apart from the task label, derived from the same ``task_type`` key
+    ``_list_tasks_description`` above takes.
     """
-    return f"Poll for {task_label} task status and result. Call until status is 'succeeded' or 'failed'."
+    return (
+        f"Poll for {task_type.lower()} task status and result. "
+        "Call until status is 'succeeded' or 'failed'."
+    )
 
 
 @mcp.tool(
@@ -334,7 +344,7 @@ async def run_browsing_task(
 
 
 @mcp.tool(
-    description=_list_tasks_description("browsing", TASK_TOOLS[TASK_TYPE_BROWSING][1]),
+    description=_list_tasks_description(TASK_TYPE_BROWSING),
     annotations=_READ_ONLY,
 )
 async def list_browsing_tasks(
@@ -346,7 +356,7 @@ async def list_browsing_tasks(
 
 
 @mcp.tool(
-    description=_get_task_result_description("browsing"),
+    description=_get_task_result_description(TASK_TYPE_BROWSING),
     annotations=_READ_ONLY,
 )
 async def get_browsing_task_result(task_id: str) -> str:
@@ -372,7 +382,7 @@ async def run_research_task(
 
 
 @mcp.tool(
-    description=_list_tasks_description("research", TASK_TOOLS[TASK_TYPE_RESEARCH][1]),
+    description=_list_tasks_description(TASK_TYPE_RESEARCH),
     annotations=_READ_ONLY,
 )
 async def list_research_tasks(
@@ -384,7 +394,7 @@ async def list_research_tasks(
 
 
 @mcp.tool(
-    description=_get_task_result_description("research"),
+    description=_get_task_result_description(TASK_TYPE_RESEARCH),
     annotations=_READ_ONLY,
 )
 async def get_research_task_result(task_id: str) -> str:
