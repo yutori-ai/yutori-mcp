@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any, NoReturn, TypeVar
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ValidationError
@@ -386,7 +386,11 @@ async def run_computer_use_task(
     start_url: str | None = None,
     minutes: float = 3,
     max_steps: int = 60,
+    ctx: Context | None = None,
 ) -> str:
+    # `ctx` is FastMCP's injected request context (excluded from the client-facing
+    # input schema), used to stream per-action progress notifications while the
+    # runner drives the desktop. _handle_computer_use pops it before schema parsing.
     return await _invoke("run_computer_use_task", locals())
 
 
@@ -553,6 +557,35 @@ async def _handle_edit_scout(
     return {"old": old_scout, "new": new_scout}, {}
 
 
+def _progress_reporter(
+    ctx: Context, max_steps: int
+) -> Callable[[dict[str, Any]], Awaitable[None]]:
+    """Turn runner events into MCP progress + log notifications.
+
+    Progress totals are deliberately omitted: an action's `index` is a monotonic
+    per-action counter and a batch step executes several actions, so max_steps is
+    not an upper bound for it — a fabricated total would render a bar that
+    overshoots. The human-readable message carries the step budget instead.
+    """
+
+    async def on_event(event: dict[str, Any]) -> None:
+        if event.get("type") == "ready":
+            message = f"Computer-use runner ready; driving the desktop (up to {max_steps} steps)."
+            await ctx.report_progress(progress=0, message=message)
+            await ctx.info(message)
+            return
+        index = event.get("index", 0)
+        message = f"action #{index}: {event.get('tool')} -> {event.get('status')}"
+        if event.get("refusal_code"):
+            message += f" ({event['refusal_code']})"
+        if event.get("elapsed_ms") is not None:
+            message += f" [{event['elapsed_ms']} ms]"
+        await ctx.report_progress(progress=index, message=message)
+        await ctx.info(message)
+
+    return on_event
+
+
 async def _handle_computer_use(
     _: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -562,6 +595,8 @@ async def _handle_computer_use(
     from .computer_use.result import failure
     from .computer_use.supervisor import run_task
 
+    arguments = dict(arguments)
+    ctx: Context | None = arguments.pop("ctx", None)
     params = ComputerUseTaskInput(**arguments)
     blocker = first_blocker()
     if blocker is not None:
@@ -578,6 +613,7 @@ async def _handle_computer_use(
             os.environ.get(ENV_VAR_ENVIRONMENT) or DEFAULT_ENVIRONMENT
         ),
         api_base_url=resolve_base_url(),
+        on_event=_progress_reporter(ctx, params.max_steps) if ctx else None,
     ), {}
 
 

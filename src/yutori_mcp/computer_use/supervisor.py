@@ -2,15 +2,33 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import signal
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .lock import ComputerUseBusyError, DesktopLock
 from .preflight import child_search_path
 from .result import failure
 from .runtime import PROTOCOL_VERSION, load_runtime
+
+logger = logging.getLogger(__name__)
+
+# Receives each non-terminal runner event (`ready`, `action`) as it streams in, so a host
+# can surface live progress. Presentation only, like the reasoning overlay: a callback
+# that raises must never cost the run, so failures are logged and swallowed.
+EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+async def _notify(on_event: EventCallback | None, event: dict[str, Any]) -> None:
+    if on_event is None:
+        return
+    try:
+        await on_event(event)
+    except Exception:  # noqa: BLE001
+        logger.exception("Computer-use event callback failed; continuing the run")
 
 
 def _child_environment(api_key: str) -> dict[str, str]:
@@ -51,7 +69,13 @@ async def _drain_stderr(stream: asyncio.StreamReader, secret: str) -> list[str]:
 
 
 async def _supervise(
-    *, node: str, runner: str, request: dict[str, Any], api_key: str, deadline: float
+    *,
+    node: str,
+    runner: str,
+    request: dict[str, Any],
+    api_key: str,
+    deadline: float,
+    on_event: EventCallback | None = None,
 ) -> dict[str, Any]:
     process = await asyncio.create_subprocess_exec(
         node,
@@ -89,6 +113,9 @@ async def _supervise(
             event_type = event.get("type")
             if event_type == "action":
                 actions.append(event)
+                await _notify(on_event, event)
+            elif event_type == "ready":
+                await _notify(on_event, event)
             elif event_type in {"result", "error"}:
                 if terminal is not None:
                     return failure(
@@ -144,6 +171,7 @@ async def run_task(
     api_key: str,
     api_base_url: str,
     lock: DesktopLock | None = None,
+    on_event: EventCallback | None = None,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + minutes * 60
     deadline_ms = int((time.time() + minutes * 60) * 1000)
@@ -168,6 +196,7 @@ async def run_task(
                     request=request,
                     api_key=api_key,
                     deadline=deadline,
+                    on_event=on_event,
                 )
     except (ComputerUseBusyError, RuntimeError, OSError) as error:
         return failure(str(error))

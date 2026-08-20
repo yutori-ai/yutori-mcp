@@ -537,3 +537,143 @@ def test_lock_module_avoids_apis_newer_than_the_declared_python_floor():
     source = pathlib.Path(preflight.__file__).parent.joinpath("lock.py").read_text()
     assert "from typing import Self" not in source
     assert "-> Self:" not in source
+
+
+async def test_supervisor_forwards_ready_and_action_events():
+    events = [
+        {"type": "ready", "protocol_version": 1},
+        {
+            "type": "action",
+            "index": 1,
+            "tool": "computer_batch",
+            "status": "executed",
+            "raw_status": "confirmed",
+            "delivery_mode": "foreground",
+            "route": "pixel",
+            "refusal_code": None,
+            "elapsed_ms": 42,
+        },
+        {"type": "result", "outcome": "completed", "final_text": "ok"},
+    ]
+    process = _Process(
+        _stream(*(json.dumps(event) for event in events)), _stream("")
+    )
+    seen: list[dict] = []
+
+    async def on_event(event):
+        seen.append(event)
+
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+        result = await _supervise(
+            node="/node",
+            runner="/runner.mjs",
+            request={"type": "run"},
+            api_key="yt-key",
+            deadline=time.monotonic() + 1,
+            on_event=on_event,
+        )
+    assert [event["type"] for event in seen] == ["ready", "action"]
+    assert result["outcome"] == "completed"
+    assert result["actions"] == [events[1]]
+
+
+async def test_supervisor_survives_raising_event_callback():
+    process = _Process(
+        _stream(
+            json.dumps({"type": "action", "index": 1, "tool": "screenshot",
+                        "status": "executed", "raw_status": "confirmed",
+                        "delivery_mode": "foreground", "route": "pixel",
+                        "refusal_code": None, "elapsed_ms": 5}),
+            json.dumps({"type": "result", "outcome": "completed", "final_text": "ok"}),
+        ),
+        _stream(""),
+    )
+
+    async def on_event(_event):
+        raise RuntimeError("notification transport died")
+
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+        result = await _supervise(
+            node="/node",
+            runner="/runner.mjs",
+            request={"type": "run"},
+            api_key="yt-key",
+            deadline=time.monotonic() + 1,
+            on_event=on_event,
+        )
+    assert result["outcome"] == "completed"
+
+
+async def test_progress_reporter_formats_ready_and_action_events():
+    from yutori_mcp.server import _progress_reporter
+
+    ctx = SimpleNamespace(report_progress=AsyncMock(), info=AsyncMock())
+    on_event = _progress_reporter(ctx, max_steps=60)
+
+    await on_event({"type": "ready", "protocol_version": 1})
+    ready_message = ctx.info.await_args.args[0]
+    assert "60 steps" in ready_message
+    assert ctx.report_progress.await_args.kwargs["progress"] == 0
+
+    await on_event(
+        {
+            "type": "action",
+            "index": 7,
+            "tool": "computer_batch",
+            "status": "refused",
+            "refusal_code": "stale_same_turn_action",
+            "elapsed_ms": 120,
+        }
+    )
+    action_message = ctx.info.await_args.args[0]
+    assert "action #7" in action_message
+    assert "computer_batch -> refused" in action_message
+    assert "stale_same_turn_action" in action_message
+    assert "[120 ms]" in action_message
+    assert ctx.report_progress.await_args.kwargs["progress"] == 7
+
+
+async def test_handle_computer_use_pops_ctx_and_wires_on_event():
+    import yutori_mcp.server as server
+
+    run_task = AsyncMock(return_value={"outcome": "completed"})
+    ctx = SimpleNamespace(report_progress=AsyncMock(), info=AsyncMock())
+    with (
+        patch("yutori_mcp.computer_use.preflight.first_blocker", return_value=None),
+        patch(
+            "yutori_mcp.computer_use.preflight.find_node",
+            return_value=pathlib.Path("/node"),
+        ),
+        patch("yutori_mcp.computer_use.supervisor.run_task", run_task),
+        patch(
+            "yutori_mcp.credentials.resolve_api_key_for_environment",
+            return_value="yt-key",
+        ),
+        patch("yutori_mcp.server.resolve_base_url", return_value="https://api"),
+    ):
+        result, _ = await server._handle_computer_use(
+            None, {"task": "open calculator", "ctx": ctx}
+        )
+    assert result == {"outcome": "completed"}
+    on_event = run_task.await_args.kwargs["on_event"]
+    assert on_event is not None
+    await on_event({"type": "action", "index": 1, "tool": "screenshot",
+                    "status": "executed", "refusal_code": None, "elapsed_ms": 3})
+    ctx.info.assert_awaited()
+
+    run_task.reset_mock()
+    with (
+        patch("yutori_mcp.computer_use.preflight.first_blocker", return_value=None),
+        patch(
+            "yutori_mcp.computer_use.preflight.find_node",
+            return_value=pathlib.Path("/node"),
+        ),
+        patch("yutori_mcp.computer_use.supervisor.run_task", run_task),
+        patch(
+            "yutori_mcp.credentials.resolve_api_key_for_environment",
+            return_value="yt-key",
+        ),
+        patch("yutori_mcp.server.resolve_base_url", return_value="https://api"),
+    ):
+        await server._handle_computer_use(None, {"task": "open calculator"})
+    assert run_task.await_args.kwargs["on_event"] is None
