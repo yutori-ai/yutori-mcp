@@ -10,7 +10,11 @@ from mcp.types import CallToolRequest, CallToolRequestParams
 from yutori.auth.types import AuthStatus, LoginResult
 from yutori_mcp import __version__
 from yutori_mcp.adapter import YutoriAPIError
-from yutori_mcp.formatters import format_scout_edited
+from yutori_mcp.formatters import (
+    TASK_TYPE_BROWSING,
+    TASK_TYPE_RESEARCH,
+    format_scout_edited,
+)
 from yutori_mcp.schema_utils import (
     output_fields_to_output_schema,
     output_schema_field_names,
@@ -87,8 +91,8 @@ class TestTaskDescriptionHelpers:
     so the browsing and research tool descriptions cannot drift out of sync
     with each other (mirrors `_output_fields_description` in schemas.py)."""
 
-    def test_list_tasks_description_substitutes_label_and_get_tool(self):
-        result = _list_tasks_description("browsing", "get_browsing_task_result")
+    def test_list_tasks_description_derives_label_and_get_tool(self):
+        result = _list_tasks_description(TASK_TYPE_BROWSING)
         assert result == (
             "List one-time browsing tasks for the authenticated user. "
             "Supports cursor pagination and status filtering. List status is approximate "
@@ -96,8 +100,15 @@ class TestTaskDescriptionHelpers:
             "get_browsing_task_result for a task's authoritative status."
         )
 
+    def test_list_tasks_description_derives_research_get_tool(self):
+        """Each task type derives its own get-tool name, so the label and the
+        tool name it points at can never come from different task types."""
+        result = _list_tasks_description(TASK_TYPE_RESEARCH)
+        assert result.startswith("List one-time research tasks")
+        assert "get_research_task_result for a task's authoritative status." in result
+
     def test_get_task_result_description_substitutes_label(self):
-        result = _get_task_result_description("research")
+        result = _get_task_result_description(TASK_TYPE_RESEARCH)
         assert (
             result
             == "Poll for research task status and result. Call until status is 'succeeded' or 'failed'."
@@ -108,16 +119,16 @@ class TestTaskDescriptionHelpers:
         hand-written duplicates that could diverge from the browsing variant."""
         tools = {t.name: t.description for t in await mcp.list_tools()}
         assert tools["list_browsing_tasks"] == _list_tasks_description(
-            "browsing", "get_browsing_task_result"
+            TASK_TYPE_BROWSING
         )
         assert tools["list_research_tasks"] == _list_tasks_description(
-            "research", "get_research_task_result"
+            TASK_TYPE_RESEARCH
         )
         assert tools["get_browsing_task_result"] == _get_task_result_description(
-            "browsing"
+            TASK_TYPE_BROWSING
         )
         assert tools["get_research_task_result"] == _get_task_result_description(
-            "research"
+            TASK_TYPE_RESEARCH
         )
 
 
