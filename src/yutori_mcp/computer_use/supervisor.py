@@ -18,17 +18,32 @@ logger = logging.getLogger(__name__)
 
 # Receives each non-terminal runner event (`ready`, `action`) as it streams in, so a host
 # can surface live progress. Presentation only, like the reasoning overlay: a callback
-# that raises must never cost the run, so failures are logged and swallowed.
+# that raises must never cost the run, so failures are logged and swallowed, and a callback
+# that blocks (a wedged notification transport) is cancelled after a bounded wait and
+# disabled for the rest of the run so it cannot stall past the run's deadline.
 EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
+EVENT_CALLBACK_TIMEOUT_SECONDS = 5.0
 
-async def _notify(on_event: EventCallback | None, event: dict[str, Any]) -> None:
+
+async def _notify(
+    on_event: EventCallback | None, event: dict[str, Any]
+) -> EventCallback | None:
+    """Invoke the callback and return it, or None once it must stay disabled."""
     if on_event is None:
-        return
+        return None
     try:
-        await on_event(event)
+        await asyncio.wait_for(on_event(event), EVENT_CALLBACK_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Computer-use event callback timed out after %.0fs; "
+            "disabling notifications for the rest of the run",
+            EVENT_CALLBACK_TIMEOUT_SECONDS,
+        )
+        return None
     except Exception:  # noqa: BLE001
         logger.exception("Computer-use event callback failed; continuing the run")
+    return on_event
 
 
 def _child_environment(api_key: str) -> dict[str, str]:
@@ -113,9 +128,9 @@ async def _supervise(
             event_type = event.get("type")
             if event_type == "action":
                 actions.append(event)
-                await _notify(on_event, event)
+                on_event = await _notify(on_event, event)
             elif event_type == "ready":
-                await _notify(on_event, event)
+                on_event = await _notify(on_event, event)
             elif event_type in {"result", "error"}:
                 if terminal is not None:
                     return failure(

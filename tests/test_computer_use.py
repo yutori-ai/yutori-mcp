@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from yutori_mcp.computer_use import preflight
 from yutori_mcp.computer_use.lock import ComputerUseBusyError, DesktopLock
 from yutori_mcp.computer_use.runtime import RuntimeValidationError, load_runtime
+from yutori_mcp.computer_use import supervisor
 from yutori_mcp.computer_use.supervisor import _stop_process_group, _supervise
 from yutori_mcp.schemas import ComputerUseTaskInput
 
@@ -602,6 +603,45 @@ async def test_supervisor_survives_raising_event_callback():
             on_event=on_event,
         )
     assert result["outcome"] == "completed"
+
+
+async def test_supervisor_disables_hanging_event_callback(monkeypatch):
+    """A wedged notification transport must not stall the run past its deadline.
+
+    The first blocked callback is cancelled after the bounded wait and the callback
+    is disabled, so later events don't pay the timeout again.
+    """
+    monkeypatch.setattr(supervisor, "EVENT_CALLBACK_TIMEOUT_SECONDS", 0.05)
+    action = {"type": "action", "index": 1, "tool": "screenshot",
+              "status": "executed", "raw_status": "confirmed",
+              "delivery_mode": "foreground", "route": "pixel",
+              "refusal_code": None, "elapsed_ms": 5}
+    process = _Process(
+        _stream(
+            json.dumps(action),
+            json.dumps(action | {"index": 2}),
+            json.dumps({"type": "result", "outcome": "completed", "final_text": "ok"}),
+        ),
+        _stream(""),
+    )
+    invocations = 0
+
+    async def on_event(_event):
+        nonlocal invocations
+        invocations += 1
+        await asyncio.Event().wait()
+
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+        result = await _supervise(
+            node="/node",
+            runner="/runner.mjs",
+            request={"type": "run"},
+            api_key="yt-key",
+            deadline=time.monotonic() + 5,
+            on_event=on_event,
+        )
+    assert result["outcome"] == "completed"
+    assert invocations == 1
 
 
 async def test_progress_reporter_formats_ready_and_action_events():
