@@ -582,56 +582,72 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
 }
 
 
-# CLI auth subcommand name -> argparse `help` text. Iterated over to register
-# subparsers and consulted to decide whether to dispatch to _handle_auth_command.
-_AUTH_SUBCOMMANDS: dict[str, str] = {
-    "login": "Log in and save API key",
-    "logout": "Remove saved API key",
-    "status": "Show authentication status",
+# Each auth subcommand below imports ``yutori.auth`` lazily so the default
+# ``yutori-mcp`` server-startup path does not pay the auth-flow import cost,
+# and always raises ``SystemExit``; the ``NoReturn`` annotation lets callers
+# rely on that contract instead of guarding the call with a ``return``.
+
+
+def _auth_login() -> NoReturn:
+    """Run the interactive login flow and exit with its success status."""
+    from yutori.auth import run_login_flow
+
+    result = run_login_flow(key_source="yutori-mcp")
+    if result.success:
+        print("Successfully authenticated!")
+    else:
+        print(f"Authentication failed: {result.error}")
+        if result.auth_url:
+            print(f"\nIf the browser didn't open, visit:\n  {result.auth_url}")
+    raise SystemExit(0 if result.success else 1)
+
+
+def _auth_logout() -> NoReturn:
+    """Clear the saved API key and exit."""
+    from yutori.auth import clear_config
+
+    clear_config()
+    print("Logged out successfully.")
+    raise SystemExit(0)
+
+
+def _auth_status() -> NoReturn:
+    """Print the current authentication status and exit non-zero if unauthenticated."""
+    from yutori.auth import get_auth_status
+
+    status = get_auth_status()
+    if status.authenticated:
+        print(f"Authenticated (API key: {status.masked_key})")
+        if status.source == "config_file":
+            print(f"  Source: {status.config_path}")
+        elif status.source == "env_var":
+            print("  Source: YUTORI_API_KEY environment variable")
+    else:
+        print("Not authenticated. Run 'uvx yutori-mcp login' to authenticate.")
+        raise SystemExit(1)
+    raise SystemExit(0)
+
+
+# CLI auth subcommand name -> (argparse `help` text, handler). Iterated over to
+# register subparsers, and consulted by _handle_auth_command to dispatch.
+# Pairing the help text with the handler in one table means a subcommand
+# cannot be advertised on the CLI without an implementation (or vice versa),
+# mirroring the _TOOL_HANDLERS / _TOOL_FORMATTERS registries above.
+_AUTH_SUBCOMMANDS: dict[str, tuple[str, Callable[[], NoReturn]]] = {
+    "login": ("Log in and save API key", _auth_login),
+    "logout": ("Remove saved API key", _auth_logout),
+    "status": ("Show authentication status", _auth_status),
 }
 
 
 def _handle_auth_command(command: str) -> NoReturn:
     """Run an auth subcommand (login/logout/status) and exit.
 
-    Imports ``yutori.auth`` lazily so the default ``yutori-mcp`` server-startup
-    path does not pay the auth-flow import cost. Always raises ``SystemExit``;
-    the ``NoReturn`` annotation lets ``main()`` rely on that contract instead
-    of guarding the call with a ``return``.
+    ``command`` must be a ``_AUTH_SUBCOMMANDS`` key; ``main()`` only calls
+    this for names argparse accepted from that same table.
     """
-    from yutori.auth import clear_config, get_auth_status, run_login_flow
-
-    if command == "login":
-        result = run_login_flow(key_source="yutori-mcp")
-        if result.success:
-            print("Successfully authenticated!")
-        else:
-            print(f"Authentication failed: {result.error}")
-            if result.auth_url:
-                print(f"\nIf the browser didn't open, visit:\n  {result.auth_url}")
-        raise SystemExit(0 if result.success else 1)
-
-    if command == "logout":
-        clear_config()
-        print("Logged out successfully.")
-        raise SystemExit(0)
-
-    if command == "status":
-        status = get_auth_status()
-        if status.authenticated:
-            print(f"Authenticated (API key: {status.masked_key})")
-            if status.source == "config_file":
-                print(f"  Source: {status.config_path}")
-            elif status.source == "env_var":
-                print("  Source: YUTORI_API_KEY environment variable")
-        else:
-            print("Not authenticated. Run 'uvx yutori-mcp login' to authenticate.")
-            raise SystemExit(1)
-        raise SystemExit(0)
-
-    # Defensive: every name in _AUTH_SUBCOMMANDS must have a branch above.
-    # Reaching here means the dispatch table and this helper drifted apart.
-    raise ValueError(f"Unhandled auth subcommand: {command!r}")
+    _, run_command = _AUTH_SUBCOMMANDS[command]
+    run_command()
 
 
 def main() -> None:
@@ -654,7 +670,7 @@ def main() -> None:
         ),
     )
     subparsers = parser.add_subparsers(dest="command")
-    for name, help_text in _AUTH_SUBCOMMANDS.items():
+    for name, (help_text, _) in _AUTH_SUBCOMMANDS.items():
         subparsers.add_parser(name, help=help_text)
 
     args = parser.parse_args()
