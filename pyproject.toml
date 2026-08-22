@@ -41,7 +41,7 @@ dependencies = [
     # public PyPI entry and no private index to configure. PEP 508 direct references are the
     # ordinary way to pin a private Python package, and the tag is what makes the runtime's
     # own verify_runner() hash check meaningful — never point this at a branch.
-    "yutori-computer-use-runtime @ git+ssh://git@github.com/yutori-ai/yutori-sdk-typescript.git@v0.1.2 ; sys_platform == 'darwin'",
+    "yutori-computer-use-runtime @ git+ssh://git@github.com/yutori-ai/yutori-sdk-typescript.git@v0.1.5 ; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]
