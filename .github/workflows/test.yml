@@ -22,27 +22,27 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
 
-      # The computer-use runtime is a PEP 508 git reference to a private repo, so uv has to be
-      # able to clone it just to read its metadata — even here on Linux, where the darwin marker
-      # means it is never actually installed. Without this, resolution fails outright and no test
-      # runs at all, which is why this repo has never had a green build.
+      # The computer-use harness (cua-agent) is a PEP 508 git reference to a private repo, so uv
+      # has to be able to clone it just to read its metadata — even here on Linux, where the
+      # darwin marker means it is never actually installed. Without this, resolution fails
+      # outright and no test runs at all, which is why this repo has never had a green build.
       #
       # Written out by hand rather than pulling in a third-party ssh-agent action: that would be
       # one more dependency holding a key that can read a private repository.
-      - name: Authorize the private runtime dependency
+      - name: Authorize the private harness dependency
         env:
-          SDK_DEPLOY_KEY: ${{ secrets.SDK_DEPLOY_KEY }}
+          CUA_DEPLOY_KEY: ${{ secrets.CUA_DEPLOY_KEY }}
         run: |
-          if [ -z "${SDK_DEPLOY_KEY:-}" ]; then
-            echo "::error title=Missing SDK_DEPLOY_KEY::Add the read-only deploy key for yutori-sdk-typescript as a repository secret; uv cannot resolve the runtime dependency without it."
+          if [ -z "${CUA_DEPLOY_KEY:-}" ]; then
+            echo "::error title=Missing CUA_DEPLOY_KEY::Add the read-only deploy key for cua-private as a repository secret; uv cannot resolve the cua-agent dependency without it."
             exit 1
           fi
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          printf '%s\n' "$SDK_DEPLOY_KEY" > ~/.ssh/sdk_deploy
-          chmod 600 ~/.ssh/sdk_deploy
+          printf '%s\n' "$CUA_DEPLOY_KEY" > ~/.ssh/cua_deploy
+          chmod 600 ~/.ssh/cua_deploy
           ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
-          printf 'Host github.com\n  User git\n  IdentityFile ~/.ssh/sdk_deploy\n  IdentitiesOnly yes\n' > ~/.ssh/config
+          printf 'Host github.com\n  User git\n  IdentityFile ~/.ssh/cua_deploy\n  IdentitiesOnly yes\n' > ~/.ssh/config
           chmod 600 ~/.ssh/config
 
       - name: Run tests

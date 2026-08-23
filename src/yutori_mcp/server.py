@@ -591,7 +591,7 @@ async def _handle_computer_use(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     from .credentials import resolve_api_key_for_environment
 
-    from .computer_use.preflight import find_node, first_blocker
+    from .computer_use.preflight import first_blocker
     from .computer_use.result import failure
     from .computer_use.supervisor import run_task
 
@@ -601,14 +601,8 @@ async def _handle_computer_use(
     blocker = first_blocker()
     if blocker is not None:
         return failure(f"{blocker.detail} Fix: {blocker.remediation}"), {}
-    node = find_node()
-    if node is None:  # Kept defensive because preflight already checked it.
-        return failure(
-            "Node 22 not found. Install Node 22 with: brew install node@22"
-        ), {}
     return await run_task(
         **params.model_dump(),
-        node=str(node),
         api_key=resolve_api_key_for_environment(
             os.environ.get(ENV_VAR_ENVIRONMENT) or DEFAULT_ENVIRONMENT
         ),

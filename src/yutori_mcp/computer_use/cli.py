@@ -10,16 +10,15 @@ from urllib.request import urlopen
 
 from ..credentials import resolve_api_key_for_environment
 
+from .constants import DRIVER_INSTALLER_SHA256, DRIVER_VERSION
 from .preflight import (
     check_driver_binary,
-    check_node,
+    check_harness,
     child_search_path,
     find_cua_driver,
-    find_node,
     run_checks,
 )
 from .result import format_result
-from .runtime import get_manifest
 from .supervisor import run_task
 
 
@@ -38,16 +37,15 @@ def _download_installer(url: str) -> bytes:
 
 
 def _setup() -> int:
-    node_result = check_node()
-    if not node_result.ok:
-        print(node_result.remediation)
+    harness_result = check_harness()
+    if not harness_result.ok:
+        print(harness_result.remediation)
         return 1
-    manifest = get_manifest()
-    version = str(manifest["driver_version"])
+    version = DRIVER_VERSION
     installer = _download_installer(
         f"https://github.com/trycua/cua/releases/download/cua-driver-rs-v{version}/install.sh"
     )
-    if hashlib.sha256(installer).hexdigest() != manifest["driver_installer_sha256"]:
+    if hashlib.sha256(installer).hexdigest() != DRIVER_INSTALLER_SHA256:
         print("Driver installer checksum mismatch; nothing was executed.")
         return 1
     with tempfile.TemporaryDirectory() as directory:
@@ -74,9 +72,9 @@ def _setup() -> int:
 
 
 async def _smoke_live() -> int:
-    node = find_node()
-    if node is None:
-        print("Install Node 22 with: brew install node@22")
+    harness_result = check_harness()
+    if not harness_result.ok:
+        print(harness_result.remediation)
         return 1
     mechanical = await asyncio.create_subprocess_exec(
         "osascript",
@@ -100,7 +98,6 @@ async def _smoke_live() -> int:
         start_url=None,
         minutes=1,
         max_steps=10,
-        node=str(node),
         api_key=resolve_api_key_for_environment("dev"),
         api_base_url="https://api.dev.yutori.com/v1",
     )

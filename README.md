@@ -15,7 +15,7 @@ You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and 
 ### macOS computer-use preview
 
 This development-only preview is available only when the MCP server runs on macOS with
-`YUTORI_ENV=dev`. Install Node 22 (`brew install node@22`), then run:
+`YUTORI_ENV=dev` and a Python 3.11-3.13 interpreter. Run:
 
 ```bash
 uvx yutori-mcp computer-use setup
@@ -432,12 +432,13 @@ That writes an `environments.dev` entry alongside the existing top-level `api_ke
 machine can hold both without either shadowing the other. `YUTORI_API_KEY` still takes
 precedence over both when set.
 
-## Computer-use preview: runtime dependency
+## Computer-use preview: harness dependency
 
-The macOS computer-use tool runs the TypeScript harness from the private
-[`yutori-ai/yutori-sdk-typescript`](https://github.com/yutori-ai/yutori-sdk-typescript) repo,
-pinned to a tag as a PEP 508 direct reference. It is not on any package index — public or
-private — because the preview is unreleased.
+The macOS computer-use tool runs the reviewed Yutori n2 agent loop from the private
+[`yutori-ai/cua-private`](https://github.com/yutori-ai/cua-private) repo (`cua-agent`,
+`libs/python/agent`), pinned by full commit SHA as a PEP 508 direct reference — the same pin
+the Python SDK's `examples/navigator_n2` cookbooks use. It is not on any package index —
+public or private — because the preview is unreleased.
 
 Installing therefore needs SSH access to that repo:
 
@@ -446,6 +447,6 @@ ssh -T git@github.com          # must authenticate as a yutori-ai member
 uv sync --extra dev            # resolves the git dependency over SSH
 ```
 
-`uvx yutori-mcp` alone will not resolve it without that access. The runtime verifies itself once
-installed — `verify_runner()` checks the manifest version, the protocol version, and the
-SHA-256 of the bundled `runner.mjs`.
+`uvx yutori-mcp` alone will not resolve it without that access. The harness only installs on
+Python 3.11-3.13 (`cua-agent`'s own interpreter window); on other interpreters the rest of
+the MCP server works and `computer-use doctor` reports the tool as unavailable with the fix.

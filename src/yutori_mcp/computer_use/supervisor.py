@@ -5,14 +5,15 @@ import json
 import logging
 import os
 import signal
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from .constants import MODEL, PROTOCOL_VERSION
 from .lock import ComputerUseBusyError, DesktopLock
-from .preflight import child_search_path
+from .preflight import child_search_path, find_cua_driver
 from .result import failure
-from .runtime import PROTOCOL_VERSION, load_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +48,16 @@ async def _notify(
 
 
 def _child_environment(api_key: str) -> dict[str, str]:
-    # PATH is not optional here even though the env is otherwise built from scratch: the runner
-    # execs `cua-driver` by bare name and its observation encoder execs `sips`, so an env without
-    # PATH makes every run fail with ENOENT before the model is ever called.
-    env = {"YUTORI_API_KEY": api_key, "PATH": child_search_path()}
+    # PATH is not optional here even though the env is otherwise built from scratch: shell
+    # commands the model runs resolve their tools from it, so an env without PATH makes every
+    # shell_command fail with ENOENT. CUA_TELEMETRY_ENABLED must be off in the environment,
+    # not just the agent constructor, because the harness fires an import-time telemetry
+    # event before any constructor argument is seen.
+    env = {
+        "YUTORI_API_KEY": api_key,
+        "PATH": child_search_path(),
+        "CUA_TELEMETRY_ENABLED": "false",
+    }
     for name in ("HOME", "TMPDIR", "LANG", "LC_ALL"):
         if value := os.environ.get(name):
             env[name] = value
@@ -85,16 +92,14 @@ async def _drain_stderr(stream: asyncio.StreamReader, secret: str) -> list[str]:
 
 async def _supervise(
     *,
-    node: str,
-    runner: str,
+    command: list[str],
     request: dict[str, Any],
     api_key: str,
     deadline: float,
     on_event: EventCallback | None = None,
 ) -> dict[str, Any]:
     process = await asyncio.create_subprocess_exec(
-        node,
-        runner,
+        *command,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -175,6 +180,16 @@ async def _supervise(
         await asyncio.gather(stderr_task, return_exceptions=True)
 
 
+def runner_command() -> list[str]:
+    """The runner child's argv: this interpreter, running the runner module.
+
+    The runner lives in this package and imports the pinned `cua-agent`
+    harness from the same environment, so the interpreter serving the MCP
+    process is exactly the one that can run it.
+    """
+    return [sys.executable, "-m", "yutori_mcp.computer_use.runner"]
+
+
 async def run_task(
     *,
     task: str,
@@ -182,7 +197,6 @@ async def run_task(
     start_url: str | None,
     minutes: float,
     max_steps: int,
-    node: str,
     api_key: str,
     api_base_url: str,
     lock: DesktopLock | None = None,
@@ -192,7 +206,11 @@ async def run_task(
     deadline_ms = int((time.time() + minutes * 60) * 1000)
     try:
         with lock or DesktopLock():
-            runtime = load_runtime()
+            driver = find_cua_driver()
+            if driver is None:  # Kept defensive because preflight already checked it.
+                return failure(
+                    "cua-driver not found. Run: yutori-mcp computer-use setup"
+                )
             request = {
                 "protocol_version": PROTOCOL_VERSION,
                 "type": "run",
@@ -201,17 +219,16 @@ async def run_task(
                 "start_url": start_url,
                 "deadline_ms": deadline_ms,
                 "max_steps": max_steps,
-                "model": "n2-preview",
+                "model": MODEL,
                 "api_base_url": api_base_url,
+                "driver_path": str(driver),
             }
-            with runtime.runner_path() as path:
-                return await _supervise(
-                    node=node,
-                    runner=str(path),
-                    request=request,
-                    api_key=api_key,
-                    deadline=deadline,
-                    on_event=on_event,
-                )
+            return await _supervise(
+                command=runner_command(),
+                request=request,
+                api_key=api_key,
+                deadline=deadline,
+                on_event=on_event,
+            )
     except (ComputerUseBusyError, RuntimeError, OSError) as error:
         return failure(str(error))
