@@ -1,8 +1,8 @@
 """The computer-use runner child process.
 
 Spawned by the supervisor as ``python -m yutori_mcp.computer_use.runner``. It
-reads one JSONL run request from stdin, drives the pinned ``cua-agent``
-yutori n2 loop against the local desktop, and emits protocol-v1 events
+reads one JSONL run request from stdin, drives the SDK-owned
+``yutori.navigator.N2ComputerAgent`` loop against the local desktop, and emits protocol-v1 events
 (``ready``, ``action``..., then exactly one ``result`` or ``error``) on stdout.
 
 It runs out of process on purpose: the agent loop's dependencies print to
@@ -22,6 +22,8 @@ import time
 from importlib import metadata
 from collections.abc import Callable
 from typing import Any, TextIO
+
+from yutori.navigator import N2ComputerAgent
 
 from .constants import DRIVER_VERSION, PROTOCOL_VERSION, TOOL_SET
 from .driver import CuaDriverDesktop, DriverCLI, DriverError, prepare_app
@@ -395,7 +397,7 @@ def _strip_final_markers(text: str | None) -> str | None:
 
 async def _collect_run(agent: Any, messages: Any) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    async for response in agent.run(messages, stream=False):
+    async for response in agent.run(messages):
         items.extend(response.get("output") or [])
     return items
 
@@ -414,27 +416,24 @@ async def _summarize_limit_run(
     trajectory plus the stop instruction; a denying confirmation callback
     keeps any further tool call from touching the desktop.
     """
-    from cua_agent import ComputerAgent
-
     async def deny(_request: dict[str, Any]) -> bool:
         return False
 
-    agent = ComputerAgent(
-        model=f"yutori/{request['model']}",
-        tools=[desktop],
-        api_key=api_key,
-        api_base=request["api_base_url"],
-        callbacks=[RunGuard(1, deadline)],
-        telemetry_enabled=False,
-        action_confirmation_callback=deny,
-        tool_set=TOOL_SET,
-    )
     messages = (
         [{"role": "user", "content": request["task"]}]
         + items
         + [{"role": "user", "content": STOP_SUMMARY_PROMPT}]
     )
-    summary_items = await _collect_run(agent, messages)
+    async with N2ComputerAgent(
+        computer=desktop,
+        tool_set=TOOL_SET,
+        api_key=api_key,
+        base_url=request["api_base_url"],
+        model=request["model"],
+        callbacks=[RunGuard(1, deadline)],
+        action_confirmation_callback=deny,
+    ) as agent:
+        summary_items = await _collect_run(agent, messages)
     texts = _texts_from_items(summary_items)
     return texts[-1] if texts else None
 
@@ -496,8 +495,6 @@ async def run_request(request: dict[str, Any], emitter: Emitter, api_key: str) -
     timings = RunTimings()
     desktop_timings: Any | None = None
     try:
-        from cua_agent import ComputerAgent
-
         cli = DriverCLI(request["driver_path"])
         target: dict[str, Any] | None = None
         if request["app"]:
@@ -519,15 +516,14 @@ async def run_request(request: dict[str, Any], emitter: Emitter, api_key: str) -
                 timings=timings,
                 desktop_timings=desktop.timings,
             )
-            agent = ComputerAgent(
-                model=f"yutori/{request['model']}",
-                tools=[desktop],
+            async with N2ComputerAgent(
+                computer=desktop,
+                tool_set=TOOL_SET,
                 api_key=api_key,
-                api_base=request["api_base_url"],
+                base_url=request["api_base_url"],
+                model=request["model"],
                 callbacks=[guard, reporter, ApiTimer(timings)],
                 instructions=SYSTEM_CONTEXT,
-                telemetry_enabled=False,
-                tool_set=TOOL_SET,
                 # 0, not the library's 0.5 default: the post-action pause is the
                 # handler's 0.3s settle, matching the previous runner's
                 # SETTLE_AFTER_ACTION_MS, so both harnesses capture the
@@ -536,8 +532,8 @@ async def run_request(request: dict[str, Any], emitter: Emitter, api_key: str) -
                 # Truncates in-flight batch execution at the wall clock; the
                 # step-level deadline lives in the guard.
                 execution_deadline=deadline,
-            )
-            items = await _collect_run(agent, request["task"])
+            ) as agent:
+                items = await _collect_run(agent, request["task"])
             texts = _texts_from_items(items)
             final_text = _strip_final_markers(texts[-1] if texts else None)
 

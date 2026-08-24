@@ -19,8 +19,6 @@ from .constants import (
     DRIVER_VERSION,
     HARNESS_NODE,
     HARNESS_PYTHON,
-    HARNESS_PYTHON_MAX_EXCLUSIVE,
-    HARNESS_PYTHON_MIN,
     resolve_harness,
 )
 from .runtime import RuntimeValidationError, get_manifest
@@ -151,32 +149,22 @@ def check_runtime() -> CheckResult:
 
 
 def check_harness() -> CheckResult:
-    """Whether the interpreter can run the pinned cua-agent harness.
+    """Whether the installed yutori SDK carries the n2 computer-use loop.
 
-    The harness needs a newer Python than the rest of the MCP server declares,
-    so the dependency carries an interpreter marker and this check is what
-    tells a 3.10 install why the tool is unavailable instead of an ImportError
-    mid-run. find_spec keeps the probe cheap — actually importing cua_agent
-    pulls litellm into the server process for no reason.
+    The loop lives in the SDK itself (yutori.navigator.n2), so the only way
+    this fails is a yutori version predating it — which this reports up front
+    instead of as an ImportError mid-run. find_spec keeps the probe cheap.
     """
-    floor = ".".join(str(part) for part in HARNESS_PYTHON_MIN)
-    ceiling = ".".join(str(part) for part in HARNESS_PYTHON_MAX_EXCLUSIVE)
-    remediation = (
-        "Reinstall with a supported interpreter: uvx --python 3.12 --refresh yutori-mcp"
-    )
+    remediation = "Reinstall to pick up the pinned yutori SDK: uvx --refresh yutori-mcp"
     version = ".".join(str(part) for part in sys.version_info[:3])
-    if not (HARNESS_PYTHON_MIN <= sys.version_info[:2] < HARNESS_PYTHON_MAX_EXCLUSIVE):
+    if importlib.util.find_spec("yutori.navigator.n2") is None:
         return _result(
             "harness",
             False,
-            f"Python {version} is outside the supported window [{floor}, {ceiling})",
+            "the installed yutori SDK has no navigator n2 loop",
             remediation,
         )
-    if importlib.util.find_spec("cua_agent") is None:
-        return _result(
-            "harness", False, "cua-agent is not installed", remediation
-        )
-    return _result("harness", True, f"cua-agent on Python {version}", remediation)
+    return _result("harness", True, f"yutori.navigator n2 loop on Python {version}", remediation)
 
 
 def check_driver_app() -> CheckResult:

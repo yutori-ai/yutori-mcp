@@ -52,13 +52,9 @@ def _child_environment(api_key: str) -> dict[str, str]:
     # PATH is not optional here even though the env is otherwise built from scratch: the Node
     # runner execs `cua-driver` by bare name and its observation encoder execs `sips`, and
     # shell commands the model runs resolve their tools from it in both harnesses.
-    # CUA_TELEMETRY_ENABLED is harmless to the Node runner and must be off in the Python
-    # runner's environment — not just its agent constructor — because the harness fires an
-    # import-time telemetry event before any constructor argument is seen.
     env = {
         "YUTORI_API_KEY": api_key,
         "PATH": child_search_path(),
-        "CUA_TELEMETRY_ENABLED": "false",
     }
     for name in ("HOME", "TMPDIR", "LANG", "LC_ALL"):
         if value := os.environ.get(name):
