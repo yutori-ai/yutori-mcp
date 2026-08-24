@@ -40,7 +40,7 @@ dependencies = [
     # `yutori>=0.9` index requirement as soon as the SDK ships a release
     # carrying the loop — that removes the last private git dependency from
     # the base install.
-    "yutori @ git+ssh://git@github.com/yutori-ai/yutori-sdk-python-private.git@63bf8369698d7c836e4942ab7bdf8ba0b6b4d30b",
+    "yutori @ git+ssh://git@github.com/yutori-ai/yutori-sdk-python-private.git@ae63e99f3338f528ff97420dee65d6499ac9957d",
 ]
 
 [project.optional-dependencies]
