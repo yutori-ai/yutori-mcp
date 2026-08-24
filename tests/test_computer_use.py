@@ -30,6 +30,7 @@ from yutori_mcp.computer_use.driver import (
     pick_best_window,
     prepare_app,
 )
+from yutori_mcp.computer_use.constants import resolve_harness
 from yutori_mcp.computer_use.lock import ComputerUseBusyError, DesktopLock
 from yutori_mcp.computer_use.runner import (
     ActionReporter,
@@ -40,11 +41,12 @@ from yutori_mcp.computer_use.runner import (
     parse_request,
 )
 from yutori_mcp.computer_use.result import format_result
+from yutori_mcp.computer_use.runtime import RuntimeValidationError, load_runtime
 from yutori_mcp.computer_use.supervisor import (
     _stop_process_group,
     _supervise,
+    python_runner_command,
     run_task,
-    runner_command,
 )
 from yutori_mcp.schemas import ComputerUseTaskInput
 
@@ -122,11 +124,54 @@ def test_lock_releases_on_exception_and_cancellation(tmp_path, error):
 def test_installer_checksum_aborts_before_execution(monkeypatch):
     from yutori_mcp.computer_use import cli
 
-    monkeypatch.setattr(cli, "check_harness", lambda: SimpleNamespace(ok=True))
+    monkeypatch.setattr(cli, "harness_blocker", lambda harness=None: None)
     monkeypatch.setattr(cli, "_download_installer", lambda _: b"installer")
     with patch("yutori_mcp.computer_use.cli.subprocess.run") as run:
         assert cli._setup() == 1
     run.assert_not_called()
+
+
+def test_harness_resolution_orders_request_env_default(monkeypatch):
+    monkeypatch.delenv("YUTORI_COMPUTER_USE_HARNESS", raising=False)
+    assert resolve_harness() == "node"
+    monkeypatch.setenv("YUTORI_COMPUTER_USE_HARNESS", "python")
+    assert resolve_harness() == "python"
+    assert resolve_harness("node") == "node"
+    with pytest.raises(ValueError, match="Unknown computer-use harness"):
+        resolve_harness("typescript")
+
+
+def test_schema_accepts_only_known_harnesses():
+    assert ComputerUseTaskInput(task="x").harness is None
+    assert ComputerUseTaskInput(task="x", harness="python").harness == "python"
+    with pytest.raises(ValidationError):
+        ComputerUseTaskInput(task="x", harness="typescript")
+
+
+def test_runtime_protocol_mismatch_has_one_remediation():
+    with (
+        patch(
+            "yutori_mcp.computer_use.runtime.import_module",
+            return_value=SimpleNamespace(PROTOCOL_VERSION=2, verify_runner=lambda: True),
+        ),
+        pytest.raises(RuntimeValidationError) as error,
+    ):
+        load_runtime()
+    assert "protocol mismatch" in str(error.value)
+    assert str(error.value).count(error.value.remediation) == 1
+
+
+def test_runtime_hash_mismatch_has_one_remediation():
+    with (
+        patch(
+            "yutori_mcp.computer_use.runtime.import_module",
+            return_value=SimpleNamespace(PROTOCOL_VERSION=1, verify_runner=lambda: False),
+        ),
+        pytest.raises(RuntimeValidationError) as error,
+    ):
+        load_runtime()
+    assert "integrity" in str(error.value)
+    assert str(error.value).count(error.value.remediation) == 1
 
 
 class _Writer:
@@ -288,13 +333,27 @@ async def test_child_environment_has_path_and_disables_harness_telemetry():
     assert env["CUA_TELEMETRY_ENABLED"] == "false"
 
 
-def test_runner_command_uses_this_interpreter():
-    assert runner_command()[0] == sys.executable
-    assert runner_command()[1:] == ["-m", "yutori_mcp.computer_use.runner"]
+def test_python_runner_command_uses_this_interpreter():
+    assert python_runner_command()[0] == sys.executable
+    assert python_runner_command()[1:] == ["-m", "yutori_mcp.computer_use.runner"]
 
 
-async def test_run_task_request_carries_driver_path_and_model(tmp_path):
-    lock_path = tmp_path / "desktop.lock"
+def _run_task_kwargs(tmp_path, **overrides):
+    kwargs = {
+        "task": "open calculator",
+        "app": None,
+        "start_url": None,
+        "minutes": 1,
+        "max_steps": 10,
+        "api_key": "yt-key",
+        "api_base_url": "https://api.dev.yutori.com/v1",
+        "lock": DesktopLock(tmp_path / "desktop.lock"),
+    }
+    kwargs.update(overrides)
+    return kwargs
+
+
+async def test_run_task_python_harness_carries_driver_path_and_model(tmp_path):
     driver = tmp_path / "cua-driver"
     driver.write_text("")
     supervise = AsyncMock(return_value={"outcome": "completed"})
@@ -303,14 +362,7 @@ async def test_run_task_request_carries_driver_path_and_model(tmp_path):
         patch.object(supervisor, "find_cua_driver", return_value=driver),
     ):
         result = await run_task(
-            task="open calculator",
-            app=None,
-            start_url=None,
-            minutes=1,
-            max_steps=10,
-            api_key="yt-key",
-            api_base_url="https://api.dev.yutori.com/v1",
-            lock=DesktopLock(lock_path),
+            **_run_task_kwargs(tmp_path, harness="python")
         )
     assert result == {"outcome": "completed"}
     request = supervise.await_args.kwargs["request"]
@@ -320,24 +372,76 @@ async def test_run_task_request_carries_driver_path_and_model(tmp_path):
     assert supervise.await_args.kwargs["command"][0] == sys.executable
 
 
-async def test_run_task_reports_a_missing_driver_without_spawning(tmp_path):
+async def test_run_task_defaults_to_the_node_harness(tmp_path, monkeypatch):
+    monkeypatch.delenv("YUTORI_COMPUTER_USE_HARNESS", raising=False)
+    supervise = AsyncMock(return_value={"outcome": "completed"})
+
+    class _RunnerPath:
+        def __enter__(self):
+            return "/wheel/runner.mjs"
+
+        def __exit__(self, *args):
+            return False
+
+    runtime = SimpleNamespace(runner_path=lambda: _RunnerPath())
+    with (
+        patch.object(supervisor, "_supervise", supervise),
+        patch.object(supervisor, "find_node", return_value=pathlib.Path("/opt/node")),
+        patch.object(supervisor, "load_runtime", return_value=runtime),
+    ):
+        result = await run_task(**_run_task_kwargs(tmp_path))
+    assert result == {"outcome": "completed"}
+    assert supervise.await_args.kwargs["command"] == ["/opt/node", "/wheel/runner.mjs"]
+    # The Node runner resolves cua-driver from PATH; the field is python-only.
+    assert "driver_path" not in supervise.await_args.kwargs["request"]
+
+
+async def test_run_task_env_var_selects_the_python_harness(tmp_path, monkeypatch):
+    monkeypatch.setenv("YUTORI_COMPUTER_USE_HARNESS", "python")
+    driver = tmp_path / "cua-driver"
+    driver.write_text("")
+    supervise = AsyncMock(return_value={"outcome": "completed"})
+    with (
+        patch.object(supervisor, "_supervise", supervise),
+        patch.object(supervisor, "find_cua_driver", return_value=driver),
+    ):
+        await run_task(**_run_task_kwargs(tmp_path))
+    assert supervise.await_args.kwargs["command"][1:] == [
+        "-m",
+        "yutori_mcp.computer_use.runner",
+    ]
+
+
+async def test_run_task_rejects_an_unknown_harness(tmp_path):
+    supervise = AsyncMock()
+    with patch.object(supervisor, "_supervise", supervise):
+        result = await run_task(**_run_task_kwargs(tmp_path, harness="typescript"))
+    assert result["outcome"] == "failed"
+    assert "Unknown computer-use harness" in result["final_text"]
+    supervise.assert_not_awaited()
+
+
+async def test_run_task_python_reports_a_missing_driver_without_spawning(tmp_path):
     supervise = AsyncMock()
     with (
         patch.object(supervisor, "_supervise", supervise),
         patch.object(supervisor, "find_cua_driver", return_value=None),
     ):
-        result = await run_task(
-            task="open calculator",
-            app=None,
-            start_url=None,
-            minutes=1,
-            max_steps=10,
-            api_key="yt-key",
-            api_base_url="https://api.dev.yutori.com/v1",
-            lock=DesktopLock(tmp_path / "desktop.lock"),
-        )
+        result = await run_task(**_run_task_kwargs(tmp_path, harness="python"))
     assert result["outcome"] == "failed"
     assert "cua-driver" in result["final_text"]
+    supervise.assert_not_awaited()
+
+
+async def test_run_task_node_reports_missing_node_without_spawning(tmp_path):
+    supervise = AsyncMock()
+    with (
+        patch.object(supervisor, "_supervise", supervise),
+        patch.object(supervisor, "find_node", return_value=None),
+    ):
+        result = await run_task(**_run_task_kwargs(tmp_path, harness="node"))
+    assert result["outcome"] == "failed"
+    assert "Node 22" in result["final_text"]
     supervise.assert_not_awaited()
 
 
@@ -362,8 +466,29 @@ def test_missing_driver_binary_is_the_reported_blocker_before_the_contract_check
         result = preflight.check_driver_binary()
     assert not result.ok
     assert result.remediation == "Run: yutori-mcp computer-use setup"
-    names = [check.__name__ for check in preflight.CHECKS]
-    assert names.index("check_driver_binary") < names.index("check_driver_contract")
+    for harness in ("node", "python"):
+        names = [check.__name__ for check in preflight.checks_for(harness)]
+        assert names.index("check_driver_binary") < names.index("check_driver_contract")
+
+
+def test_checks_gate_each_harness_on_its_own_toolchain():
+    node_names = [check.__name__ for check in preflight.checks_for("node")]
+    python_names = [check.__name__ for check in preflight.checks_for("python")]
+    assert "check_node" in node_names and "check_runtime" in node_names
+    assert "check_harness" not in node_names
+    assert "check_harness" in python_names
+    assert "check_node" not in python_names and "check_runtime" not in python_names
+
+
+def test_harness_blocker_reports_only_toolchain_failures():
+    with patch.object(preflight, "find_node", return_value=None):
+        blocker = preflight.harness_blocker("node")
+    assert blocker is not None and blocker.name == "Node 22"
+    with (
+        patch.object(preflight.sys, "version_info", (3, 12, 0)),
+        patch.object(preflight.importlib.util, "find_spec", return_value=object()),
+    ):
+        assert preflight.harness_blocker("python") is None
 
 
 @pytest.mark.parametrize(

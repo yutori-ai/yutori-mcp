@@ -10,12 +10,18 @@ from urllib.request import urlopen
 
 from ..credentials import resolve_api_key_for_environment
 
-from .constants import DRIVER_INSTALLER_SHA256, DRIVER_VERSION
+from .constants import (
+    DRIVER_INSTALLER_SHA256,
+    DRIVER_VERSION,
+    ENV_VAR_HARNESS,
+    HARNESSES,
+    resolve_harness,
+)
 from .preflight import (
     check_driver_binary,
-    check_harness,
     child_search_path,
     find_cua_driver,
+    harness_blocker,
     run_checks,
 )
 from .result import format_result
@@ -23,11 +29,21 @@ from .supervisor import run_task
 
 
 def _doctor() -> int:
-    results = run_checks()
+    harness = resolve_harness()
+    print(
+        f"Harness: {harness} (switch with {ENV_VAR_HARNESS} or the tool's harness parameter)"
+    )
+    results = run_checks(harness)
     for result in results:
         print(f"{'PASS' if result.ok else 'BLOCKED'} {result.name}: {result.detail}")
         if result.remediation:
             print(f"  Fix: {result.remediation}")
+    for other in HARNESSES:
+        if other == harness:
+            continue
+        blocker = harness_blocker(other)
+        status = "available" if blocker is None else f"unavailable ({blocker.detail})"
+        print(f"INFO harness '{other}': {status}")
     return 0 if all(result.ok for result in results) else 1
 
 
@@ -37,9 +53,9 @@ def _download_installer(url: str) -> bytes:
 
 
 def _setup() -> int:
-    harness_result = check_harness()
-    if not harness_result.ok:
-        print(harness_result.remediation)
+    blocker = harness_blocker()
+    if blocker is not None:
+        print(blocker.remediation)
         return 1
     version = DRIVER_VERSION
     installer = _download_installer(
@@ -72,9 +88,9 @@ def _setup() -> int:
 
 
 async def _smoke_live() -> int:
-    harness_result = check_harness()
-    if not harness_result.ok:
-        print(harness_result.remediation)
+    blocker = harness_blocker()
+    if blocker is not None:
+        print(blocker.remediation)
         return 1
     mechanical = await asyncio.create_subprocess_exec(
         "osascript",

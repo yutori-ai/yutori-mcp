@@ -8,9 +8,34 @@ run exposes.
 
 from __future__ import annotations
 
+import os
+
 PROTOCOL_VERSION = 1
 
 MODEL = "n2-preview"
+
+# Two runner implementations speak the same JSONL protocol while the Python
+# harness is being evaluated against the incumbent: "node" spawns the pinned
+# runtime wheel's runner.mjs under Node 22, "python" spawns this package's
+# runner module driving the pinned cua-agent loop. The Node harness stays the
+# default so installing this version changes nothing until a caller opts in;
+# once the evaluation settles the flag and the losing harness are expected to
+# be removed.
+HARNESS_NODE = "node"
+HARNESS_PYTHON = "python"
+HARNESSES = (HARNESS_NODE, HARNESS_PYTHON)
+DEFAULT_HARNESS = HARNESS_NODE
+ENV_VAR_HARNESS = "YUTORI_COMPUTER_USE_HARNESS"
+
+
+def resolve_harness(requested: str | None = None) -> str:
+    """The harness a run should use: explicit request, then env, then default."""
+    value = requested or os.environ.get(ENV_VAR_HARNESS) or DEFAULT_HARNESS
+    if value not in HARNESSES:
+        raise ValueError(
+            f"Unknown computer-use harness {value!r}; choose one of {', '.join(HARNESSES)}."
+        )
+    return value
 
 # The dated id decides which tools the model may call, and the server default
 # has already moved twice — so a run always sends it explicitly. 20260729 is

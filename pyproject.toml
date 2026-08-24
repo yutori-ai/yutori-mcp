@@ -37,13 +37,20 @@ dependencies = [
     "pydantic>=2.0.0",
     # 0.8.1 adds browsing/research task list methods on both sync and async clients
     "yutori>=0.8.1",
-    # The n2 computer-use agent loop, reviewed and pinned by full commit SHA in Yutori's
-    # private Cua mirror — the same pin the Python SDK's navigator_n2 cookbooks use. A
-    # private git dependency rather than an index because the adapter is unreleased, and a
-    # full SHA rather than a branch so the pin cannot move underneath an install. The
-    # interpreter markers mirror cua-agent's own requires-python (>=3.11,<3.14): without
-    # them a 3.10 install of this package fails to resolve entirely, instead of merely
-    # lacking the dev-only computer-use tool, which preflight reports with a remediation.
+    # The two computer-use runner implementations, both installed while the Python harness
+    # is evaluated against the incumbent Node one (select with YUTORI_COMPUTER_USE_HARNESS
+    # or the tool's harness parameter; the flag and the losing harness are expected to be
+    # removed after the evaluation). Both are private git dependencies because neither is
+    # released to any index.
+    #
+    # The Node runner: pinned to a tag, which is what makes the runtime's own
+    # verify_runner() hash check meaningful — never point this at a branch.
+    "yutori-computer-use-runtime @ git+ssh://git@github.com/yutori-ai/yutori-sdk-typescript.git@v0.1.5 ; sys_platform == 'darwin'",
+    # The Python harness: the reviewed n2 agent loop in Yutori's private Cua mirror,
+    # pinned by full commit SHA — the same pin the Python SDK's navigator_n2 cookbooks
+    # use. The interpreter markers mirror cua-agent's own requires-python (>=3.11,<3.14):
+    # without them a 3.10 install of this package fails to resolve entirely, instead of
+    # merely lacking one harness, which preflight reports with a remediation.
     "cua-agent @ git+ssh://git@github.com/yutori-ai/cua-private.git@07f6d2a1836dde25a755b7222310c1e1361f08aa#subdirectory=libs/python/agent ; sys_platform == 'darwin' and python_version >= '3.11' and python_version < '3.14'",
 ]
 

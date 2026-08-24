@@ -8,7 +8,7 @@ import os
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any, NoReturn, TypeVar
+from typing import Any, Literal, NoReturn, TypeVar
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
@@ -386,6 +386,7 @@ async def run_computer_use_task(
     start_url: str | None = None,
     minutes: float = 3,
     max_steps: int = 60,
+    harness: Literal["node", "python"] | None = None,
     ctx: Context | None = None,
 ) -> str:
     # `ctx` is FastMCP's injected request context (excluded from the client-facing
@@ -598,7 +599,7 @@ async def _handle_computer_use(
     arguments = dict(arguments)
     ctx: Context | None = arguments.pop("ctx", None)
     params = ComputerUseTaskInput(**arguments)
-    blocker = first_blocker()
+    blocker = first_blocker(params.harness)
     if blocker is not None:
         return failure(f"{blocker.detail} Fix: {blocker.remediation}"), {}
     return await run_task(

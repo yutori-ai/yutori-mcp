@@ -10,10 +10,11 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from .constants import MODEL, PROTOCOL_VERSION
+from .constants import HARNESS_NODE, MODEL, PROTOCOL_VERSION, resolve_harness
 from .lock import ComputerUseBusyError, DesktopLock
-from .preflight import child_search_path, find_cua_driver
+from .preflight import child_search_path, find_cua_driver, find_node
 from .result import failure
+from .runtime import load_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +49,12 @@ async def _notify(
 
 
 def _child_environment(api_key: str) -> dict[str, str]:
-    # PATH is not optional here even though the env is otherwise built from scratch: shell
-    # commands the model runs resolve their tools from it, so an env without PATH makes every
-    # shell_command fail with ENOENT. CUA_TELEMETRY_ENABLED must be off in the environment,
-    # not just the agent constructor, because the harness fires an import-time telemetry
-    # event before any constructor argument is seen.
+    # PATH is not optional here even though the env is otherwise built from scratch: the Node
+    # runner execs `cua-driver` by bare name and its observation encoder execs `sips`, and
+    # shell commands the model runs resolve their tools from it in both harnesses.
+    # CUA_TELEMETRY_ENABLED is harmless to the Node runner and must be off in the Python
+    # runner's environment — not just its agent constructor — because the harness fires an
+    # import-time telemetry event before any constructor argument is seen.
     env = {
         "YUTORI_API_KEY": api_key,
         "PATH": child_search_path(),
@@ -180,8 +182,8 @@ async def _supervise(
         await asyncio.gather(stderr_task, return_exceptions=True)
 
 
-def runner_command() -> list[str]:
-    """The runner child's argv: this interpreter, running the runner module.
+def python_runner_command() -> list[str]:
+    """The Python runner child's argv: this interpreter, running the runner module.
 
     The runner lives in this package and imports the pinned `cua-agent`
     harness from the same environment, so the interpreter serving the MCP
@@ -199,18 +201,15 @@ async def run_task(
     max_steps: int,
     api_key: str,
     api_base_url: str,
+    harness: str | None = None,
     lock: DesktopLock | None = None,
     on_event: EventCallback | None = None,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + minutes * 60
     deadline_ms = int((time.time() + minutes * 60) * 1000)
     try:
+        resolved_harness = resolve_harness(harness)
         with lock or DesktopLock():
-            driver = find_cua_driver()
-            if driver is None:  # Kept defensive because preflight already checked it.
-                return failure(
-                    "cua-driver not found. Run: yutori-mcp computer-use setup"
-                )
             request = {
                 "protocol_version": PROTOCOL_VERSION,
                 "type": "run",
@@ -221,14 +220,37 @@ async def run_task(
                 "max_steps": max_steps,
                 "model": MODEL,
                 "api_base_url": api_base_url,
-                "driver_path": str(driver),
             }
+            # Both runners speak protocol v1; the Python runner additionally
+            # requires the resolved driver path, which the Node runner instead
+            # finds on PATH by bare name.
+            if resolved_harness == HARNESS_NODE:
+                node = find_node()
+                if node is None:  # Kept defensive; preflight already checked it.
+                    return failure(
+                        "Node 22 not found. Install Node 22 with: brew install node@22"
+                    )
+                runtime = load_runtime()
+                with runtime.runner_path() as path:
+                    return await _supervise(
+                        command=[str(node), str(path)],
+                        request=request,
+                        api_key=api_key,
+                        deadline=deadline,
+                        on_event=on_event,
+                    )
+            driver = find_cua_driver()
+            if driver is None:  # Kept defensive; preflight already checked it.
+                return failure(
+                    "cua-driver not found. Run: yutori-mcp computer-use setup"
+                )
+            request["driver_path"] = str(driver)
             return await _supervise(
-                command=runner_command(),
+                command=python_runner_command(),
                 request=request,
                 api_key=api_key,
                 deadline=deadline,
                 on_event=on_event,
             )
-    except (ComputerUseBusyError, RuntimeError, OSError) as error:
+    except (ComputerUseBusyError, RuntimeError, OSError, ValueError) as error:
         return failure(str(error))
