@@ -107,6 +107,11 @@ async def _supervise(
         stderr=asyncio.subprocess.PIPE,
         env=_child_environment(api_key),
         start_new_session=True,
+        # Never the caller's directory: `python -m` puts the child's cwd on
+        # sys.path, and a run launched from inside the Yutori monorepo had its
+        # `yutori/` source tree shadow the installed yutori SDK, crashing the
+        # runner on import.
+        cwd=os.path.expanduser("~"),
     )
     assert process.stdin and process.stdout and process.stderr
     stderr_task = asyncio.create_task(_drain_stderr(process.stderr, api_key))
@@ -187,9 +192,12 @@ def python_runner_command() -> list[str]:
 
     The runner lives in this package and imports the pinned `cua-agent`
     harness from the same environment, so the interpreter serving the MCP
-    process is exactly the one that can run it.
+    process is exactly the one that can run it. `-I` (isolated mode) keeps the
+    child's sys.path free of the working directory, PYTHONPATH, and user
+    site-packages, so no ambient directory can shadow the installed packages;
+    the venv's own site-packages still resolve.
     """
-    return [sys.executable, "-m", "yutori_mcp.computer_use.runner"]
+    return [sys.executable, "-I", "-m", "yutori_mcp.computer_use.runner"]
 
 
 async def run_task(

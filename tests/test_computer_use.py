@@ -333,9 +333,12 @@ async def test_child_environment_has_path_and_disables_harness_telemetry():
     assert env["CUA_TELEMETRY_ENABLED"] == "false"
 
 
-def test_python_runner_command_uses_this_interpreter():
+def test_python_runner_command_uses_this_interpreter_isolated():
+    # -I keeps the child's sys.path free of cwd/PYTHONPATH/user-site: a run
+    # launched from inside the Yutori monorepo had its `yutori/` source tree
+    # shadow the installed SDK and crash the runner on import.
     assert python_runner_command()[0] == sys.executable
-    assert python_runner_command()[1:] == ["-m", "yutori_mcp.computer_use.runner"]
+    assert python_runner_command()[1:] == ["-I", "-m", "yutori_mcp.computer_use.runner"]
 
 
 def _run_task_kwargs(tmp_path, **overrides):
@@ -407,6 +410,7 @@ async def test_run_task_env_var_selects_the_python_harness(tmp_path, monkeypatch
     ):
         await run_task(**_run_task_kwargs(tmp_path))
     assert supervise.await_args.kwargs["command"][1:] == [
+        "-I",
         "-m",
         "yutori_mcp.computer_use.runner",
     ]
