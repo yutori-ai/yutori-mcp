@@ -1601,3 +1601,56 @@ def test_session_badge_name_is_branded_and_fits_the_badge_cap():
     assert len(desktop.session) <= 28
     named = CuaDriverDesktop(_FakeCLI(), session="explicit")
     assert named.session == "explicit"
+
+
+def test_shell_command_preview_collapses_caps_and_ignores_non_shell():
+    preview = runner_module.shell_command_preview(
+        {"name": "bash", "arguments": json.dumps({"command": "echo hi\n  ls  -la"})}
+    )
+    assert preview == "echo hi ls -la"
+    long = runner_module.shell_command_preview(
+        {"name": "shell_command", "arguments": {"command": "x" * 400}}
+    )
+    assert long is not None and len(long) == 301 and long.endswith("…")
+    assert (
+        runner_module.shell_command_preview(
+            {"name": "left_click", "arguments": {"command": "not a shell tool"}}
+        )
+        is None
+    )
+    assert runner_module.shell_command_preview({"name": "bash", "arguments": "{bad"}) is None
+
+
+async def test_action_event_carries_the_shell_command():
+    stream = _CollectStream()
+    reporter = runner_module.ActionReporter(Emitter(stream), run_start=0.0)
+    await reporter.on_computer_call_start(
+        {"name": "bash", "arguments": json.dumps({"command": "uname -a"})}
+    )
+    await reporter.on_computer_call_end(
+        {"name": "bash", "arguments": json.dumps({"command": "uname -a"})},
+        [{"output": "Darwin"}],
+    )
+    event = json.loads(stream.lines[-1])
+    assert event["command"] == "uname -a"
+
+
+def test_format_result_appends_the_shell_command():
+    text = format_result(
+        {
+            "outcome": "completed",
+            "actions": [
+                {
+                    "index": 0,
+                    "tool": "bash",
+                    "status": "executed",
+                    "raw_status": "confirmed",
+                    "delivery_mode": "foreground",
+                    "route": "pixel",
+                    "refusal_code": None,
+                    "command": "uname -a",
+                }
+            ],
+        }
+    )
+    assert "$ uname -a" in text

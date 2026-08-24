@@ -168,6 +168,37 @@ def _status_for(raw_status: str) -> str:
     return "uncertain"
 
 
+_SHELL_TOOL_NAMES = frozenset({"bash", "shell_command", "run_command"})
+_COMMAND_PREVIEW_MAX_CHARS = 300
+
+
+def shell_command_preview(item: dict[str, Any]) -> str | None:
+    """The shell command a tool call is about to run, as a one-line preview.
+
+    Only shell tools carry it — a person watching the event stream needs to
+    see what ran on their machine, which a bare tool name does not convey.
+    Whitespace is collapsed and long scripts truncated so the preview stays a
+    readable line rather than splaying a multi-line script across the log.
+    """
+    if str(item.get("name") or "").lower() not in _SHELL_TOOL_NAMES:
+        return None
+    arguments = item.get("arguments")
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(arguments, dict):
+        return None
+    command = arguments.get("command")
+    if not isinstance(command, str) or not command.strip():
+        return None
+    collapsed = " ".join(command.split())
+    if len(collapsed) > _COMMAND_PREVIEW_MAX_CHARS:
+        collapsed = collapsed[:_COMMAND_PREVIEW_MAX_CHARS] + "…"
+    return collapsed
+
+
 class RunTimings:
     """Model and pure-action time, aggregated across the run.
 
@@ -262,6 +293,7 @@ class ActionReporter:
                 "refusal_code": "driver_refused" if raw_status == "refused" else None,
                 "elapsed_ms": max(0, int((time.monotonic() - self._run_start) * 1000)),
                 "duration_ms": duration_ms,
+                "command": shell_command_preview(item),
             }
         )
         self._index += 1
