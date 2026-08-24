@@ -1371,3 +1371,18 @@ def test_cli_reports_a_bad_harness_env_without_a_traceback(
     monkeypatch.setenv("YUTORI_COMPUTER_USE_HARNESS", "typescript")
     assert cli.dispatch(command) == 1
     assert "Unknown computer-use harness" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("[DONE] All set.", "All set."),
+        ("All set.\n\n[DONE]", "All set."),
+        ("[INFEASIBLE] The app is gone.", "The app is gone."),
+        ("[DONE]", None),
+        (None, None),
+    ],
+)
+def test_final_markers_are_stripped_from_either_end(text, expected):
+    # A live run produced a trailing "[DONE]"; the wire text must carry neither.
+    assert runner_module._strip_final_markers(text) == expected

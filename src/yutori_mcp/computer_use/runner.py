@@ -279,9 +279,13 @@ def _strip_final_markers(text: str | None) -> str | None:
     if text is None:
         return None
     stripped = text.strip()
+    # The model may place the marker before or after its summary; a live run
+    # produced a trailing "[DONE]", so both ends are stripped.
     for marker in FINAL_TEXT_MARKERS:
         if stripped.startswith(marker):
             stripped = stripped[len(marker) :].strip()
+        if stripped.endswith(marker):
+            stripped = stripped[: -len(marker)].strip()
     return stripped or None
 
 
