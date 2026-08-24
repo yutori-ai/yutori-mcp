@@ -4,7 +4,13 @@ from importlib import import_module
 from typing import Any
 
 PROTOCOL_VERSION = 1
-REMEDIATION = "Reinstall yutori-mcp with: uvx --refresh yutori-mcp@latest"
+# The Node runner's wheel is an optional extra now that the Python harness is
+# the default, so "not installed" usually means the extra was never asked for
+# rather than a broken install.
+REMEDIATION = (
+    "The node harness is optional: reinstall yutori-mcp with its node-harness "
+    "extra (yutori-mcp[node-harness]), or use the default python harness."
+)
 
 
 class RuntimeValidationError(RuntimeError):

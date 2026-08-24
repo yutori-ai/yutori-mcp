@@ -15,11 +15,11 @@ You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and 
 ### macOS computer-use preview
 
 This development-only preview is available only when the MCP server runs on macOS with
-`YUTORI_ENV=dev`. Two runner implementations are installed side by side while the Python
-harness is evaluated against the incumbent Node one; select with
-`YUTORI_COMPUTER_USE_HARNESS=node|python` (default `node`) or per call with the tool's
-`harness` parameter. The `node` harness needs Node 22 (`brew install node@22`); the `python`
-harness needs a Python 3.11-3.13 interpreter. Run:
+`YUTORI_ENV=dev`. The default runner is the Python harness (needs a Python 3.11-3.13
+interpreter). The legacy Node runner remains available for head-to-head comparison, but only
+when explicitly asked for twice: install it with the `node-harness` extra
+(`yutori-mcp[node-harness]`; it also needs Node 22 via `brew install node@22`), then select it
+with `YUTORI_COMPUTER_USE_HARNESS=node` or per call with the tool's `harness` parameter. Run:
 
 ```bash
 uvx yutori-mcp computer-use setup
@@ -445,27 +445,30 @@ precedence over both when set.
 
 ## Computer-use preview: harness dependencies
 
-The macOS computer-use tool ships two runner implementations behind one flag while the Python
-harness is evaluated (the flag and the losing harness are expected to be removed afterwards):
+The macOS computer-use tool's default runner is the Python harness, with the legacy Node
+runner available as an opt-in install extra for comparison (the flag and the losing harness
+are expected to be removed once the evaluation concludes):
 
-- `node` (default): the TypeScript runner from the private
-  [`yutori-ai/yutori-sdk-typescript`](https://github.com/yutori-ai/yutori-sdk-typescript)
-  repo (`yutori-computer-use-runtime`), pinned to a tag. The runtime verifies itself once
-  installed — `verify_runner()` checks the manifest version, the protocol version, and the
-  SHA-256 of the bundled `runner.mjs`.
-- `python`: the reviewed Yutori n2 agent loop from the private
+- `python` (default, base dependency): the reviewed Yutori n2 agent loop from the private
   [`yutori-ai/cua-private`](https://github.com/yutori-ai/cua-private) repo (`cua-agent`,
   `libs/python/agent`), pinned by full commit SHA — the same pin the Python SDK's
   `examples/navigator_n2` cookbooks use. It only installs on Python 3.11-3.13 (`cua-agent`'s
-  own interpreter window); on other interpreters the `node` harness still works and
-  `computer-use doctor` reports the `python` harness as unavailable with the fix.
+  own interpreter window); on other interpreters `computer-use doctor` reports the harness as
+  unavailable with the fix.
+- `node` (opt-in, `node-harness` extra): the TypeScript runner from the private
+  [`yutori-ai/yutori-sdk-typescript`](https://github.com/yutori-ai/yutori-sdk-typescript)
+  repo (`yutori-computer-use-runtime`), pinned to a tag. A plain install carries no
+  TypeScript runtime and no Node requirement; installing `yutori-mcp[node-harness]` adds the
+  wheel, and the runtime verifies itself once installed — `verify_runner()` checks the
+  manifest version, the protocol version, and the SHA-256 of the bundled `runner.mjs`.
 
-Neither is on any package index — public or private — because the preview is unreleased, so
-installing needs SSH access to both repos:
+Neither package is on any index — public or private — because the preview is unreleased, so
+installing needs SSH access to the repo(s) involved:
 
 ```sh
 ssh -T git@github.com          # must authenticate as a yutori-ai member
-uv sync --extra dev            # resolves both git dependencies over SSH
+uv sync --extra dev            # base install: resolves cua-agent over SSH
+uv sync --extra dev --extra node-harness   # additionally pulls the Node runtime wheel
 ```
 
 `uvx yutori-mcp` alone will not resolve them without that access.

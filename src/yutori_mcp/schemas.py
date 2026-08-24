@@ -403,9 +403,10 @@ class ComputerUseTaskInput(ToolInput):
     harness: ComputerUseHarness = Field(
         default=None,
         description=(
-            "Evaluation-only override of the runner implementation: 'node' (the "
-            "incumbent TypeScript runner, default) or 'python' (the SDK's cua-agent "
-            "harness). Omit to use the server default."
+            "Evaluation-only override of the runner implementation: 'python' (the "
+            "SDK's cua-agent harness, default) or 'node' (the legacy TypeScript "
+            "runner; requires the node-harness install extra and Node 22). Omit to "
+            "use the server default."
         ),
     )
 

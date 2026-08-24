@@ -133,10 +133,10 @@ def test_installer_checksum_aborts_before_execution(monkeypatch):
 
 def test_harness_resolution_orders_request_env_default(monkeypatch):
     monkeypatch.delenv("YUTORI_COMPUTER_USE_HARNESS", raising=False)
-    assert resolve_harness() == "node"
-    monkeypatch.setenv("YUTORI_COMPUTER_USE_HARNESS", "python")
     assert resolve_harness() == "python"
-    assert resolve_harness("node") == "node"
+    monkeypatch.setenv("YUTORI_COMPUTER_USE_HARNESS", "node")
+    assert resolve_harness() == "node"
+    assert resolve_harness("python") == "python"
     with pytest.raises(ValueError, match="Unknown computer-use harness"):
         resolve_harness("typescript")
 
@@ -375,8 +375,26 @@ async def test_run_task_python_harness_carries_driver_path_and_model(tmp_path):
     assert supervise.await_args.kwargs["command"][0] == sys.executable
 
 
-async def test_run_task_defaults_to_the_node_harness(tmp_path, monkeypatch):
+async def test_run_task_defaults_to_the_python_harness(tmp_path, monkeypatch):
     monkeypatch.delenv("YUTORI_COMPUTER_USE_HARNESS", raising=False)
+    driver = tmp_path / "cua-driver"
+    driver.write_text("")
+    supervise = AsyncMock(return_value={"outcome": "completed"})
+    with (
+        patch.object(supervisor, "_supervise", supervise),
+        patch.object(supervisor, "find_cua_driver", return_value=driver),
+    ):
+        result = await run_task(**_run_task_kwargs(tmp_path))
+    assert result == {"outcome": "completed"}
+    assert supervise.await_args.kwargs["command"][1:] == [
+        "-I",
+        "-m",
+        "yutori_mcp.computer_use.runner",
+    ]
+
+
+async def test_run_task_node_harness_is_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setenv("YUTORI_COMPUTER_USE_HARNESS", "node")
     supervise = AsyncMock(return_value={"outcome": "completed"})
 
     class _RunnerPath:
@@ -399,21 +417,27 @@ async def test_run_task_defaults_to_the_node_harness(tmp_path, monkeypatch):
     assert "driver_path" not in supervise.await_args.kwargs["request"]
 
 
-async def test_run_task_env_var_selects_the_python_harness(tmp_path, monkeypatch):
-    monkeypatch.setenv("YUTORI_COMPUTER_USE_HARNESS", "python")
-    driver = tmp_path / "cua-driver"
-    driver.write_text("")
-    supervise = AsyncMock(return_value={"outcome": "completed"})
+async def test_run_task_reports_a_missing_node_wheel_as_the_optional_extra(
+    tmp_path,
+):
+    """Selecting the node harness without the node-harness extra installed must
+    point at the extra, not claim a broken install."""
+    from yutori_mcp.computer_use.runtime import RuntimeValidationError
+
+    supervise = AsyncMock()
     with (
         patch.object(supervisor, "_supervise", supervise),
-        patch.object(supervisor, "find_cua_driver", return_value=driver),
+        patch.object(supervisor, "find_node", return_value=pathlib.Path("/opt/node")),
+        patch.object(
+            supervisor,
+            "load_runtime",
+            side_effect=RuntimeValidationError("is not installed"),
+        ),
     ):
-        await run_task(**_run_task_kwargs(tmp_path))
-    assert supervise.await_args.kwargs["command"][1:] == [
-        "-I",
-        "-m",
-        "yutori_mcp.computer_use.runner",
-    ]
+        result = await run_task(**_run_task_kwargs(tmp_path, harness="node"))
+    assert result["outcome"] == "failed"
+    assert "node-harness" in result["final_text"]
+    supervise.assert_not_awaited()
 
 
 async def test_run_task_rejects_an_unknown_harness(tmp_path):

@@ -14,17 +14,16 @@ PROTOCOL_VERSION = 1
 
 MODEL = "n2-preview"
 
-# Two runner implementations speak the same JSONL protocol while the Python
-# harness is being evaluated against the incumbent: "node" spawns the pinned
-# runtime wheel's runner.mjs under Node 22, "python" spawns this package's
-# runner module driving the pinned cua-agent loop. The Node harness stays the
-# default so installing this version changes nothing until a caller opts in;
-# once the evaluation settles the flag and the losing harness are expected to
-# be removed.
+# Two runner implementations speak the same JSONL protocol: "python" (the
+# default) spawns this package's runner module driving the pinned cua-agent
+# loop, "node" spawns the legacy runtime wheel's runner.mjs under Node 22.
+# The Node harness is opt-in only — its wheel installs via the `node-harness`
+# extra — and is kept for head-to-head comparison until the evaluation
+# concludes, when the flag and the losing harness are expected to be removed.
 HARNESS_NODE = "node"
 HARNESS_PYTHON = "python"
 HARNESSES = (HARNESS_NODE, HARNESS_PYTHON)
-DEFAULT_HARNESS = HARNESS_NODE
+DEFAULT_HARNESS = HARNESS_PYTHON
 ENV_VAR_HARNESS = "YUTORI_COMPUTER_USE_HARNESS"
 
 
