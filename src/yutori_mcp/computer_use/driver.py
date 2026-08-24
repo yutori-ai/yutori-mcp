@@ -383,7 +383,12 @@ class CuaDriverDesktop:
 
     def __init__(self, cli: DriverCLI, *, session: str | None = None):
         self.cli = cli
-        self.session = session or f"yutori-mcp-{uuid.uuid4().hex[:8]}"
+        # The driver renders this name verbatim in the agent cursor's badge
+        # (sanitized, 28-char cap) and derives the cursor's fill color from it,
+        # so it is chosen for the person watching the desktop: a brand name
+        # plus a short suffix that keeps concurrent or crashed-run sessions
+        # distinguishable without reading like an opaque machine id.
+        self.session = session or f"Yutori Navigator · {uuid.uuid4().hex[:4]}"
         self.timings = DesktopTimings()
         self._native_size: tuple[int, int] | None = None
         self._bash_cwd = os.path.expanduser("~")

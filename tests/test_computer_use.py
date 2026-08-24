@@ -1591,3 +1591,13 @@ async def test_smoke_seeds_the_clipboard_and_requires_an_exact_result(monkeypatc
     assert captured["seeded"] != "42"
     assert len(calls) == 4  # one setup, then three polled copy attempts
     run_task.assert_not_awaited()
+
+
+def test_session_badge_name_is_branded_and_fits_the_badge_cap():
+    """The driver shows the session name in the cursor badge and caps it at 28
+    characters; the default must render as identity, not an opaque id."""
+    desktop = CuaDriverDesktop(_FakeCLI())
+    assert desktop.session.startswith("Yutori Navigator · ")
+    assert len(desktop.session) <= 28
+    named = CuaDriverDesktop(_FakeCLI(), session="explicit")
+    assert named.session == "explicit"
