@@ -92,21 +92,38 @@ async def _smoke_live() -> int:
     if blocker is not None:
         print(blocker.remediation)
         return 1
+    # The result is read back through Calculator's own copy-result (cmd+c) and
+    # the clipboard, not the accessibility tree: macOS 26 rewrote Calculator and
+    # "static text 1 of window 1" no longer exists there, so the AX read failed
+    # on a machine whose Accessibility grant was fine. Keystrokes still need the
+    # *terminal's* Accessibility permission, which is what this check verifies.
     mechanical = await asyncio.create_subprocess_exec(
         "osascript",
         "-e",
         'tell application "Calculator" to activate',
         "-e",
+        "delay 1",
+        "-e",
         'tell application "System Events" to keystroke "6*7="',
         "-e",
         "delay 1",
         "-e",
-        'tell application "System Events" to tell process "Calculator" to get value of first static text of window 1',
+        'tell application "System Events" to keystroke "c" using command down',
+        "-e",
+        "delay 0.5",
+        "-e",
+        "the clipboard",
         stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
-    output, _ = await mechanical.communicate()
+    output, diagnostics = await mechanical.communicate()
     if mechanical.returncode != 0 or "42" not in output.decode():
-        print("Mechanical Calculator check failed; verify Accessibility permission.")
+        detail = diagnostics.decode(errors="replace").strip()
+        print(
+            "Mechanical Calculator check failed; verify the terminal's Accessibility "
+            "permission (System Settings > Privacy & Security > Accessibility)."
+            + (f" Detail: {detail}" if detail else "")
+        )
         return 1
     result = await run_task(
         task="In Calculator, clear the display, compute 9 * 9, and report the result.",
