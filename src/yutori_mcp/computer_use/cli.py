@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -90,6 +91,30 @@ def _setup() -> int:
     return _doctor()
 
 
+class _ScriptResult:
+    def __init__(self, returncode: int, stdout: str, stderr: str):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+async def _osascript(*lines: str) -> _ScriptResult:
+    argv: list[str] = ["osascript"]
+    for line in lines:
+        argv.extend(["-e", line])
+    process = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
+    return _ScriptResult(
+        process.returncode or 0,
+        stdout.decode(errors="replace"),
+        stderr.decode(errors="replace"),
+    )
+
+
 async def _smoke_live() -> int:
     blocker = harness_blocker()
     if blocker is not None:
@@ -100,28 +125,38 @@ async def _smoke_live() -> int:
     # "static text 1 of window 1" no longer exists there, so the AX read failed
     # on a machine whose Accessibility grant was fine. Keystrokes still need the
     # *terminal's* Accessibility permission, which is what this check verifies.
-    mechanical = await asyncio.create_subprocess_exec(
-        "osascript",
-        "-e",
+    #
+    # Two measured failure modes shape this sequence. The clipboard is seeded
+    # with a unique sentinel and the read must equal exactly "42", because a
+    # previous smoke leaves "42" behind — without the seed, a cmd+c that
+    # silently did nothing still passed. And the copy is retried as its own
+    # polled step, because cmd+c can race the "=" keypress and copy the prior
+    # display value (state restoration reopens Calculator mid-calculation).
+    # Escape first clears that restored state.
+    sentinel = f"yutori-smoke-{uuid.uuid4().hex[:12]}"
+    setup = await _osascript(
+        f'set the clipboard to "{sentinel}"',
         'tell application "Calculator" to activate',
-        "-e",
-        "delay 1",
-        "-e",
+        "delay 2",
+        'tell application "System Events" to key code 53',
+        "delay 0.3",
         'tell application "System Events" to keystroke "6*7="',
-        "-e",
         "delay 1",
-        "-e",
-        'tell application "System Events" to keystroke "c" using command down',
-        "-e",
-        "delay 0.5",
-        "-e",
-        "the clipboard",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
     )
-    output, diagnostics = await mechanical.communicate()
-    if mechanical.returncode != 0 or "42" not in output.decode():
-        detail = diagnostics.decode(errors="replace").strip()
+    copied = ""
+    if setup.returncode == 0:
+        for _attempt in range(3):
+            copy = await _osascript(
+                'tell application "System Events" to keystroke "c" using command down',
+                "delay 0.7",
+                "the clipboard",
+            )
+            copied = copy.stdout.strip() if copy.returncode == 0 else ""
+            if copied == "42":
+                break
+            await asyncio.sleep(0.5)
+    if copied != "42":
+        detail = setup.stderr.strip() or f"clipboard read {copied!r}"
         print(
             "Mechanical Calculator check failed; verify the terminal's Accessibility "
             "permission (System Settings > Privacy & Security > Accessibility)."

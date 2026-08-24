@@ -1555,3 +1555,39 @@ def test_format_result_appends_action_durations():
         }
     )
     assert "took 4200 ms" in text
+
+
+async def test_smoke_seeds_the_clipboard_and_requires_an_exact_result(monkeypatch):
+    """A previous smoke leaves "42" on the clipboard, so the check must seed a
+    sentinel first, demand the read-back changed to exactly "42", and retry the
+    copy (cmd+c can race the "=" keypress and copy the prior display value)."""
+    from yutori_mcp.computer_use import cli
+
+    captured: dict[str, str] = {}
+    calls: list[tuple[str, ...]] = []
+
+    async def fake_osascript(*lines):
+        calls.append(lines)
+        seed = next(
+            (line for line in lines if line.startswith('set the clipboard to "')),
+            None,
+        )
+        if seed is not None:
+            captured["seeded"] = seed.split('"')[1]
+            keystroke_index = next(
+                index for index, line in enumerate(lines) if "keystroke" in line
+            )
+            assert lines.index(seed) < keystroke_index
+            return cli._ScriptResult(0, "", "")
+        # A copy attempt whose cmd+c silently did nothing: the clipboard
+        # still holds the seeded sentinel.
+        return cli._ScriptResult(0, captured["seeded"] + "\n", "")
+
+    monkeypatch.setattr(cli, "harness_blocker", lambda harness=None: None)
+    monkeypatch.setattr(cli, "_osascript", fake_osascript)
+    run_task = AsyncMock()
+    monkeypatch.setattr(cli, "run_task", run_task)
+    assert await cli._smoke_live() == 1
+    assert captured["seeded"] != "42"
+    assert len(calls) == 4  # one setup, then three polled copy attempts
+    run_task.assert_not_awaited()
