@@ -172,6 +172,22 @@ def test_runtime_hash_mismatch_has_one_remediation():
         load_runtime()
     assert "integrity" in str(error.value)
     assert str(error.value).count(error.value.remediation) == 1
+    # Installed-but-broken must steer to a refresh of the extra, not suggest
+    # the wheel was never asked for.
+    assert "--refresh" in error.value.remediation
+
+
+def test_runtime_not_installed_points_at_the_optional_extra():
+    with (
+        patch(
+            "yutori_mcp.computer_use.runtime.import_module",
+            side_effect=ModuleNotFoundError("yutori_computer_use_runtime"),
+        ),
+        pytest.raises(RuntimeValidationError) as error,
+    ):
+        load_runtime()
+    assert "optional" in error.value.remediation
+    assert "node-harness" in error.value.remediation
 
 
 class _Writer:
