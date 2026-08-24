@@ -1320,3 +1320,43 @@ async def test_cua_agent_accepts_the_desktop_handler():
     # The optional shell capabilities are duck-typed by method presence.
     assert hasattr(desktop, "run_shell_command")
     assert hasattr(desktop, "run_bash_command")
+
+
+async def test_failed_run_reports_completed_steps_and_redacts_the_key(monkeypatch):
+    """A run that crashes on step N must report N steps, not zero.
+
+    The failed result is emitted inside run_request, the only scope that can
+    still see the guard's counter and the run clock.
+    """
+
+    class _FakeAgent:
+        def __init__(self, **kwargs):
+            self.callbacks = kwargs.get("callbacks") or []
+
+        async def run(self, _messages, stream=False):
+            del stream
+            for _ in range(2):
+                for callback in self.callbacks:
+                    if hasattr(callback, "on_run_continue"):
+                        assert await callback.on_run_continue({}, [], [])
+                yield {"output": []}
+            raise RuntimeError("boom mid-run holding yt-secret")
+
+    monkeypatch.setitem(
+        sys.modules, "cua_agent", SimpleNamespace(ComputerAgent=_FakeAgent)
+    )
+    monkeypatch.setattr(runner_module, "DriverCLI", lambda path: _FakeCLI())
+    stream = _CollectStream()
+    request = parse_request(
+        _valid_request(deadline_ms=int((time.time() + 60) * 1000), max_steps=30)
+    )
+    outcome = await runner_module.run_request(
+        request, Emitter(stream), api_key="yt-secret"
+    )
+    assert outcome == "failed"
+    result = json.loads(stream.lines[-1])
+    assert result["outcome"] == "failed"
+    assert result["steps"] == 2
+    assert result["elapsed_ms"] >= 0
+    assert "yt-secret" not in json.dumps(result)
+    assert "[REDACTED]" in result["final_text"]

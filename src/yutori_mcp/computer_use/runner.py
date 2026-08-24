@@ -332,9 +332,12 @@ async def _summarize_limit_run(
 
 
 async def run_request(request: dict[str, Any], emitter: Emitter, api_key: str) -> str:
-    """Execute one run request and emit its result. Returns the outcome."""
-    from cua_agent import ComputerAgent
+    """Execute one run request and emit its result. Returns the outcome.
 
+    Failures are emitted here rather than by the caller because only this
+    scope can still see the guard: a run that crashes on step 12 must report
+    12 steps and its real elapsed time, not zeros.
+    """
     run_start = time.monotonic()
     remaining_seconds = request["deadline_ms"] / 1000 - time.time()
     if remaining_seconds <= 0:
@@ -351,55 +354,73 @@ async def run_request(request: dict[str, Any], emitter: Emitter, api_key: str) -
         return "limit"
     deadline = run_start + remaining_seconds
 
-    cli = DriverCLI(request["driver_path"])
-    target: dict[str, Any] | None = None
-    if request["app"]:
-        target = await prepare_app(cli, request["app"], request["start_url"])
+    guard: RunGuard | None = None
+    try:
+        from cua_agent import ComputerAgent
 
-    guard = RunGuard(
-        request["max_steps"],
-        deadline,
-        cli=cli,
-        app=request["app"],
-        start_url=request["start_url"],
-        target=target,
-    )
-    reporter = ActionReporter(emitter, run_start)
-    async with CuaDriverDesktop(cli) as desktop:
-        agent = ComputerAgent(
-            model=f"yutori/{request['model']}",
-            tools=[desktop],
-            api_key=api_key,
-            api_base=request["api_base_url"],
-            callbacks=[guard, reporter],
-            instructions=SYSTEM_CONTEXT,
-            telemetry_enabled=False,
-            tool_set=TOOL_SET,
-            # Truncates in-flight batch execution at the wall clock; the
-            # step-level deadline lives in the guard.
-            execution_deadline=deadline,
+        cli = DriverCLI(request["driver_path"])
+        target: dict[str, Any] | None = None
+        if request["app"]:
+            target = await prepare_app(cli, request["app"], request["start_url"])
+
+        guard = RunGuard(
+            request["max_steps"],
+            deadline,
+            cli=cli,
+            app=request["app"],
+            start_url=request["start_url"],
+            target=target,
         )
-        items = await _collect_run(agent, request["task"])
-        texts = _texts_from_items(items)
-        final_text = _strip_final_markers(texts[-1] if texts else None)
+        reporter = ActionReporter(emitter, run_start)
+        async with CuaDriverDesktop(cli) as desktop:
+            agent = ComputerAgent(
+                model=f"yutori/{request['model']}",
+                tools=[desktop],
+                api_key=api_key,
+                api_base=request["api_base_url"],
+                callbacks=[guard, reporter],
+                instructions=SYSTEM_CONTEXT,
+                telemetry_enabled=False,
+                tool_set=TOOL_SET,
+                # Truncates in-flight batch execution at the wall clock; the
+                # step-level deadline lives in the guard.
+                execution_deadline=deadline,
+            )
+            items = await _collect_run(agent, request["task"])
+            texts = _texts_from_items(items)
+            final_text = _strip_final_markers(texts[-1] if texts else None)
 
-        if guard.target_crashed:
-            outcome = "target_crashed"
-            final_text = "The target app exited and could not be recovered."
-        elif guard.limit_reached or guard.deadline_reached:
-            outcome = "limit"
-            if guard.limit_reached:
-                try:
-                    final_text = (
-                        await _summarize_limit_run(
-                            request, api_key, desktop, items, deadline
+            if guard.target_crashed:
+                outcome = "target_crashed"
+                final_text = "The target app exited and could not be recovered."
+            elif guard.limit_reached or guard.deadline_reached:
+                outcome = "limit"
+                if guard.limit_reached:
+                    try:
+                        final_text = (
+                            await _summarize_limit_run(
+                                request, api_key, desktop, items, deadline
+                            )
+                            or final_text
                         )
-                        or final_text
-                    )
-                except Exception as error:  # noqa: BLE001 - the summary is a nicety
-                    print(f"limit summary failed: {error}", file=sys.stderr)
-        else:
-            outcome = "completed"
+                    except Exception as error:  # noqa: BLE001 - the summary is a nicety
+                        print(f"limit summary failed: {error}", file=sys.stderr)
+            else:
+                outcome = "completed"
+    except Exception as error:  # noqa: BLE001 - the wire carries the failure
+        message = str(error).replace(api_key, "[REDACTED]") or type(error).__name__
+        emitter.emit(
+            {
+                "type": "result",
+                "outcome": "failed",
+                "delivery_mode": "foreground",
+                "final_text": message,
+                "elapsed_ms": max(0, int((time.monotonic() - run_start) * 1000)),
+                "steps": guard.steps if guard else 0,
+                "target_recovery_attempts": guard.recovery_attempts if guard else 0,
+            }
+        )
+        return "failed"
 
     emitter.emit(
         {
@@ -472,6 +493,9 @@ def main() -> int:
         )
         return 1
     try:
+        # run_request emits the failed result itself (it can still see the
+        # guard's step count there); this fallback only covers a failure to
+        # start or tear down the event loop.
         outcome = asyncio.run(run_request(request, emitter, api_key))
     except Exception as error:  # noqa: BLE001 - the wire carries the failure
         message = str(error).replace(api_key, "[REDACTED]") or type(error).__name__
