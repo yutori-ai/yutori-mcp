@@ -333,9 +333,12 @@ async def test_child_environment_has_path_and_disables_harness_telemetry():
     assert env["CUA_TELEMETRY_ENABLED"] == "false"
 
 
-def test_python_runner_command_uses_this_interpreter():
+def test_python_runner_command_uses_this_interpreter_isolated():
+    # -I keeps the child's sys.path free of cwd/PYTHONPATH/user-site: a run
+    # launched from inside the Yutori monorepo had its `yutori/` source tree
+    # shadow the installed SDK and crash the runner on import.
     assert python_runner_command()[0] == sys.executable
-    assert python_runner_command()[1:] == ["-m", "yutori_mcp.computer_use.runner"]
+    assert python_runner_command()[1:] == ["-I", "-m", "yutori_mcp.computer_use.runner"]
 
 
 def _run_task_kwargs(tmp_path, **overrides):
@@ -407,6 +410,7 @@ async def test_run_task_env_var_selects_the_python_harness(tmp_path, monkeypatch
     ):
         await run_task(**_run_task_kwargs(tmp_path))
     assert supervise.await_args.kwargs["command"][1:] == [
+        "-I",
         "-m",
         "yutori_mcp.computer_use.runner",
     ]
@@ -1386,3 +1390,204 @@ def test_cli_reports_a_bad_harness_env_without_a_traceback(
 def test_final_markers_are_stripped_from_either_end(text, expected):
     # A live run produced a trailing "[DONE]"; the wire text must carry neither.
     assert runner_module._strip_final_markers(text) == expected
+
+
+def _run_namespace(**overrides):
+    import argparse
+
+    values = {
+        "task": "open calculator",
+        "harness": None,
+        "app": None,
+        "start_url": None,
+        "minutes": 3,
+        "max_steps": 60,
+    }
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+def test_cli_run_forwards_the_task_and_prints_the_result(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    run_task = AsyncMock(
+        return_value={"outcome": "completed", "final_text": "done", "actions": []}
+    )
+    monkeypatch.setattr(cli, "first_blocker", lambda harness=None: None)
+    monkeypatch.setattr(cli, "run_task", run_task)
+    monkeypatch.setattr(
+        cli, "resolve_api_key_for_environment", lambda environment: "yt-key"
+    )
+    code = cli.dispatch("run", _run_namespace(harness="python", app="Calculator"))
+    assert code == 0
+    kwargs = run_task.await_args.kwargs
+    assert kwargs["harness"] == "python"
+    assert kwargs["app"] == "Calculator"
+    assert kwargs["on_event"] is not None
+    assert "Outcome: completed" in capsys.readouterr().out
+
+
+def test_cli_run_rejects_out_of_bounds_arguments_as_a_message(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    run_task = AsyncMock()
+    monkeypatch.setattr(cli, "run_task", run_task)
+    assert cli.dispatch("run", _run_namespace(minutes=99)) == 1
+    run_task.assert_not_awaited()
+    assert "minutes" in capsys.readouterr().out
+
+
+def test_cli_run_gates_on_the_selected_harness_blocker(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    run_task = AsyncMock()
+    monkeypatch.setattr(cli, "run_task", run_task)
+    monkeypatch.setattr(
+        cli,
+        "first_blocker",
+        lambda harness=None: SimpleNamespace(
+            detail="Node 22 not found", remediation="brew install node@22"
+        ),
+    )
+    assert cli.dispatch("run", _run_namespace(harness="node")) == 1
+    run_task.assert_not_awaited()
+    output = capsys.readouterr().out
+    assert "Node 22 not found" in output and "brew install node@22" in output
+
+
+async def test_api_timer_accumulates_model_time():
+    clock = iter([10.0, 12.5, 20.0, 21.0])
+    timings = runner_module.RunTimings()
+    timer = runner_module.ApiTimer(timings, clock=lambda: next(clock))
+    await timer.on_api_start({})
+    await timer.on_api_end({}, None)
+    await timer.on_api_start({})
+    await timer.on_api_end({}, None)
+    assert timings.model_ms == 3500
+    assert timings.model_calls == 2
+
+
+async def test_action_reporter_subtracts_capture_and_settle_from_action_time():
+    """The call span includes the post-action capture and settle; the perf
+    breakdown's action_ms must not, or phases double count against total."""
+    clock = iter([100.0, 104.0])  # call start, call end
+    timings = runner_module.RunTimings()
+    desktop_timings = SimpleNamespace(capture_ms=1000, settle_ms=300, captures=2)
+    stream = _CollectStream()
+    reporter = runner_module.ActionReporter(
+        Emitter(stream),
+        run_start=0.0,
+        timings=timings,
+        desktop_timings=desktop_timings,
+        clock=lambda: next(clock),
+    )
+    await reporter.on_computer_call_start({"name": "left_click"})
+    desktop_timings.capture_ms += 700
+    desktop_timings.settle_ms += 300
+    await reporter.on_computer_call_end(
+        {"name": "left_click"}, [{"output": {"type": "input_image", "image_url": "d"}}]
+    )
+    event = json.loads(stream.lines[-1])
+    assert event["duration_ms"] == 4000
+    assert timings.action_ms == 3000  # 4000 span - 700 capture - 300 settle
+    assert timings.tool_calls == 1
+
+
+def test_timings_payload_accounts_every_phase():
+    timings = runner_module.RunTimings()
+    timings.model_ms, timings.model_calls = 6000, 3
+    timings.action_ms, timings.tool_calls = 2000, 4
+    desktop_timings = SimpleNamespace(capture_ms=1500, captures=5, settle_ms=900)
+    payload = runner_module._timings_payload(12000, 3, timings, desktop_timings)
+    assert payload["other_ms"] == 12000 - 6000 - 2000 - 1500 - 900
+    assert payload["screenshots"] == 5
+    payload = runner_module._timings_payload(1000, 0, timings, None)
+    assert payload["screenshot_ms"] == 0 and payload["other_ms"] == 0
+
+
+def test_format_perf_renders_phases_and_basic_step_rate():
+    from yutori_mcp.computer_use.result import format_perf
+
+    detailed = format_perf(
+        {
+            "elapsed_ms": 103000,
+            "steps": 12,
+            "timings": {
+                "model_ms": 61000,
+                "model_calls": 12,
+                "action_ms": 18000,
+                "tool_calls": 12,
+                "screenshot_ms": 9800,
+                "screenshots": 14,
+                "settle_ms": 3600,
+                "other_ms": 10600,
+            },
+        }
+    )
+    assert detailed[0] == "Perf: total 103.0s over 12 steps (8.6s/step)"
+    assert "model 61.0s over 12 calls (5.1s avg)" in detailed[1]
+    assert "screenshots 9.8s over 14 captures (0.7s avg)" in detailed[1]
+    assert "settle 3.6s" in detailed[1] and "other 10.6s" in detailed[1]
+
+    # The Node runner carries no phase timings; the summary stops at step rate.
+    basic = format_perf({"elapsed_ms": 70000, "steps": 6})
+    assert basic == ["Perf: total 70.0s over 6 steps (11.7s/step)"]
+    assert format_perf({"elapsed_ms": 70000}) == []
+
+
+def test_format_result_appends_action_durations():
+    text = format_result(
+        {
+            "outcome": "completed",
+            "actions": [
+                {
+                    "index": 0,
+                    "tool": "left_click",
+                    "status": "executed",
+                    "raw_status": "confirmed",
+                    "delivery_mode": "foreground",
+                    "route": "pixel",
+                    "refusal_code": None,
+                    "elapsed_ms": 5000,
+                    "duration_ms": 4200,
+                }
+            ],
+        }
+    )
+    assert "took 4200 ms" in text
+
+
+async def test_smoke_seeds_the_clipboard_and_requires_an_exact_result(monkeypatch):
+    """A previous smoke leaves "42" on the clipboard, so the check must seed a
+    sentinel first, demand the read-back changed to exactly "42", and retry the
+    copy (cmd+c can race the "=" keypress and copy the prior display value)."""
+    from yutori_mcp.computer_use import cli
+
+    captured: dict[str, str] = {}
+    calls: list[tuple[str, ...]] = []
+
+    async def fake_osascript(*lines):
+        calls.append(lines)
+        seed = next(
+            (line for line in lines if line.startswith('set the clipboard to "')),
+            None,
+        )
+        if seed is not None:
+            captured["seeded"] = seed.split('"')[1]
+            keystroke_index = next(
+                index for index, line in enumerate(lines) if "keystroke" in line
+            )
+            assert lines.index(seed) < keystroke_index
+            return cli._ScriptResult(0, "", "")
+        # A copy attempt whose cmd+c silently did nothing: the clipboard
+        # still holds the seeded sentinel.
+        return cli._ScriptResult(0, captured["seeded"] + "\n", "")
+
+    monkeypatch.setattr(cli, "harness_blocker", lambda harness=None: None)
+    monkeypatch.setattr(cli, "_osascript", fake_osascript)
+    run_task = AsyncMock()
+    monkeypatch.setattr(cli, "run_task", run_task)
+    assert await cli._smoke_live() == 1
+    assert captured["seeded"] != "42"
+    assert len(calls) == 4  # one setup, then three polled copy attempts
+    run_task.assert_not_awaited()

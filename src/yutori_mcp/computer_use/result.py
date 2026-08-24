@@ -3,6 +3,66 @@ from __future__ import annotations
 from typing import Any
 
 
+def _seconds(ms: Any) -> str:
+    return f"{ms / 1000:.1f}s" if isinstance(ms, (int, float)) else "?"
+
+
+def _phase(label: str, total_ms: Any, count: Any, unit: str) -> str:
+    text = f"{label} {_seconds(total_ms)}"
+    if isinstance(count, int) and count > 0:
+        text += f" over {count} {unit}"
+        if isinstance(total_ms, (int, float)):
+            text += f" ({total_ms / count / 1000:.1f}s avg)"
+    return text
+
+
+def format_perf(result: dict[str, Any]) -> list[str]:
+    """Render the run's perf numbers, matching depth to what the wire carried.
+
+    The Python runner reports a full phase breakdown in the playground's
+    StepTimings vocabulary; the Node runner reports only elapsed time and
+    steps, so its summary stops at time per step.
+    """
+    elapsed_ms = result.get("elapsed_ms")
+    steps = result.get("steps")
+    if not isinstance(elapsed_ms, (int, float)) or not isinstance(steps, int):
+        return []
+    headline = f"Perf: total {_seconds(elapsed_ms)} over {steps} steps"
+    if steps > 0:
+        headline += f" ({elapsed_ms / steps / 1000:.1f}s/step)"
+    lines = [headline]
+    timings = result.get("timings")
+    if isinstance(timings, dict):
+        lines.append(
+            "  "
+            + " | ".join(
+                [
+                    _phase(
+                        "model",
+                        timings.get("model_ms"),
+                        timings.get("model_calls"),
+                        "calls",
+                    ),
+                    _phase(
+                        "actions",
+                        timings.get("action_ms"),
+                        timings.get("tool_calls"),
+                        "tool calls",
+                    ),
+                    _phase(
+                        "screenshots",
+                        timings.get("screenshot_ms"),
+                        timings.get("screenshots"),
+                        "captures",
+                    ),
+                    f"settle {_seconds(timings.get('settle_ms'))}",
+                    f"other {_seconds(timings.get('other_ms'))}",
+                ]
+            )
+        )
+    return lines
+
+
 def format_result(result: dict[str, Any]) -> str:
     lines = [
         f"Outcome: {result.get('outcome', 'failed')}",
@@ -12,14 +72,18 @@ def format_result(result: dict[str, Any]) -> str:
         lines.append(f"Final text: {result['final_text']}")
     if result.get("elapsed_ms") is not None:
         lines.append(f"Elapsed: {result['elapsed_ms']} ms")
+    lines.extend(format_perf(result))
     actions = result.get("actions", [])
     if actions:
         lines.append("Actions:")
         for action in actions:
-            lines.append(
+            line = (
                 "- #{index} {tool}: {status} (raw: {raw_status}; mode: {delivery_mode}; "
                 "route: {route}; refusal: {refusal_code})".format(**action)
             )
+            if action.get("duration_ms") is not None:
+                line += f" took {action['duration_ms']} ms"
+            lines.append(line)
     return "\n".join(lines)
 
 
