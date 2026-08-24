@@ -1449,3 +1449,105 @@ def test_cli_run_gates_on_the_selected_harness_blocker(monkeypatch, capsys):
     run_task.assert_not_awaited()
     output = capsys.readouterr().out
     assert "Node 22 not found" in output and "brew install node@22" in output
+
+
+async def test_api_timer_accumulates_model_time():
+    clock = iter([10.0, 12.5, 20.0, 21.0])
+    timings = runner_module.RunTimings()
+    timer = runner_module.ApiTimer(timings, clock=lambda: next(clock))
+    await timer.on_api_start({})
+    await timer.on_api_end({}, None)
+    await timer.on_api_start({})
+    await timer.on_api_end({}, None)
+    assert timings.model_ms == 3500
+    assert timings.model_calls == 2
+
+
+async def test_action_reporter_subtracts_capture_and_settle_from_action_time():
+    """The call span includes the post-action capture and settle; the perf
+    breakdown's action_ms must not, or phases double count against total."""
+    clock = iter([100.0, 104.0])  # call start, call end
+    timings = runner_module.RunTimings()
+    desktop_timings = SimpleNamespace(capture_ms=1000, settle_ms=300, captures=2)
+    stream = _CollectStream()
+    reporter = runner_module.ActionReporter(
+        Emitter(stream),
+        run_start=0.0,
+        timings=timings,
+        desktop_timings=desktop_timings,
+        clock=lambda: next(clock),
+    )
+    await reporter.on_computer_call_start({"name": "left_click"})
+    desktop_timings.capture_ms += 700
+    desktop_timings.settle_ms += 300
+    await reporter.on_computer_call_end(
+        {"name": "left_click"}, [{"output": {"type": "input_image", "image_url": "d"}}]
+    )
+    event = json.loads(stream.lines[-1])
+    assert event["duration_ms"] == 4000
+    assert timings.action_ms == 3000  # 4000 span - 700 capture - 300 settle
+    assert timings.tool_calls == 1
+
+
+def test_timings_payload_accounts_every_phase():
+    timings = runner_module.RunTimings()
+    timings.model_ms, timings.model_calls = 6000, 3
+    timings.action_ms, timings.tool_calls = 2000, 4
+    desktop_timings = SimpleNamespace(capture_ms=1500, captures=5, settle_ms=900)
+    payload = runner_module._timings_payload(12000, 3, timings, desktop_timings)
+    assert payload["other_ms"] == 12000 - 6000 - 2000 - 1500 - 900
+    assert payload["screenshots"] == 5
+    payload = runner_module._timings_payload(1000, 0, timings, None)
+    assert payload["screenshot_ms"] == 0 and payload["other_ms"] == 0
+
+
+def test_format_perf_renders_phases_and_basic_step_rate():
+    from yutori_mcp.computer_use.result import format_perf
+
+    detailed = format_perf(
+        {
+            "elapsed_ms": 103000,
+            "steps": 12,
+            "timings": {
+                "model_ms": 61000,
+                "model_calls": 12,
+                "action_ms": 18000,
+                "tool_calls": 12,
+                "screenshot_ms": 9800,
+                "screenshots": 14,
+                "settle_ms": 3600,
+                "other_ms": 10600,
+            },
+        }
+    )
+    assert detailed[0] == "Perf: total 103.0s over 12 steps (8.6s/step)"
+    assert "model 61.0s over 12 calls (5.1s avg)" in detailed[1]
+    assert "screenshots 9.8s over 14 captures (0.7s avg)" in detailed[1]
+    assert "settle 3.6s" in detailed[1] and "other 10.6s" in detailed[1]
+
+    # The Node runner carries no phase timings; the summary stops at step rate.
+    basic = format_perf({"elapsed_ms": 70000, "steps": 6})
+    assert basic == ["Perf: total 70.0s over 6 steps (11.7s/step)"]
+    assert format_perf({"elapsed_ms": 70000}) == []
+
+
+def test_format_result_appends_action_durations():
+    text = format_result(
+        {
+            "outcome": "completed",
+            "actions": [
+                {
+                    "index": 0,
+                    "tool": "left_click",
+                    "status": "executed",
+                    "raw_status": "confirmed",
+                    "delivery_mode": "foreground",
+                    "route": "pixel",
+                    "refusal_code": None,
+                    "elapsed_ms": 5000,
+                    "duration_ms": 4200,
+                }
+            ],
+        }
+    )
+    assert "took 4200 ms" in text

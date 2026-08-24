@@ -148,8 +148,10 @@ async def _print_event(event: dict) -> None:
     line = f"action #{event.get('index')}: {event.get('tool')} -> {event.get('status')}"
     if event.get("refusal_code"):
         line += f" ({event['refusal_code']})"
+    if event.get("duration_ms") is not None:
+        line += f" took {event['duration_ms']} ms"
     if event.get("elapsed_ms") is not None:
-        line += f" [{event['elapsed_ms']} ms]"
+        line += f" [at {event['elapsed_ms']} ms]"
     print(line, flush=True)
 
 

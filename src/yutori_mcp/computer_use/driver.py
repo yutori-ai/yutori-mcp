@@ -15,6 +15,7 @@ import json
 import os
 import re
 import signal
+import time
 import uuid
 from contextlib import suppress
 from pathlib import Path
@@ -355,6 +356,22 @@ def _kill_shell_process_group(process: asyncio.subprocess.Process) -> None:
         process.kill()
 
 
+class DesktopTimings:
+    """Accumulated capture and settle time, read by the runner's perf report.
+
+    Kept on the handler because these two phases happen here: the capture RPC
+    is this class's ``screenshot`` and the post-action settle is ``_settle``.
+    The runner subtracts both from each tool-call span so its per-phase
+    breakdown (model / actions / screenshots / settle) sums without double
+    counting — the same decomposition the playground's StepTimings uses.
+    """
+
+    def __init__(self) -> None:
+        self.capture_ms = 0
+        self.captures = 0
+        self.settle_ms = 0
+
+
 class CuaDriverDesktop:
     """Full-display, native-pixel macOS handler backed by cua-driver.
 
@@ -367,6 +384,7 @@ class CuaDriverDesktop:
     def __init__(self, cli: DriverCLI, *, session: str | None = None):
         self.cli = cli
         self.session = session or f"yutori-mcp-{uuid.uuid4().hex[:8]}"
+        self.timings = DesktopTimings()
         self._native_size: tuple[int, int] | None = None
         self._bash_cwd = os.path.expanduser("~")
         self._background_tasks: dict[str, asyncio.subprocess.Process] = {}
@@ -395,9 +413,13 @@ class CuaDriverDesktop:
             **arguments,
         }
 
+    async def _settle(self) -> None:
+        await asyncio.sleep(SETTLE_AFTER_ACTION_SECONDS)
+        self.timings.settle_ms += int(SETTLE_AFTER_ACTION_SECONDS * 1000)
+
     async def _act(self, tool: str, args: dict[str, Any]) -> None:
         await self.cli.call(tool, args)
-        await asyncio.sleep(SETTLE_AFTER_ACTION_SECONDS)
+        await self._settle()
 
     # --- AsyncComputerHandler surface -------------------------------------
 
@@ -412,11 +434,15 @@ class CuaDriverDesktop:
 
     async def screenshot(self, text: str | None = None) -> str:
         del text
+        start = time.monotonic()
         payload, image = await self.cli.capture(
             "get_desktop_state", {"session": self.session}
         )
         self._native_size = (payload["screenshot_width"], payload["screenshot_height"])
-        return base64.b64encode(image).decode()
+        encoded = base64.b64encode(image).decode()
+        self.timings.capture_ms += int((time.monotonic() - start) * 1000)
+        self.timings.captures += 1
+        return encoded
 
     async def click(self, x: int, y: int, button: str = "left") -> None:
         await self._act("click", self._routed(x=x, y=y, count=1, button=button))
@@ -451,7 +477,7 @@ class CuaDriverDesktop:
             await self.cli.call(
                 "type_text", self._routed(text=chunk, delay_ms=0)
             )
-        await asyncio.sleep(SETTLE_AFTER_ACTION_SECONDS)
+        await self._settle()
 
     async def wait(self, ms: int = 1000) -> None:
         await asyncio.sleep(ms / 1000)

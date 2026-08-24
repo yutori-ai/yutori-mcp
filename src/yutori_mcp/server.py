@@ -579,6 +579,8 @@ def _progress_reporter(
         message = f"action #{index}: {event.get('tool')} -> {event.get('status')}"
         if event.get("refusal_code"):
             message += f" ({event['refusal_code']})"
+        if event.get("duration_ms") is not None:
+            message += f" took {event['duration_ms']} ms"
         if event.get("elapsed_ms") is not None:
             message += f" [{event['elapsed_ms']} ms]"
         await ctx.report_progress(progress=index, message=message)

@@ -20,6 +20,7 @@ import os
 import sys
 import time
 from importlib import metadata
+from collections.abc import Callable
 from typing import Any, TextIO
 
 from .constants import DRIVER_VERSION, PROTOCOL_VERSION, TOOL_SET
@@ -167,18 +168,88 @@ def _status_for(raw_status: str) -> str:
     return "uncertain"
 
 
-class ActionReporter:
-    """Emits one protocol action event per attempted tool call."""
+class RunTimings:
+    """Model and pure-action time, aggregated across the run.
 
-    def __init__(self, emitter: Emitter, run_start: float):
+    Together with the handler's DesktopTimings (captures, settle) this yields
+    the playground StepTimings decomposition: model + actions + screenshots +
+    settle + other = total.
+    """
+
+    def __init__(self) -> None:
+        self.model_ms = 0
+        self.model_calls = 0
+        self.action_ms = 0
+        self.tool_calls = 0
+
+
+class ApiTimer:
+    """Times each model call through the loop's on_api_start/end callbacks."""
+
+    def __init__(self, timings: RunTimings, *, clock: Callable[[], float] = time.monotonic):
+        self._timings = timings
+        self._clock = clock
+        self._started: float | None = None
+
+    async def on_api_start(self, _kwargs: dict[str, Any]) -> None:
+        self._started = self._clock()
+
+    async def on_api_end(self, _kwargs: dict[str, Any], _result: Any) -> None:
+        if self._started is None:
+            return
+        self._timings.model_ms += int((self._clock() - self._started) * 1000)
+        self._timings.model_calls += 1
+        self._started = None
+
+
+class ActionReporter:
+    """Emits one protocol action event per attempted tool call.
+
+    Each event carries ``duration_ms`` — the whole tool-call span — while the
+    aggregate's ``action_ms`` is that span minus the capture and settle time
+    the handler recorded within it, so the perf breakdown's phases do not
+    double count.
+    """
+
+    def __init__(
+        self,
+        emitter: Emitter,
+        run_start: float,
+        *,
+        timings: RunTimings | None = None,
+        desktop_timings: Any | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ):
         self._emitter = emitter
         self._run_start = run_start
+        self._timings = timings
+        self._desktop_timings = desktop_timings
+        self._clock = clock
         self._index = 0
+        self._call_start: float | None = None
+        self._overhead_ms_at_start = 0
+
+    def _overhead_ms(self) -> int:
+        if self._desktop_timings is None:
+            return 0
+        return self._desktop_timings.capture_ms + self._desktop_timings.settle_ms
+
+    async def on_computer_call_start(self, _item: dict[str, Any]) -> None:
+        self._call_start = self._clock()
+        self._overhead_ms_at_start = self._overhead_ms()
 
     async def on_computer_call_end(
         self, item: dict[str, Any], result: list[dict[str, Any]]
     ) -> None:
         raw_status = classify_result(result)
+        duration_ms: int | None = None
+        if self._call_start is not None:
+            duration_ms = max(0, int((self._clock() - self._call_start) * 1000))
+            self._call_start = None
+            if self._timings is not None:
+                overhead = self._overhead_ms() - self._overhead_ms_at_start
+                self._timings.action_ms += max(0, duration_ms - overhead)
+                self._timings.tool_calls += 1
         self._emitter.emit(
             {
                 "type": "action",
@@ -190,6 +261,7 @@ class ActionReporter:
                 "route": "pixel",
                 "refusal_code": "driver_refused" if raw_status == "refused" else None,
                 "elapsed_ms": max(0, int((time.monotonic() - self._run_start) * 1000)),
+                "duration_ms": duration_ms,
             }
         )
         self._index += 1
@@ -335,6 +407,36 @@ async def _summarize_limit_run(
     return texts[-1] if texts else None
 
 
+def _timings_payload(
+    total_ms: int,
+    steps: int,
+    timings: RunTimings,
+    desktop_timings: Any | None,
+) -> dict[str, Any]:
+    """The result's perf breakdown, in the playground StepTimings vocabulary.
+
+    ``other_ms`` is the wall clock no measured phase accounts for (app launch
+    and fronting, JPEG re-encode inside the loop, event writes), clamped so a
+    measurement race can never render negative.
+    """
+    capture_ms = desktop_timings.capture_ms if desktop_timings else 0
+    captures = desktop_timings.captures if desktop_timings else 0
+    settle_ms = desktop_timings.settle_ms if desktop_timings else 0
+    accounted = timings.model_ms + timings.action_ms + capture_ms + settle_ms
+    return {
+        "total_ms": total_ms,
+        "steps": steps,
+        "model_ms": timings.model_ms,
+        "model_calls": timings.model_calls,
+        "action_ms": timings.action_ms,
+        "tool_calls": timings.tool_calls,
+        "screenshot_ms": capture_ms,
+        "screenshots": captures,
+        "settle_ms": settle_ms,
+        "other_ms": max(0, total_ms - accounted),
+    }
+
+
 async def run_request(request: dict[str, Any], emitter: Emitter, api_key: str) -> str:
     """Execute one run request and emit its result. Returns the outcome.
 
@@ -359,6 +461,8 @@ async def run_request(request: dict[str, Any], emitter: Emitter, api_key: str) -
     deadline = run_start + remaining_seconds
 
     guard: RunGuard | None = None
+    timings = RunTimings()
+    desktop_timings: Any | None = None
     try:
         from cua_agent import ComputerAgent
 
@@ -375,17 +479,28 @@ async def run_request(request: dict[str, Any], emitter: Emitter, api_key: str) -
             start_url=request["start_url"],
             target=target,
         )
-        reporter = ActionReporter(emitter, run_start)
         async with CuaDriverDesktop(cli) as desktop:
+            desktop_timings = desktop.timings
+            reporter = ActionReporter(
+                emitter,
+                run_start,
+                timings=timings,
+                desktop_timings=desktop.timings,
+            )
             agent = ComputerAgent(
                 model=f"yutori/{request['model']}",
                 tools=[desktop],
                 api_key=api_key,
                 api_base=request["api_base_url"],
-                callbacks=[guard, reporter],
+                callbacks=[guard, reporter, ApiTimer(timings)],
                 instructions=SYSTEM_CONTEXT,
                 telemetry_enabled=False,
                 tool_set=TOOL_SET,
+                # 0, not the library's 0.5 default: the post-action pause is the
+                # handler's 0.3s settle, matching the previous runner's
+                # SETTLE_AFTER_ACTION_MS, so both harnesses capture the
+                # post-action frame on the same clock.
+                screenshot_delay=0,
                 # Truncates in-flight batch execution at the wall clock; the
                 # step-level deadline lives in the guard.
                 execution_deadline=deadline,
@@ -413,28 +528,36 @@ async def run_request(request: dict[str, Any], emitter: Emitter, api_key: str) -
                 outcome = "completed"
     except Exception as error:  # noqa: BLE001 - the wire carries the failure
         message = str(error).replace(api_key, "[REDACTED]") or type(error).__name__
+        elapsed_ms = max(0, int((time.monotonic() - run_start) * 1000))
         emitter.emit(
             {
                 "type": "result",
                 "outcome": "failed",
                 "delivery_mode": "foreground",
                 "final_text": message,
-                "elapsed_ms": max(0, int((time.monotonic() - run_start) * 1000)),
+                "elapsed_ms": elapsed_ms,
                 "steps": guard.steps if guard else 0,
                 "target_recovery_attempts": guard.recovery_attempts if guard else 0,
+                "timings": _timings_payload(
+                    elapsed_ms, guard.steps if guard else 0, timings, desktop_timings
+                ),
             }
         )
         return "failed"
 
+    elapsed_ms = max(0, int((time.monotonic() - run_start) * 1000))
     emitter.emit(
         {
             "type": "result",
             "outcome": outcome,
             "delivery_mode": "foreground",
             "final_text": final_text,
-            "elapsed_ms": max(0, int((time.monotonic() - run_start) * 1000)),
+            "elapsed_ms": elapsed_ms,
             "steps": guard.steps,
             "target_recovery_attempts": guard.recovery_attempts,
+            "timings": _timings_payload(
+                elapsed_ms, guard.steps, timings, desktop_timings
+            ),
         }
     )
     return outcome
