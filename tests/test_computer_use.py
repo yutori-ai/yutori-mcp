@@ -346,7 +346,6 @@ async def test_child_environment_has_path_and_disables_harness_telemetry():
     env = create.await_args.kwargs["env"]
     assert "/usr/bin" in env["PATH"].split(":")
     assert "/opt/homebrew/bin" in env["PATH"].split(":")
-    assert env["CUA_TELEMETRY_ENABLED"] == "false"
 
 
 def test_python_runner_command_uses_this_interpreter_isolated():
@@ -528,10 +527,7 @@ def test_harness_blocker_reports_only_toolchain_failures():
     with patch.object(preflight, "find_node", return_value=None):
         blocker = preflight.harness_blocker("node")
     assert blocker is not None and blocker.name == "Node 22"
-    with (
-        patch.object(preflight.sys, "version_info", (3, 12, 0)),
-        patch.object(preflight.importlib.util, "find_spec", return_value=object()),
-    ):
+    with patch.object(preflight.importlib.util, "find_spec", return_value=object()):
         assert preflight.harness_blocker("python") is None
 
 
@@ -550,32 +546,19 @@ def test_platform_blockers_each_return_one_remediation(check, patched, value):
     assert result.remediation
 
 
-def test_harness_check_blocks_an_unsupported_interpreter():
-    with patch.object(preflight.sys, "version_info", (3, 10, 4)):
+def test_harness_check_blocks_a_yutori_sdk_without_the_loop():
+    with patch.object(preflight.importlib.util, "find_spec", return_value=None):
         result = preflight.check_harness()
     assert not result.ok
-    assert "3.10" in result.detail
-    assert "uvx --python" in result.remediation
+    assert "no navigator n2 loop" in result.detail
+    assert "uvx --refresh" in result.remediation
 
 
-def test_harness_check_blocks_a_missing_cua_agent():
-    with (
-        patch.object(preflight.sys, "version_info", (3, 12, 0)),
-        patch.object(preflight.importlib.util, "find_spec", return_value=None),
-    ):
-        result = preflight.check_harness()
-    assert not result.ok
-    assert "cua-agent" in result.detail
-
-
-def test_harness_check_passes_on_a_supported_setup():
-    with (
-        patch.object(preflight.sys, "version_info", (3, 12, 0)),
-        patch.object(
-            preflight.importlib.util, "find_spec", return_value=object()
-        ),
-    ):
-        assert preflight.check_harness().ok
+def test_harness_check_passes_with_the_sdk_loop_installed():
+    # No mock: the pinned yutori dependency in this environment carries the loop.
+    result = preflight.check_harness()
+    assert result.ok
+    assert "yutori.navigator" in result.detail
 
 
 def test_env_flag_after_import_still_registers_the_tool():
@@ -1342,25 +1325,39 @@ async def test_driver_cli_capture_reports_a_permanently_missing_frame(tmp_path):
             await cli.capture("get_desktop_state", {"session": "s"})
 
 
-async def test_cua_agent_accepts_the_desktop_handler():
-    """The harness's handler protocol is runtime-checkable on member PRESENCE.
+async def test_sdk_loop_executes_against_the_desktop_handler():
+    """The desktop handler satisfies the SDK loop's duck-typed surface.
 
-    A handler missing any member (left_mouse_down/up included) silently falls
-    through to "Unknown tool type", computer_handler stays None, and the first
-    step dies with "No current screenshot". This pins the whole surface.
+    Exercises a real translated click through yutori.navigator's executor
+    against the driver adapter, pinning the handler/loop seam end to end.
     """
-    cua_agent = pytest.importorskip("cua_agent")
+    from yutori.navigator import parse_n2_tool_calls
+    from yutori.navigator.n2 import _CallbackDispatcher, execute_n2_computer_call
 
     desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
-    agent = cua_agent.ComputerAgent(
-        model="yutori/n2-preview",
-        tools=[desktop],
-        api_key="yt-test",
-        telemetry_enabled=False,
-        tool_set="computer_use_tools-20260729",
+    item = parse_n2_tool_calls(
+        {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "function": {
+                        "name": "left_click",
+                        "arguments": '{"coordinates": [500, 500]}',
+                    },
+                }
+            ],
+        },
+        200,
+        100,
+    )[-1]
+    result = await execute_n2_computer_call(
+        item, desktop, callbacks=_CallbackDispatcher(None), screenshot_delay=0
     )
-    await agent._initialize_computers()
-    assert agent.computer_handler is not None
+    output = result[0]["output"]
+    assert isinstance(output, dict) and output["type"] == "input_image"
+    assert ("click", {"delivery_mode": "foreground", "scope": "desktop", "session": "s1",
+                      "x": 100, "y": 50, "count": 1, "button": "left"}) in desktop.cli.calls
     # The optional shell capabilities are duck-typed by method presence.
     assert hasattr(desktop, "run_shell_command")
     assert hasattr(desktop, "run_bash_command")
@@ -1377,8 +1374,13 @@ async def test_failed_run_reports_completed_steps_and_redacts_the_key(monkeypatc
         def __init__(self, **kwargs):
             self.callbacks = kwargs.get("callbacks") or []
 
-        async def run(self, _messages, stream=False):
-            del stream
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+        async def run(self, _messages):
             for _ in range(2):
                 for callback in self.callbacks:
                     if hasattr(callback, "on_run_continue"):
@@ -1386,9 +1388,7 @@ async def test_failed_run_reports_completed_steps_and_redacts_the_key(monkeypatc
                 yield {"output": []}
             raise RuntimeError("boom mid-run holding yt-secret")
 
-    monkeypatch.setitem(
-        sys.modules, "cua_agent", SimpleNamespace(ComputerAgent=_FakeAgent)
-    )
+    monkeypatch.setattr(runner_module, "N2ComputerAgent", _FakeAgent)
     monkeypatch.setattr(runner_module, "DriverCLI", lambda path: _FakeCLI())
     stream = _CollectStream()
     request = parse_request(

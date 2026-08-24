@@ -449,12 +449,12 @@ The macOS computer-use tool's default runner is the Python harness, with the leg
 runner available as an opt-in install extra for comparison (the flag and the losing harness
 are expected to be removed once the evaluation concludes):
 
-- `python` (default, base dependency): the reviewed Yutori n2 agent loop from the private
-  [`yutori-ai/cua-private`](https://github.com/yutori-ai/cua-private) repo (`cua-agent`,
-  `libs/python/agent`), pinned by full commit SHA — the same pin the Python SDK's
-  `examples/navigator_n2` cookbooks use. It only installs on Python 3.11-3.13 (`cua-agent`'s
-  own interpreter window); on other interpreters `computer-use doctor` reports the harness as
-  unavailable with the fix.
+- `python` (default, base dependency): the SDK-owned n2 agent loop
+  (`yutori.navigator.N2ComputerAgent`), currently pinned by commit to the private
+  [`yutori-ai/yutori-sdk-python-private`](https://github.com/yutori-ai/yutori-sdk-python-private)
+  fork until the SDK ships a release carrying it — after which the pin becomes a plain
+  `yutori>=X` index requirement and the base install has no private git dependencies at all.
+  No Cua framework, no litellm.
 - `node` (opt-in, `node-harness` extra): the TypeScript runner from the private
   [`yutori-ai/yutori-sdk-typescript`](https://github.com/yutori-ai/yutori-sdk-typescript)
   repo (`yutori-computer-use-runtime`), pinned to a tag. A plain install carries no
@@ -467,7 +467,7 @@ installing needs SSH access to the repo(s) involved:
 
 ```sh
 ssh -T git@github.com          # must authenticate as a yutori-ai member
-uv sync --extra dev            # base install: resolves cua-agent over SSH
+uv sync --extra dev            # base install: resolves the yutori SDK fork over SSH
 uv sync --extra dev --extra node-harness   # additionally pulls the Node runtime wheel
 ```
 

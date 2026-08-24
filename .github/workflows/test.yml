@@ -36,11 +36,11 @@ jobs:
       - name: Authorize the private runner dependencies
         env:
           SDK_DEPLOY_KEY: ${{ secrets.SDK_DEPLOY_KEY }}
-          CUA_DEPLOY_KEY: ${{ secrets.CUA_DEPLOY_KEY }}
+          PYSDK_DEPLOY_KEY: ${{ secrets.PYSDK_DEPLOY_KEY }}
         run: |
           missing=""
           [ -z "${SDK_DEPLOY_KEY:-}" ] && missing="SDK_DEPLOY_KEY (yutori-sdk-typescript)"
-          [ -z "${CUA_DEPLOY_KEY:-}" ] && missing="${missing:+$missing, }CUA_DEPLOY_KEY (cua-private)"
+          [ -z "${PYSDK_DEPLOY_KEY:-}" ] && missing="${missing:+$missing, }PYSDK_DEPLOY_KEY (yutori-sdk-python-private)"
           if [ -n "$missing" ]; then
             echo "::error title=Missing deploy key secret(s)::Add read-only deploy keys as repository secrets: $missing. uv cannot resolve the runner dependencies without them."
             exit 1
@@ -48,19 +48,19 @@ jobs:
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           printf '%s\n' "$SDK_DEPLOY_KEY" > ~/.ssh/sdk_deploy
-          printf '%s\n' "$CUA_DEPLOY_KEY" > ~/.ssh/cua_deploy
-          chmod 600 ~/.ssh/sdk_deploy ~/.ssh/cua_deploy
+          printf '%s\n' "$PYSDK_DEPLOY_KEY" > ~/.ssh/pysdk_deploy
+          chmod 600 ~/.ssh/sdk_deploy ~/.ssh/pysdk_deploy
           ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
           {
             printf 'Host github-sdk\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/sdk_deploy\n  IdentitiesOnly yes\n'
-            printf 'Host github-cua\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/cua_deploy\n  IdentitiesOnly yes\n'
+            printf 'Host github-pysdk\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/pysdk_deploy\n  IdentitiesOnly yes\n'
           } > ~/.ssh/config
           chmod 600 ~/.ssh/config
           # known_hosts entries for the aliases so StrictHostKeyChecking still passes.
           ssh-keyscan -t ed25519 github.com 2>/dev/null | sed 's/^github.com/github-sdk/' >> ~/.ssh/known_hosts
-          ssh-keyscan -t ed25519 github.com 2>/dev/null | sed 's/^github.com/github-cua/' >> ~/.ssh/known_hosts
+          ssh-keyscan -t ed25519 github.com 2>/dev/null | sed 's/^github.com/github-pysdk/' >> ~/.ssh/known_hosts
           git config --global url."ssh://git@github-sdk/yutori-ai/yutori-sdk-typescript".insteadOf "ssh://git@github.com/yutori-ai/yutori-sdk-typescript"
-          git config --global url."ssh://git@github-cua/yutori-ai/cua-private".insteadOf "ssh://git@github.com/yutori-ai/cua-private"
+          git config --global url."ssh://git@github-pysdk/yutori-ai/yutori-sdk-python-private".insteadOf "ssh://git@github.com/yutori-ai/yutori-sdk-python-private"
 
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} --extra dev pytest -q
