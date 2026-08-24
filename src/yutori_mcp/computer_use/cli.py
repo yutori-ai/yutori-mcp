@@ -17,10 +17,13 @@ from .constants import (
     HARNESSES,
     resolve_harness,
 )
+from ..schemas import ComputerUseTaskInput
+
 from .preflight import (
     check_driver_binary,
     child_search_path,
     find_cua_driver,
+    first_blocker,
     harness_blocker,
     run_checks,
 )
@@ -138,6 +141,48 @@ async def _smoke_live() -> int:
     return 0 if result.get("outcome") == "completed" else 1
 
 
+async def _print_event(event: dict) -> None:
+    if event.get("type") == "ready":
+        print("runner ready; driving the desktop")
+        return
+    line = f"action #{event.get('index')}: {event.get('tool')} -> {event.get('status')}"
+    if event.get("refusal_code"):
+        line += f" ({event['refusal_code']})"
+    if event.get("elapsed_ms") is not None:
+        line += f" [{event['elapsed_ms']} ms]"
+    print(line, flush=True)
+
+
+async def _run_custom(args: argparse.Namespace) -> int:
+    # Reuses the MCP tool's input schema so the CLI enforces the same bounds
+    # (minutes 1-15, steps 1-100, start_url requires app) with the same
+    # messages; the resulting ValidationError is a ValueError, so dispatch's
+    # handler prints it as a message rather than a traceback.
+    params = ComputerUseTaskInput(
+        task=args.task,
+        app=args.app,
+        start_url=args.start_url,
+        minutes=args.minutes,
+        max_steps=args.max_steps,
+        harness=args.harness,
+    )
+    blocker = first_blocker(params.harness)
+    if blocker is not None:
+        print(f"{blocker.detail} Fix: {blocker.remediation}")
+        return 1
+    print(
+        "The model takes over this Mac's desktop now; do not touch it during the run."
+    )
+    result = await run_task(
+        **params.model_dump(),
+        api_key=resolve_api_key_for_environment("dev"),
+        api_base_url="https://api.dev.yutori.com/v1",
+        on_event=_print_event,
+    )
+    print(format_result(result))
+    return 0 if result.get("outcome") == "completed" else 1
+
+
 def register_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
@@ -148,19 +193,44 @@ def register_parser(
     commands.add_parser("setup", help="Install and configure the pinned CuaDriver")
     commands.add_parser("doctor", help="Run all computer-use readiness checks")
     commands.add_parser("smoke", help="Run Calculator mechanical and live checks")
+    run_parser = commands.add_parser(
+        "run", help="Run one custom task on the visible desktop (dev only)"
+    )
+    run_parser.add_argument("task", help="Task for the model to perform")
+    run_parser.add_argument(
+        "--harness",
+        choices=list(HARNESSES),
+        default=None,
+        help="Runner implementation (default: YUTORI_COMPUTER_USE_HARNESS or node)",
+    )
+    run_parser.add_argument("--app", default=None, help="Application to target")
+    run_parser.add_argument(
+        "--start-url", dest="start_url", default=None, help="URL to open in the app"
+    )
+    run_parser.add_argument(
+        "--minutes", type=float, default=3, help="Absolute deadline in minutes (1-15)"
+    )
+    run_parser.add_argument(
+        "--max-steps", dest="max_steps", type=int, default=60, help="Maximum actions (1-100)"
+    )
 
 
-def dispatch(command: str) -> int:
-    if command not in {"setup", "doctor", "smoke"}:
+def dispatch(command: str, args: argparse.Namespace | None = None) -> int:
+    if command not in {"setup", "doctor", "smoke", "run"}:
         raise ValueError(f"Unknown computer-use command: {command}")
     try:
         if command == "setup":
             return _setup()
         if command == "doctor":
             return _doctor()
+        if command == "run":
+            if args is None:
+                raise ValueError("computer-use run needs its parsed arguments")
+            return asyncio.run(_run_custom(args))
         return asyncio.run(_smoke_live())
     except ValueError as error:
-        # An invalid YUTORI_COMPUTER_USE_HARNESS value should read as the same
-        # clear message run_task reports, not a traceback.
+        # An invalid YUTORI_COMPUTER_USE_HARNESS value or out-of-bounds run
+        # argument should read as the same clear message run_task reports,
+        # not a traceback. Pydantic's ValidationError is a ValueError too.
         print(error)
         return 1

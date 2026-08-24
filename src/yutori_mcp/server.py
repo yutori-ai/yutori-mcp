@@ -829,7 +829,7 @@ def main() -> None:
     if args.command == "computer-use":
         from .computer_use.cli import dispatch
 
-        raise SystemExit(dispatch(args.computer_use_command))
+        raise SystemExit(dispatch(args.computer_use_command, args))
 
     # The flag is forwarded via the env var (rather than threaded through to
     # get_adapter()'s lazily-constructed, process-lifetime MCPClientAdapter)

@@ -1386,3 +1386,66 @@ def test_cli_reports_a_bad_harness_env_without_a_traceback(
 def test_final_markers_are_stripped_from_either_end(text, expected):
     # A live run produced a trailing "[DONE]"; the wire text must carry neither.
     assert runner_module._strip_final_markers(text) == expected
+
+
+def _run_namespace(**overrides):
+    import argparse
+
+    values = {
+        "task": "open calculator",
+        "harness": None,
+        "app": None,
+        "start_url": None,
+        "minutes": 3,
+        "max_steps": 60,
+    }
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+def test_cli_run_forwards_the_task_and_prints_the_result(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    run_task = AsyncMock(
+        return_value={"outcome": "completed", "final_text": "done", "actions": []}
+    )
+    monkeypatch.setattr(cli, "first_blocker", lambda harness=None: None)
+    monkeypatch.setattr(cli, "run_task", run_task)
+    monkeypatch.setattr(
+        cli, "resolve_api_key_for_environment", lambda environment: "yt-key"
+    )
+    code = cli.dispatch("run", _run_namespace(harness="python", app="Calculator"))
+    assert code == 0
+    kwargs = run_task.await_args.kwargs
+    assert kwargs["harness"] == "python"
+    assert kwargs["app"] == "Calculator"
+    assert kwargs["on_event"] is not None
+    assert "Outcome: completed" in capsys.readouterr().out
+
+
+def test_cli_run_rejects_out_of_bounds_arguments_as_a_message(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    run_task = AsyncMock()
+    monkeypatch.setattr(cli, "run_task", run_task)
+    assert cli.dispatch("run", _run_namespace(minutes=99)) == 1
+    run_task.assert_not_awaited()
+    assert "minutes" in capsys.readouterr().out
+
+
+def test_cli_run_gates_on_the_selected_harness_blocker(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    run_task = AsyncMock()
+    monkeypatch.setattr(cli, "run_task", run_task)
+    monkeypatch.setattr(
+        cli,
+        "first_blocker",
+        lambda harness=None: SimpleNamespace(
+            detail="Node 22 not found", remediation="brew install node@22"
+        ),
+    )
+    assert cli.dispatch("run", _run_namespace(harness="node")) == 1
+    run_task.assert_not_awaited()
+    output = capsys.readouterr().out
+    assert "Node 22 not found" in output and "brew install node@22" in output

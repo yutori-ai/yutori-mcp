@@ -27,6 +27,13 @@ uvx yutori-mcp computer-use doctor
 uvx yutori-mcp computer-use smoke
 ```
 
+`computer-use run` executes one custom task from the terminal — the same run the MCP tool
+performs, with per-action progress printed as it happens:
+
+```bash
+uvx yutori-mcp computer-use run "In Calculator, compute 17 * 23 and report the result." --app Calculator --harness python
+```
+
 The `run_computer_use_task` tool controls the visible foreground desktop. Do not touch the
 Mac while it runs. Visible desktop content is sent to Yutori's dev model endpoint. Only one
 task can control a Mac at a time.
