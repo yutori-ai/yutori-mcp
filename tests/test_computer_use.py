@@ -1360,3 +1360,14 @@ async def test_failed_run_reports_completed_steps_and_redacts_the_key(monkeypatc
     assert result["elapsed_ms"] >= 0
     assert "yt-secret" not in json.dumps(result)
     assert "[REDACTED]" in result["final_text"]
+
+
+@pytest.mark.parametrize("command", ["setup", "doctor", "smoke"])
+def test_cli_reports_a_bad_harness_env_without_a_traceback(
+    command, monkeypatch, capsys
+):
+    from yutori_mcp.computer_use import cli
+
+    monkeypatch.setenv("YUTORI_COMPUTER_USE_HARNESS", "typescript")
+    assert cli.dispatch(command) == 1
+    assert "Unknown computer-use harness" in capsys.readouterr().out

@@ -134,10 +134,16 @@ def register_parser(
 
 
 def dispatch(command: str) -> int:
-    if command == "setup":
-        return _setup()
-    if command == "doctor":
-        return _doctor()
-    if command == "smoke":
+    if command not in {"setup", "doctor", "smoke"}:
+        raise ValueError(f"Unknown computer-use command: {command}")
+    try:
+        if command == "setup":
+            return _setup()
+        if command == "doctor":
+            return _doctor()
         return asyncio.run(_smoke_live())
-    raise ValueError(f"Unknown computer-use command: {command}")
+    except ValueError as error:
+        # An invalid YUTORI_COMPUTER_USE_HARNESS value should read as the same
+        # clear message run_task reports, not a traceback.
+        print(error)
+        return 1
