@@ -187,6 +187,8 @@ async def _print_event(event: dict) -> None:
         line += f" took {event['duration_ms']} ms"
     if event.get("elapsed_ms") is not None:
         line += f" [at {event['elapsed_ms']} ms]"
+    if event.get("command"):
+        line += f"\n  $ {event['command']}"
     print(line, flush=True)
 
 

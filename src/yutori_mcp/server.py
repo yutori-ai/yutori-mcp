@@ -583,6 +583,8 @@ def _progress_reporter(
             message += f" took {event['duration_ms']} ms"
         if event.get("elapsed_ms") is not None:
             message += f" [{event['elapsed_ms']} ms]"
+        if event.get("command"):
+            message += f" $ {event['command']}"
         await ctx.report_progress(progress=index, message=message)
         await ctx.info(message)
 

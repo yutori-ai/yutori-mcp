@@ -83,6 +83,8 @@ def format_result(result: dict[str, Any]) -> str:
             )
             if action.get("duration_ms") is not None:
                 line += f" took {action['duration_ms']} ms"
+            if action.get("command"):
+                line += f" $ {action['command']}"
             lines.append(line)
     return "\n".join(lines)
 
