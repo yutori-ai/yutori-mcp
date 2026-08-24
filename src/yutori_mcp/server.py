@@ -8,7 +8,7 @@ import os
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any, NoReturn, TypeVar
+from typing import Any, Literal, NoReturn, TypeVar
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
@@ -386,6 +386,7 @@ async def run_computer_use_task(
     start_url: str | None = None,
     minutes: float = 3,
     max_steps: int = 60,
+    harness: Literal["node", "python"] | None = None,
     ctx: Context | None = None,
 ) -> str:
     # `ctx` is FastMCP's injected request context (excluded from the client-facing
@@ -591,24 +592,18 @@ async def _handle_computer_use(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     from .credentials import resolve_api_key_for_environment
 
-    from .computer_use.preflight import find_node, first_blocker
+    from .computer_use.preflight import first_blocker
     from .computer_use.result import failure
     from .computer_use.supervisor import run_task
 
     arguments = dict(arguments)
     ctx: Context | None = arguments.pop("ctx", None)
     params = ComputerUseTaskInput(**arguments)
-    blocker = first_blocker()
+    blocker = first_blocker(params.harness)
     if blocker is not None:
         return failure(f"{blocker.detail} Fix: {blocker.remediation}"), {}
-    node = find_node()
-    if node is None:  # Kept defensive because preflight already checked it.
-        return failure(
-            "Node 22 not found. Install Node 22 with: brew install node@22"
-        ), {}
     return await run_task(
         **params.model_dump(),
-        node=str(node),
         api_key=resolve_api_key_for_environment(
             os.environ.get(ENV_VAR_ENVIRONMENT) or DEFAULT_ENVIRONMENT
         ),

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import platform
 import re
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,6 +15,14 @@ from urllib.request import Request, urlopen
 
 from ..credentials import resolve_api_key_for_environment
 
+from .constants import (
+    DRIVER_VERSION,
+    HARNESS_NODE,
+    HARNESS_PYTHON,
+    HARNESS_PYTHON_MAX_EXCLUSIVE,
+    HARNESS_PYTHON_MIN,
+    resolve_harness,
+)
 from .runtime import RuntimeValidationError, get_manifest
 
 NODE_PATHS = (
@@ -41,8 +51,8 @@ DRIVER_PATHS = (
 )
 # An MCP client launched from the Dock inherits a minimal PATH that omits Homebrew, so every
 # tool we shell out to is resolved from an explicit list instead of the ambient PATH. The
-# runner subprocess needs this as its PATH too: it execs `cua-driver` by bare name, and its
-# macOS observation encoder execs `sips`.
+# runner subprocess needs this as its PATH too: shell commands the model runs resolve their
+# tools from it.
 TOOL_SEARCH_DIRECTORIES = (
     "/opt/homebrew/bin",
     "/usr/local/bin",
@@ -140,6 +150,35 @@ def check_runtime() -> CheckResult:
         return CheckResult("runtime", False, str(error), error.remediation)
 
 
+def check_harness() -> CheckResult:
+    """Whether the interpreter can run the pinned cua-agent harness.
+
+    The harness needs a newer Python than the rest of the MCP server declares,
+    so the dependency carries an interpreter marker and this check is what
+    tells a 3.10 install why the tool is unavailable instead of an ImportError
+    mid-run. find_spec keeps the probe cheap — actually importing cua_agent
+    pulls litellm into the server process for no reason.
+    """
+    floor = ".".join(str(part) for part in HARNESS_PYTHON_MIN)
+    ceiling = ".".join(str(part) for part in HARNESS_PYTHON_MAX_EXCLUSIVE)
+    remediation = (
+        "Reinstall with a supported interpreter: uvx --python 3.12 --refresh yutori-mcp"
+    )
+    version = ".".join(str(part) for part in sys.version_info[:3])
+    if not (HARNESS_PYTHON_MIN <= sys.version_info[:2] < HARNESS_PYTHON_MAX_EXCLUSIVE):
+        return _result(
+            "harness",
+            False,
+            f"Python {version} is outside the supported window [{floor}, {ceiling})",
+            remediation,
+        )
+    if importlib.util.find_spec("cua_agent") is None:
+        return _result(
+            "harness", False, "cua-agent is not installed", remediation
+        )
+    return _result("harness", True, f"cua-agent on Python {version}", remediation)
+
+
 def check_driver_app() -> CheckResult:
     return _result(
         "driver app",
@@ -200,8 +239,8 @@ def driver_version() -> str | None:
 def check_driver_contract() -> CheckResult:
     """Require a driver that answers, and report whether it matches the pin.
 
-    Deliberately not an equality gate. The manifest's driver_version records the release this
-    runtime was verified against, and a different one is not automatically broken: 0.18.0 drove a
+    Deliberately not an equality gate. DRIVER_VERSION records the release this
+    harness was verified against, and a different one is not automatically broken: 0.18.0 drove a
     full task correctly while the pin read 0.19.3. Blocking there would have refused a working
     machine over a version string. A live smoke run is the real gate, so this reports the drift
     rather than pretending to know it is fatal.
@@ -214,10 +253,7 @@ def check_driver_contract() -> CheckResult:
             "driver did not report a version",
             "Run: yutori-mcp computer-use setup",
         )
-    try:
-        pinned = str(get_manifest()["driver_version"])
-    except (RuntimeValidationError, KeyError):
-        pinned = "unknown"
+    pinned = DRIVER_VERSION
     matches = installed == pinned
     detail = (
         f"{installed}"
@@ -404,11 +440,20 @@ def check_dev_access() -> CheckResult:
     )
 
 
-CHECKS: tuple[Callable[[], CheckResult], ...] = (
+_PLATFORM_CHECKS: tuple[Callable[[], CheckResult], ...] = (
     check_macos,
     check_architecture,
-    check_node,
-    check_runtime,
+)
+
+# The toolchain each runner implementation needs, keyed by harness. Checked
+# between the platform and environment groups so "your interpreter cannot run
+# the selected harness" is reported before any driver probe shells out.
+HARNESS_CHECKS: dict[str, tuple[Callable[[], CheckResult], ...]] = {
+    HARNESS_NODE: (check_node, check_runtime),
+    HARNESS_PYTHON: (check_harness,),
+}
+
+_ENVIRONMENT_CHECKS: tuple[Callable[[], CheckResult], ...] = (
     check_driver_app,
     # Ordered before the contract check, which shells out to the binary: "cua-driver is not
     # installed where we look" is the actionable blocker, not the timeout it would cause.
@@ -423,12 +468,25 @@ CHECKS: tuple[Callable[[], CheckResult], ...] = (
 )
 
 
-def run_checks() -> list[CheckResult]:
-    return [check() for check in CHECKS]
+def checks_for(harness: str | None = None) -> tuple[Callable[[], CheckResult], ...]:
+    return _PLATFORM_CHECKS + HARNESS_CHECKS[resolve_harness(harness)] + _ENVIRONMENT_CHECKS
 
 
-def first_blocker() -> CheckResult | None:
-    for check in CHECKS:
+def run_checks(harness: str | None = None) -> list[CheckResult]:
+    return [check() for check in checks_for(harness)]
+
+
+def first_blocker(harness: str | None = None) -> CheckResult | None:
+    for check in checks_for(harness):
+        result = check()
+        if not result.ok:
+            return result
+    return None
+
+
+def harness_blocker(harness: str | None = None) -> CheckResult | None:
+    """The first failing toolchain check for one harness, environment aside."""
+    for check in HARNESS_CHECKS[resolve_harness(harness)]:
         result = check()
         if not result.ok:
             return result

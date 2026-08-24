@@ -41,6 +41,7 @@ ScoutStatus = Literal["active", "paused", "done"] | None
 TaskListStatus = Literal["running", "succeeded", "failed"] | None
 UsagePeriod = Literal["24h", "7d", "30d", "90d"] | None
 BrowserChoice = Literal["cloud", "local"] | None
+ComputerUseHarness = Literal["node", "python"] | None
 
 # Shared field descriptions, defined once so the call sites cannot drift out
 # of sync as the schemas evolve.
@@ -398,6 +399,14 @@ class ComputerUseTaskInput(ToolInput):
     )
     max_steps: int = Field(
         default=60, ge=1, le=100, description="Maximum actions (1-100)"
+    )
+    harness: ComputerUseHarness = Field(
+        default=None,
+        description=(
+            "Evaluation-only override of the runner implementation: 'node' (the "
+            "incumbent TypeScript runner, default) or 'python' (the SDK's cua-agent "
+            "harness). Omit to use the server default."
+        ),
     )
 
     @model_validator(mode="after")

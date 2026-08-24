@@ -16,10 +16,38 @@ import pytest
 from pydantic import ValidationError
 
 from yutori_mcp.computer_use import preflight
-from yutori_mcp.computer_use.lock import ComputerUseBusyError, DesktopLock
-from yutori_mcp.computer_use.runtime import RuntimeValidationError, load_runtime
+from yutori_mcp.computer_use import runner as runner_module
 from yutori_mcp.computer_use import supervisor
-from yutori_mcp.computer_use.supervisor import _stop_process_group, _supervise
+from yutori_mcp.computer_use.driver import (
+    CuaDriverDesktop,
+    DriverCLI,
+    DriverError,
+    DriverRefusal,
+    _payload_ok,
+    chunk_type_text,
+    format_shell_result,
+    normalize_key,
+    pick_best_window,
+    prepare_app,
+)
+from yutori_mcp.computer_use.constants import resolve_harness
+from yutori_mcp.computer_use.lock import ComputerUseBusyError, DesktopLock
+from yutori_mcp.computer_use.runner import (
+    ActionReporter,
+    Emitter,
+    RequestError,
+    RunGuard,
+    classify_result,
+    parse_request,
+)
+from yutori_mcp.computer_use.result import format_result
+from yutori_mcp.computer_use.runtime import RuntimeValidationError, load_runtime
+from yutori_mcp.computer_use.supervisor import (
+    _stop_process_group,
+    _supervise,
+    python_runner_command,
+    run_task,
+)
 from yutori_mcp.schemas import ComputerUseTaskInput
 
 
@@ -93,14 +121,38 @@ def test_lock_releases_on_exception_and_cancellation(tmp_path, error):
         pass
 
 
-def _runtime(protocol=1, verified=True):
-    return SimpleNamespace(PROTOCOL_VERSION=protocol, verify_runner=lambda: verified)
+def test_installer_checksum_aborts_before_execution(monkeypatch):
+    from yutori_mcp.computer_use import cli
+
+    monkeypatch.setattr(cli, "harness_blocker", lambda harness=None: None)
+    monkeypatch.setattr(cli, "_download_installer", lambda _: b"installer")
+    with patch("yutori_mcp.computer_use.cli.subprocess.run") as run:
+        assert cli._setup() == 1
+    run.assert_not_called()
+
+
+def test_harness_resolution_orders_request_env_default(monkeypatch):
+    monkeypatch.delenv("YUTORI_COMPUTER_USE_HARNESS", raising=False)
+    assert resolve_harness() == "node"
+    monkeypatch.setenv("YUTORI_COMPUTER_USE_HARNESS", "python")
+    assert resolve_harness() == "python"
+    assert resolve_harness("node") == "node"
+    with pytest.raises(ValueError, match="Unknown computer-use harness"):
+        resolve_harness("typescript")
+
+
+def test_schema_accepts_only_known_harnesses():
+    assert ComputerUseTaskInput(task="x").harness is None
+    assert ComputerUseTaskInput(task="x", harness="python").harness == "python"
+    with pytest.raises(ValidationError):
+        ComputerUseTaskInput(task="x", harness="typescript")
 
 
 def test_runtime_protocol_mismatch_has_one_remediation():
     with (
         patch(
-            "yutori_mcp.computer_use.runtime.import_module", return_value=_runtime(2)
+            "yutori_mcp.computer_use.runtime.import_module",
+            return_value=SimpleNamespace(PROTOCOL_VERSION=2, verify_runner=lambda: True),
         ),
         pytest.raises(RuntimeValidationError) as error,
     ):
@@ -113,28 +165,13 @@ def test_runtime_hash_mismatch_has_one_remediation():
     with (
         patch(
             "yutori_mcp.computer_use.runtime.import_module",
-            return_value=_runtime(verified=False),
+            return_value=SimpleNamespace(PROTOCOL_VERSION=1, verify_runner=lambda: False),
         ),
         pytest.raises(RuntimeValidationError) as error,
     ):
         load_runtime()
     assert "integrity" in str(error.value)
     assert str(error.value).count(error.value.remediation) == 1
-
-
-def test_installer_checksum_aborts_before_execution(monkeypatch):
-    from yutori_mcp.computer_use import cli
-
-    monkeypatch.setattr(cli, "check_node", lambda: SimpleNamespace(ok=True))
-    monkeypatch.setattr(
-        cli,
-        "get_manifest",
-        lambda: {"driver_version": "0.19.3", "driver_installer_sha256": "bad"},
-    )
-    monkeypatch.setattr(cli, "_download_installer", lambda _: b"installer")
-    with patch("yutori_mcp.computer_use.cli.subprocess.run") as run:
-        assert cli._setup() == 1
-    run.assert_not_called()
 
 
 class _Writer:
@@ -184,8 +221,7 @@ async def test_supervisor_redacts_key_and_keeps_it_out_of_argv():
     create = AsyncMock(return_value=process)
     with patch("asyncio.create_subprocess_exec", create):
         result = await _supervise(
-            node="/node",
-            runner="/runner.mjs",
+            command=["/python", "-m", "yutori_mcp.computer_use.runner"],
             request={"type": "run"},
             api_key=secret,
             deadline=time.monotonic() + 1,
@@ -238,8 +274,7 @@ async def test_cancellation_returns_structured_result_and_stops_group():
     ):
         task = asyncio.create_task(
             _supervise(
-                node="/node",
-                runner="/runner",
+                command=["/python", "-m", "yutori_mcp.computer_use.runner"],
                 request={"type": "run"},
                 api_key="secret",
                 deadline=time.monotonic() + 60,
@@ -273,11 +308,10 @@ def test_cli_dispatches_commands(command):
             called.assert_called_once()
 
 
-async def test_child_environment_can_resolve_cua_driver_and_sips():
-    """The runner execs `cua-driver` and `sips` by bare name.
-
-    An env built from scratch without PATH makes every run die with ENOENT before the model is
-    ever called, and no faked-subprocess test would notice.
+async def test_child_environment_has_path_and_disables_harness_telemetry():
+    """Shell commands the model runs resolve tools from PATH, and the harness
+    fires an import-time telemetry event unless the env var is off — the
+    constructor flag alone is too late for that one.
     """
     process = _Process(
         _stream(
@@ -288,15 +322,127 @@ async def test_child_environment_can_resolve_cua_driver_and_sips():
     create = AsyncMock(return_value=process)
     with patch("asyncio.create_subprocess_exec", create):
         await _supervise(
-            node="/node",
-            runner="/runner.mjs",
+            command=["/python", "-m", "yutori_mcp.computer_use.runner"],
             request={"type": "run"},
             api_key="yt-key",
             deadline=time.monotonic() + 1,
         )
-    child_path = create.await_args.kwargs["env"]["PATH"]
-    assert "/usr/bin" in child_path.split(":")
-    assert "/opt/homebrew/bin" in child_path.split(":")
+    env = create.await_args.kwargs["env"]
+    assert "/usr/bin" in env["PATH"].split(":")
+    assert "/opt/homebrew/bin" in env["PATH"].split(":")
+    assert env["CUA_TELEMETRY_ENABLED"] == "false"
+
+
+def test_python_runner_command_uses_this_interpreter():
+    assert python_runner_command()[0] == sys.executable
+    assert python_runner_command()[1:] == ["-m", "yutori_mcp.computer_use.runner"]
+
+
+def _run_task_kwargs(tmp_path, **overrides):
+    kwargs = {
+        "task": "open calculator",
+        "app": None,
+        "start_url": None,
+        "minutes": 1,
+        "max_steps": 10,
+        "api_key": "yt-key",
+        "api_base_url": "https://api.dev.yutori.com/v1",
+        "lock": DesktopLock(tmp_path / "desktop.lock"),
+    }
+    kwargs.update(overrides)
+    return kwargs
+
+
+async def test_run_task_python_harness_carries_driver_path_and_model(tmp_path):
+    driver = tmp_path / "cua-driver"
+    driver.write_text("")
+    supervise = AsyncMock(return_value={"outcome": "completed"})
+    with (
+        patch.object(supervisor, "_supervise", supervise),
+        patch.object(supervisor, "find_cua_driver", return_value=driver),
+    ):
+        result = await run_task(
+            **_run_task_kwargs(tmp_path, harness="python")
+        )
+    assert result == {"outcome": "completed"}
+    request = supervise.await_args.kwargs["request"]
+    assert request["driver_path"] == str(driver)
+    assert request["model"] == "n2-preview"
+    assert request["protocol_version"] == 1
+    assert supervise.await_args.kwargs["command"][0] == sys.executable
+
+
+async def test_run_task_defaults_to_the_node_harness(tmp_path, monkeypatch):
+    monkeypatch.delenv("YUTORI_COMPUTER_USE_HARNESS", raising=False)
+    supervise = AsyncMock(return_value={"outcome": "completed"})
+
+    class _RunnerPath:
+        def __enter__(self):
+            return "/wheel/runner.mjs"
+
+        def __exit__(self, *args):
+            return False
+
+    runtime = SimpleNamespace(runner_path=lambda: _RunnerPath())
+    with (
+        patch.object(supervisor, "_supervise", supervise),
+        patch.object(supervisor, "find_node", return_value=pathlib.Path("/opt/node")),
+        patch.object(supervisor, "load_runtime", return_value=runtime),
+    ):
+        result = await run_task(**_run_task_kwargs(tmp_path))
+    assert result == {"outcome": "completed"}
+    assert supervise.await_args.kwargs["command"] == ["/opt/node", "/wheel/runner.mjs"]
+    # The Node runner resolves cua-driver from PATH; the field is python-only.
+    assert "driver_path" not in supervise.await_args.kwargs["request"]
+
+
+async def test_run_task_env_var_selects_the_python_harness(tmp_path, monkeypatch):
+    monkeypatch.setenv("YUTORI_COMPUTER_USE_HARNESS", "python")
+    driver = tmp_path / "cua-driver"
+    driver.write_text("")
+    supervise = AsyncMock(return_value={"outcome": "completed"})
+    with (
+        patch.object(supervisor, "_supervise", supervise),
+        patch.object(supervisor, "find_cua_driver", return_value=driver),
+    ):
+        await run_task(**_run_task_kwargs(tmp_path))
+    assert supervise.await_args.kwargs["command"][1:] == [
+        "-m",
+        "yutori_mcp.computer_use.runner",
+    ]
+
+
+async def test_run_task_rejects_an_unknown_harness(tmp_path):
+    supervise = AsyncMock()
+    with patch.object(supervisor, "_supervise", supervise):
+        result = await run_task(**_run_task_kwargs(tmp_path, harness="typescript"))
+    assert result["outcome"] == "failed"
+    assert "Unknown computer-use harness" in result["final_text"]
+    supervise.assert_not_awaited()
+
+
+async def test_run_task_python_reports_a_missing_driver_without_spawning(tmp_path):
+    supervise = AsyncMock()
+    with (
+        patch.object(supervisor, "_supervise", supervise),
+        patch.object(supervisor, "find_cua_driver", return_value=None),
+    ):
+        result = await run_task(**_run_task_kwargs(tmp_path, harness="python"))
+    assert result["outcome"] == "failed"
+    assert "cua-driver" in result["final_text"]
+    supervise.assert_not_awaited()
+
+
+async def test_run_task_node_reports_missing_node_without_spawning(tmp_path):
+    supervise = AsyncMock()
+    with (
+        patch.object(supervisor, "_supervise", supervise),
+        patch.object(supervisor, "find_node", return_value=None),
+    ):
+        result = await run_task(**_run_task_kwargs(tmp_path, harness="node"))
+    assert result["outcome"] == "failed"
+    assert "Node 22" in result["final_text"]
+    supervise.assert_not_awaited()
 
 
 def test_child_search_path_prefers_the_resolved_driver_directory(tmp_path):
@@ -320,8 +466,29 @@ def test_missing_driver_binary_is_the_reported_blocker_before_the_contract_check
         result = preflight.check_driver_binary()
     assert not result.ok
     assert result.remediation == "Run: yutori-mcp computer-use setup"
-    names = [check.__name__ for check in preflight.CHECKS]
-    assert names.index("check_driver_binary") < names.index("check_driver_contract")
+    for harness in ("node", "python"):
+        names = [check.__name__ for check in preflight.checks_for(harness)]
+        assert names.index("check_driver_binary") < names.index("check_driver_contract")
+
+
+def test_checks_gate_each_harness_on_its_own_toolchain():
+    node_names = [check.__name__ for check in preflight.checks_for("node")]
+    python_names = [check.__name__ for check in preflight.checks_for("python")]
+    assert "check_node" in node_names and "check_runtime" in node_names
+    assert "check_harness" not in node_names
+    assert "check_harness" in python_names
+    assert "check_node" not in python_names and "check_runtime" not in python_names
+
+
+def test_harness_blocker_reports_only_toolchain_failures():
+    with patch.object(preflight, "find_node", return_value=None):
+        blocker = preflight.harness_blocker("node")
+    assert blocker is not None and blocker.name == "Node 22"
+    with (
+        patch.object(preflight.sys, "version_info", (3, 12, 0)),
+        patch.object(preflight.importlib.util, "find_spec", return_value=object()),
+    ):
+        assert preflight.harness_blocker("python") is None
 
 
 @pytest.mark.parametrize(
@@ -337,6 +504,34 @@ def test_platform_blockers_each_return_one_remediation(check, patched, value):
         result = getattr(preflight, check)()
     assert not result.ok
     assert result.remediation
+
+
+def test_harness_check_blocks_an_unsupported_interpreter():
+    with patch.object(preflight.sys, "version_info", (3, 10, 4)):
+        result = preflight.check_harness()
+    assert not result.ok
+    assert "3.10" in result.detail
+    assert "uvx --python" in result.remediation
+
+
+def test_harness_check_blocks_a_missing_cua_agent():
+    with (
+        patch.object(preflight.sys, "version_info", (3, 12, 0)),
+        patch.object(preflight.importlib.util, "find_spec", return_value=None),
+    ):
+        result = preflight.check_harness()
+    assert not result.ok
+    assert "cua-agent" in result.detail
+
+
+def test_harness_check_passes_on_a_supported_setup():
+    with (
+        patch.object(preflight.sys, "version_info", (3, 12, 0)),
+        patch.object(
+            preflight.importlib.util, "find_spec", return_value=object()
+        ),
+    ):
+        assert preflight.check_harness().ok
 
 
 def test_env_flag_after_import_still_registers_the_tool():
@@ -434,12 +629,9 @@ def test_capture_goes_through_the_driver_not_screencapture(tmp_path):
 def test_driver_contract_reports_drift_without_blocking_a_working_driver():
     """0.18.0 drove a full task while the pin read 0.19.3; refusing that would be wrong."""
     with patch.object(preflight, "driver_version", return_value="0.18.0"):
-        with patch.object(
-            preflight, "get_manifest", return_value={"driver_version": "0.19.3"}
-        ):
-            result = preflight.check_driver_contract()
+        result = preflight.check_driver_contract()
     assert result.ok
-    assert "0.18.0" in result.detail and "0.19.3" in result.detail
+    assert "0.18.0" in result.detail and preflight.DRIVER_VERSION in result.detail
 
 
 def test_driver_contract_blocks_when_the_driver_cannot_answer():
@@ -566,8 +758,7 @@ async def test_supervisor_forwards_ready_and_action_events():
 
     with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
         result = await _supervise(
-            node="/node",
-            runner="/runner.mjs",
+            command=["/python", "-m", "yutori_mcp.computer_use.runner"],
             request={"type": "run"},
             api_key="yt-key",
             deadline=time.monotonic() + 1,
@@ -595,8 +786,7 @@ async def test_supervisor_survives_raising_event_callback():
 
     with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
         result = await _supervise(
-            node="/node",
-            runner="/runner.mjs",
+            command=["/python", "-m", "yutori_mcp.computer_use.runner"],
             request={"type": "run"},
             api_key="yt-key",
             deadline=time.monotonic() + 1,
@@ -633,8 +823,7 @@ async def test_supervisor_disables_hanging_event_callback(monkeypatch):
 
     with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
         result = await _supervise(
-            node="/node",
-            runner="/runner.mjs",
+            command=["/python", "-m", "yutori_mcp.computer_use.runner"],
             request={"type": "run"},
             api_key="yt-key",
             deadline=time.monotonic() + 5,
@@ -661,14 +850,14 @@ async def test_progress_reporter_formats_ready_and_action_events():
             "index": 7,
             "tool": "computer_batch",
             "status": "refused",
-            "refusal_code": "stale_same_turn_action",
+            "refusal_code": "driver_refused",
             "elapsed_ms": 120,
         }
     )
     action_message = ctx.info.await_args.args[0]
     assert "action #7" in action_message
     assert "computer_batch -> refused" in action_message
-    assert "stale_same_turn_action" in action_message
+    assert "driver_refused" in action_message
     assert "[120 ms]" in action_message
     assert ctx.report_progress.await_args.kwargs["progress"] == 7
 
@@ -680,10 +869,6 @@ async def test_handle_computer_use_pops_ctx_and_wires_on_event():
     ctx = SimpleNamespace(report_progress=AsyncMock(), info=AsyncMock())
     with (
         patch("yutori_mcp.computer_use.preflight.first_blocker", return_value=None),
-        patch(
-            "yutori_mcp.computer_use.preflight.find_node",
-            return_value=pathlib.Path("/node"),
-        ),
         patch("yutori_mcp.computer_use.supervisor.run_task", run_task),
         patch(
             "yutori_mcp.credentials.resolve_api_key_for_environment",
@@ -704,10 +889,6 @@ async def test_handle_computer_use_pops_ctx_and_wires_on_event():
     run_task.reset_mock()
     with (
         patch("yutori_mcp.computer_use.preflight.first_blocker", return_value=None),
-        patch(
-            "yutori_mcp.computer_use.preflight.find_node",
-            return_value=pathlib.Path("/node"),
-        ),
         patch("yutori_mcp.computer_use.supervisor.run_task", run_task),
         patch(
             "yutori_mcp.credentials.resolve_api_key_for_environment",
@@ -717,3 +898,491 @@ async def test_handle_computer_use_pops_ctx_and_wires_on_event():
     ):
         await server._handle_computer_use(None, {"task": "open calculator"})
     assert run_task.await_args.kwargs["on_event"] is None
+
+
+# ---------------------------------------------------------------------------
+# Runner: request parsing, event mapping, and run bounds.
+# ---------------------------------------------------------------------------
+
+
+def _valid_request(**overrides):
+    request = {
+        "protocol_version": 1,
+        "type": "run",
+        "task": "open calculator",
+        "app": None,
+        "start_url": None,
+        "deadline_ms": 1_000_000,
+        "max_steps": 10,
+        "model": "n2-preview",
+        "api_base_url": "https://api.dev.yutori.com/v1",
+        "driver_path": "/x/cua-driver",
+    }
+    request.update(overrides)
+    return request
+
+
+def test_parse_request_accepts_the_supervisor_shape():
+    parsed = parse_request(_valid_request())
+    assert parsed["task"] == "open calculator"
+    assert parsed["driver_path"] == "/x/cua-driver"
+
+
+@pytest.mark.parametrize(
+    "overrides,code",
+    [
+        ({"protocol_version": 2}, "UNSUPPORTED_PROTOCOL_VERSION"),
+        ({"type": "walk"}, "INVALID_REQUEST"),
+        ({"task": ""}, "INVALID_REQUEST"),
+        ({"start_url": "https://x", "app": None}, "INVALID_REQUEST"),
+        ({"deadline_ms": 0}, "INVALID_REQUEST"),
+        ({"deadline_ms": True}, "INVALID_REQUEST"),
+        ({"max_steps": -1}, "INVALID_REQUEST"),
+        ({"driver_path": ""}, "INVALID_REQUEST"),
+        ({"api_base_url": None}, "INVALID_REQUEST"),
+    ],
+)
+def test_parse_request_rejects_malformed_requests(overrides, code):
+    with pytest.raises(RequestError) as error:
+        parse_request(_valid_request(**overrides))
+    assert error.value.code == code
+
+
+@pytest.mark.parametrize(
+    "output,raw_status,status",
+    [
+        ("Batch completed; completed=3.", "confirmed", "executed"),
+        ("[ERROR] Refused an action.", "refused", "refused"),
+        ("[ERROR] Action was not confirmed by the user.", "refused", "refused"),
+        ("[ERROR] shell_command failed: command was killed after exceeding its "
+         "10-second timeout", "timeout_after_possible_dispatch", "uncertain"),
+        ("[ERROR] Invalid left_click call: bad coordinates", "unverifiable", "uncertain"),
+        ({"type": "input_image", "image_url": "data:...",
+          "result": {"status": "stopped", "error": "boom"}}, "unverifiable", "uncertain"),
+        ({"type": "input_image", "image_url": "data:...",
+          "result": {"status": "completed", "completed": 3}}, "confirmed", "executed"),
+        ({"type": "input_image", "image_url": "data:...",
+          "result": "[ERROR] bash failed: nope"}, "unverifiable", "uncertain"),
+    ],
+)
+def test_classify_result_maps_outputs_to_statuses(output, raw_status, status):
+    outputs = [{"type": "function_call_output", "call_id": "c1", "output": output}]
+    assert classify_result(outputs) == raw_status
+    from yutori_mcp.computer_use.runner import _status_for
+
+    assert _status_for(raw_status) == status
+
+
+class _CollectStream:
+    def __init__(self):
+        self.lines: list[str] = []
+
+    def write(self, data):
+        self.lines.append(data)
+
+    def flush(self):
+        pass
+
+
+async def test_action_reporter_events_satisfy_the_result_formatter():
+    stream = _CollectStream()
+    reporter = ActionReporter(Emitter(stream), time.monotonic())
+    await reporter.on_computer_call_end(
+        {"type": "function_call", "name": "Computer_Batch"},
+        [{"type": "function_call_output", "call_id": "c1", "output": "ok"}],
+    )
+    await reporter.on_computer_call_end(
+        {"type": "function_call", "name": "left_click"},
+        [{"type": "function_call_output", "call_id": "c2",
+          "output": "[ERROR] Refused a click."}],
+    )
+    events = [json.loads(line) for line in stream.lines]
+    assert [event["index"] for event in events] == [0, 1]
+    assert events[0]["tool"] == "computer_batch"
+    assert events[1]["status"] == "refused"
+    assert events[1]["refusal_code"] == "driver_refused"
+    # format_result formats each action with **action, so every key must exist.
+    formatted = format_result(
+        {"outcome": "completed", "final_text": "ok", "actions": events}
+    )
+    assert "#0 computer_batch: executed" in formatted
+
+
+async def test_run_guard_stops_at_the_step_cap_but_never_on_the_first_iteration():
+    # Stopping iteration zero trips an UnboundLocalError inside the harness's
+    # on_run_end, so the guard always allows one step.
+    guard = RunGuard(1, time.monotonic() - 5)
+    assert await guard.on_run_continue({}, [], []) is True
+    assert await guard.on_run_continue({}, [], []) is False
+    assert guard.limit_reached or guard.deadline_reached
+
+
+async def test_run_guard_deadline_reports_separately_from_the_step_cap():
+    guard = RunGuard(50, time.monotonic() - 1)
+    assert await guard.on_run_continue({}, [], []) is True
+    assert await guard.on_run_continue({}, [], []) is False
+    assert guard.deadline_reached and not guard.limit_reached
+
+
+async def test_run_guard_recovers_a_crashed_app_then_gives_up():
+    relaunches: list[str] = []
+
+    async def fake_prepare(cli, app, start_url):
+        relaunches.append(app)
+        if len(relaunches) >= 2:
+            raise DriverError("still down")
+        return {"name": app, "pid": os.getpid()}
+
+    guard = RunGuard(
+        50,
+        time.monotonic() + 60,
+        cli=object(),
+        app="Calculator",
+        start_url=None,
+        target={"name": "Calculator", "pid": 2_147_000_000},
+    )
+    with patch.object(runner_module, "prepare_app", side_effect=fake_prepare):
+        assert await guard.on_run_continue({}, [], []) is True  # first step is free
+        # Recovery succeeds once (pid becomes this test process), so the run continues.
+        assert await guard.on_run_continue({}, [], []) is True
+        assert guard.recovery_attempts == 1
+        # Kill the target again: the remaining attempt fails and the run stops.
+        guard._target = {"name": "Calculator", "pid": 2_147_000_000}
+        assert await guard.on_run_continue({}, [], []) is False
+    assert guard.target_crashed
+    assert relaunches == ["Calculator", "Calculator"]
+
+
+# ---------------------------------------------------------------------------
+# Driver client and desktop handler.
+# ---------------------------------------------------------------------------
+
+
+def test_payload_validation_raises_refusals_with_the_word_refused():
+    with pytest.raises(DriverRefusal, match="refused"):
+        _payload_ok("click", {"status": "refused"})
+    with pytest.raises(DriverRefusal, match="refused"):
+        _payload_ok("click", {"refusal": {"code": "protected_resource"}})
+
+
+def test_payload_validation_applies_the_bare_code_rule():
+    # Driver >=0.16 stamps informational codes on successful payloads.
+    assert _payload_ok("click", {"code": "ok", "activated": True})["code"] == "ok"
+    assert _payload_ok(
+        "click", {"code": "ok", "request_accepted": True, "status": "done"}
+    )
+    with pytest.raises(DriverError):
+        _payload_ok("click", {"code": "something_failed"})
+    with pytest.raises(DriverError):
+        _payload_ok("click", {"code": "x", "request_accepted": True, "status": "partial"})
+
+
+def test_chunk_type_text_prefers_word_boundaries_and_reassembles():
+    text = ("word " * 300).strip()
+    chunks = chunk_type_text(text)
+    assert all(len(chunk) <= 500 for chunk in chunks)
+    assert "".join(chunks) == text
+    assert chunk_type_text("a" * 1200) == ["a" * 500, "a" * 500, "a" * 200]
+
+
+def test_normalize_key_maps_aliases_and_punctuation():
+    assert normalize_key("Enter") == "return"
+    assert normalize_key("esc") == "escape"
+    assert normalize_key("meta") == "cmd"
+    assert normalize_key("period") == "."
+    assert normalize_key("q") == "q"
+
+
+def test_pick_best_window_excludes_helper_strips():
+    strips = [
+        {"window_id": index, "bounds": {"width": 600, "height": 20}, "z_index": 9}
+        for index in range(4)
+    ]
+    main_window = {
+        "window_id": 99,
+        "bounds": {"width": 400, "height": 500},
+        "z_index": 1,
+    }
+    assert pick_best_window(strips + [main_window])["window_id"] == 99
+    # All-helper fallback: the largest window by area.
+    assert pick_best_window(strips)["window_id"] == 0
+
+
+class _FakeCLI:
+    def __init__(self, responses=None):
+        self.calls: list[tuple[str, dict]] = []
+        self.responses = responses or {}
+
+    async def call(self, tool, args):
+        self.calls.append((tool, args))
+        response = self.responses.get(tool)
+        if isinstance(response, Exception):
+            raise response
+        if callable(response):
+            return response(args)
+        return response or {}
+
+    async def capture(self, tool, args):
+        self.calls.append((tool, args))
+        return {"screenshot_width": 3840, "screenshot_height": 2160}, b"png-bytes"
+
+
+async def test_prepare_app_uses_the_bundle_id_heuristic_with_name_retry():
+    attempts: list[dict] = []
+
+    def launch(args):
+        attempts.append(args)
+        if "bundle_id" in args:
+            raise DriverError("unknown bundle")
+        return {"pid": 42, "name": "Calculator", "windows": []}
+
+    cli = _FakeCLI({"launch_app": launch, "bring_to_front": {}})
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()):
+        target = await prepare_app(cli, "com.apple.calculator", "https://example.com")
+    assert target == {"name": "Calculator", "pid": 42}
+    assert attempts[0] == {
+        "bundle_id": "com.apple.calculator",
+        "urls": ["https://example.com"],
+    }
+    assert attempts[1] == {
+        "name": "com.apple.calculator",
+        "urls": ["https://example.com"],
+    }
+    # launch_app and bring_to_front never carry a session: a session id on any
+    # action would pin capture_scope before the desktop session starts.
+    assert all("session" not in args for _tool, args in cli.calls)
+
+
+async def test_prepare_app_fronting_failures_are_not_fatal():
+    cli = _FakeCLI(
+        {
+            "launch_app": {"pid": 7, "name": "TextEdit", "windows": [
+                {"window_id": 3, "bounds": {"width": 800, "height": 600}}
+            ]},
+            "bring_to_front": DriverError("bring_to_front_exact_window_unverified"),
+        }
+    )
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()):
+        target = await prepare_app(cli, "TextEdit", None)
+    assert target["pid"] == 7
+
+
+async def test_desktop_screenshot_returns_base64_and_caches_native_size():
+    cli = _FakeCLI()
+    desktop = CuaDriverDesktop(cli, session="s1")
+    image = await desktop.screenshot()
+    assert image == "cG5nLWJ5dGVz"  # base64 of b"png-bytes"
+    assert await desktop.get_dimensions() == (3840, 2160)
+
+
+async def test_desktop_scroll_recovers_direction_and_amount():
+    cli = _FakeCLI()
+    desktop = CuaDriverDesktop(cli, session="s1")
+    desktop._native_size = (3840, 2160)
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()):
+        # The loop converts the model's amount=5 into pixels: 5 * 2160 * 0.1.
+        await desktop.scroll(100, 200, 0, 1080)
+    tool, args = cli.calls[-1]
+    assert tool == "scroll"
+    assert args["direction"] == "down"
+    assert args["amount"] == 15  # model amount 5, tripled like the previous runner
+    assert args["by"] == "line"
+    assert args["scope"] == "desktop" and args["session"] == "s1"
+
+
+async def test_desktop_keypress_normalizes_and_routes_chords():
+    cli = _FakeCLI()
+    desktop = CuaDriverDesktop(cli, session="s1")
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()):
+        await desktop.keypress("Enter")
+        await desktop.keypress(["cmd", "shift", "s"])
+    assert cli.calls[0][0] == "press_key" and cli.calls[0][1]["key"] == "return"
+    assert cli.calls[1][0] == "hotkey" and cli.calls[1][1]["keys"] == [
+        "cmd",
+        "shift",
+        "s",
+    ]
+
+
+async def test_desktop_type_chunks_long_text_with_zero_delay():
+    cli = _FakeCLI()
+    desktop = CuaDriverDesktop(cli, session="s1")
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()):
+        await desktop.type("a" * 1200)
+    type_calls = [args for tool, args in cli.calls if tool == "type_text"]
+    assert [len(args["text"]) for args in type_calls] == [500, 500, 200]
+    assert all(args["delay_ms"] == 0 for args in type_calls)
+
+
+async def test_run_shell_command_kills_the_group_on_timeout():
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    with pytest.raises(TimeoutError, match="1-second timeout"):
+        await desktop.run_shell_command("sleep 30", timeout_seconds=1)
+
+
+async def test_run_shell_command_formats_exit_codes():
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    result = await desktop.run_shell_command("echo out; exit 3")
+    assert result == "out\n[exit code 3]"
+    assert await desktop.run_shell_command("true") == (
+        "Command exited with code 0 and produced no output."
+    )
+
+
+async def test_run_bash_command_persists_the_working_directory(tmp_path):
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    await desktop.run_bash_command(f"cd {tmp_path}")
+    result = await desktop.run_bash_command("pwd")
+    assert tmp_path.name in result
+
+
+def test_format_shell_result_keeps_the_exit_marker_within_the_cap():
+    result = format_shell_result("x" * 9000, 2)
+    assert len(result) <= 8000
+    assert result.endswith("[exit code 2]")
+    assert "[result truncated]" in result
+
+
+class _RunnerCLITransportProcess:
+    def __init__(self, stdout=b"{}", returncode=0):
+        self._stdout = stdout
+        self.returncode = returncode
+
+    async def communicate(self):
+        return self._stdout, b""
+
+
+async def test_driver_cli_sends_compact_json_argv(tmp_path):
+    create = AsyncMock(
+        return_value=_RunnerCLITransportProcess(stdout=b'{"activated": true}')
+    )
+    cli = DriverCLI("/x/cua-driver", capture_dir=tmp_path)
+    with patch("asyncio.create_subprocess_exec", create):
+        payload = await cli.call("click", {"x": 1, "y": 2})
+    assert payload == {"activated": True}
+    argv = create.await_args.args
+    assert argv[0] == "/x/cua-driver"
+    assert argv[1] == "call" and argv[2] == "click"
+    assert json.loads(argv[3]) == {"x": 1, "y": 2}
+    assert argv[4] == "--raw"
+
+
+async def test_driver_cli_capture_retries_until_a_frame_arrives(tmp_path):
+    attempts = 0
+
+    async def call(tool, args):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            return {}  # mid-repaint: no pixel frame
+        Path(args["screenshot_out_file"]).write_bytes(b"png")
+        return {"screenshot_width": 100, "screenshot_height": 50}
+
+    cli = DriverCLI("/x/cua-driver", capture_dir=tmp_path)
+    with (
+        patch.object(cli, "call", side_effect=call),
+        patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()),
+    ):
+        payload, image = await cli.capture("get_desktop_state", {"session": "s"})
+    assert attempts == 3
+    assert payload["screenshot_width"] == 100 and image == b"png"
+
+
+async def test_driver_cli_capture_reports_a_permanently_missing_frame(tmp_path):
+    cli = DriverCLI("/x/cua-driver", capture_dir=tmp_path)
+    with (
+        patch.object(cli, "call", AsyncMock(return_value={})),
+        patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()),
+    ):
+        with pytest.raises(DriverError, match="no usable pixel frame"):
+            await cli.capture("get_desktop_state", {"session": "s"})
+
+
+async def test_cua_agent_accepts_the_desktop_handler():
+    """The harness's handler protocol is runtime-checkable on member PRESENCE.
+
+    A handler missing any member (left_mouse_down/up included) silently falls
+    through to "Unknown tool type", computer_handler stays None, and the first
+    step dies with "No current screenshot". This pins the whole surface.
+    """
+    cua_agent = pytest.importorskip("cua_agent")
+
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    agent = cua_agent.ComputerAgent(
+        model="yutori/n2-preview",
+        tools=[desktop],
+        api_key="yt-test",
+        telemetry_enabled=False,
+        tool_set="computer_use_tools-20260729",
+    )
+    await agent._initialize_computers()
+    assert agent.computer_handler is not None
+    # The optional shell capabilities are duck-typed by method presence.
+    assert hasattr(desktop, "run_shell_command")
+    assert hasattr(desktop, "run_bash_command")
+
+
+async def test_failed_run_reports_completed_steps_and_redacts_the_key(monkeypatch):
+    """A run that crashes on step N must report N steps, not zero.
+
+    The failed result is emitted inside run_request, the only scope that can
+    still see the guard's counter and the run clock.
+    """
+
+    class _FakeAgent:
+        def __init__(self, **kwargs):
+            self.callbacks = kwargs.get("callbacks") or []
+
+        async def run(self, _messages, stream=False):
+            del stream
+            for _ in range(2):
+                for callback in self.callbacks:
+                    if hasattr(callback, "on_run_continue"):
+                        assert await callback.on_run_continue({}, [], [])
+                yield {"output": []}
+            raise RuntimeError("boom mid-run holding yt-secret")
+
+    monkeypatch.setitem(
+        sys.modules, "cua_agent", SimpleNamespace(ComputerAgent=_FakeAgent)
+    )
+    monkeypatch.setattr(runner_module, "DriverCLI", lambda path: _FakeCLI())
+    stream = _CollectStream()
+    request = parse_request(
+        _valid_request(deadline_ms=int((time.time() + 60) * 1000), max_steps=30)
+    )
+    outcome = await runner_module.run_request(
+        request, Emitter(stream), api_key="yt-secret"
+    )
+    assert outcome == "failed"
+    result = json.loads(stream.lines[-1])
+    assert result["outcome"] == "failed"
+    assert result["steps"] == 2
+    assert result["elapsed_ms"] >= 0
+    assert "yt-secret" not in json.dumps(result)
+    assert "[REDACTED]" in result["final_text"]
+
+
+@pytest.mark.parametrize("command", ["setup", "doctor", "smoke"])
+def test_cli_reports_a_bad_harness_env_without_a_traceback(
+    command, monkeypatch, capsys
+):
+    from yutori_mcp.computer_use import cli
+
+    monkeypatch.setenv("YUTORI_COMPUTER_USE_HARNESS", "typescript")
+    assert cli.dispatch(command) == 1
+    assert "Unknown computer-use harness" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("[DONE] All set.", "All set."),
+        ("All set.\n\n[DONE]", "All set."),
+        ("[INFEASIBLE] The app is gone.", "The app is gone."),
+        ("[DONE]", None),
+        (None, None),
+    ],
+)
+def test_final_markers_are_stripped_from_either_end(text, expected):
+    # A live run produced a trailing "[DONE]"; the wire text must carry neither.
+    assert runner_module._strip_final_markers(text) == expected

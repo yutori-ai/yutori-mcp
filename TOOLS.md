@@ -17,8 +17,9 @@ Visible desktop content is sent to Yutori's dev model endpoint.
 | `start_url` | No | Starting URL; requires `app` |
 | `minutes` | No | Absolute deadline, 1–15 minutes (default 3) |
 | `max_steps` | No | Maximum actions, 1–100 (default 60) |
+| `harness` | No | Evaluation-only runner override: `node` (default) or `python` |
 
-First-time setup: install Node 22 with `brew install node@22`, authenticate, then run
+First-time setup: authenticate, then run
 `uvx yutori-mcp computer-use setup` and `uvx yutori-mcp computer-use doctor`. Use
 `uvx yutori-mcp computer-use smoke` for the Calculator smoke test.
 

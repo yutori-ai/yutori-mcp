@@ -22,28 +22,45 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
 
-      # The computer-use runtime is a PEP 508 git reference to a private repo, so uv has to be
-      # able to clone it just to read its metadata — even here on Linux, where the darwin marker
-      # means it is never actually installed. Without this, resolution fails outright and no test
-      # runs at all, which is why this repo has never had a green build.
+      # Both computer-use runners are PEP 508 git references to private repos, so uv has to be
+      # able to clone each just to read its metadata — even here on Linux, where the darwin
+      # markers mean neither is actually installed. Without this, resolution fails outright and
+      # no test runs at all, which is why this repo has never had a green build.
+      #
+      # Deploy keys are per-repo and both repos live on github.com, so each key gets its own
+      # SSH host alias and a git insteadOf rewrite routes each clone URL to its alias —
+      # otherwise SSH offers one key for both clones and the second repo rejects it.
       #
       # Written out by hand rather than pulling in a third-party ssh-agent action: that would be
-      # one more dependency holding a key that can read a private repository.
-      - name: Authorize the private runtime dependency
+      # one more dependency holding keys that can read private repositories.
+      - name: Authorize the private runner dependencies
         env:
           SDK_DEPLOY_KEY: ${{ secrets.SDK_DEPLOY_KEY }}
+          CUA_DEPLOY_KEY: ${{ secrets.CUA_DEPLOY_KEY }}
         run: |
-          if [ -z "${SDK_DEPLOY_KEY:-}" ]; then
-            echo "::error title=Missing SDK_DEPLOY_KEY::Add the read-only deploy key for yutori-sdk-typescript as a repository secret; uv cannot resolve the runtime dependency without it."
+          missing=""
+          [ -z "${SDK_DEPLOY_KEY:-}" ] && missing="SDK_DEPLOY_KEY (yutori-sdk-typescript)"
+          [ -z "${CUA_DEPLOY_KEY:-}" ] && missing="${missing:+$missing, }CUA_DEPLOY_KEY (cua-private)"
+          if [ -n "$missing" ]; then
+            echo "::error title=Missing deploy key secret(s)::Add read-only deploy keys as repository secrets: $missing. uv cannot resolve the runner dependencies without them."
             exit 1
           fi
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           printf '%s\n' "$SDK_DEPLOY_KEY" > ~/.ssh/sdk_deploy
-          chmod 600 ~/.ssh/sdk_deploy
+          printf '%s\n' "$CUA_DEPLOY_KEY" > ~/.ssh/cua_deploy
+          chmod 600 ~/.ssh/sdk_deploy ~/.ssh/cua_deploy
           ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
-          printf 'Host github.com\n  User git\n  IdentityFile ~/.ssh/sdk_deploy\n  IdentitiesOnly yes\n' > ~/.ssh/config
+          {
+            printf 'Host github-sdk\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/sdk_deploy\n  IdentitiesOnly yes\n'
+            printf 'Host github-cua\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/cua_deploy\n  IdentitiesOnly yes\n'
+          } > ~/.ssh/config
           chmod 600 ~/.ssh/config
+          # known_hosts entries for the aliases so StrictHostKeyChecking still passes.
+          ssh-keyscan -t ed25519 github.com 2>/dev/null | sed 's/^github.com/github-sdk/' >> ~/.ssh/known_hosts
+          ssh-keyscan -t ed25519 github.com 2>/dev/null | sed 's/^github.com/github-cua/' >> ~/.ssh/known_hosts
+          git config --global url."ssh://git@github-sdk/yutori-ai/yutori-sdk-typescript".insteadOf "ssh://git@github.com/yutori-ai/yutori-sdk-typescript"
+          git config --global url."ssh://git@github-cua/yutori-ai/cua-private".insteadOf "ssh://git@github.com/yutori-ai/cua-private"
 
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} --extra dev pytest -q

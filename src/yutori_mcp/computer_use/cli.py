@@ -10,25 +10,40 @@ from urllib.request import urlopen
 
 from ..credentials import resolve_api_key_for_environment
 
+from .constants import (
+    DRIVER_INSTALLER_SHA256,
+    DRIVER_VERSION,
+    ENV_VAR_HARNESS,
+    HARNESSES,
+    resolve_harness,
+)
 from .preflight import (
     check_driver_binary,
-    check_node,
     child_search_path,
     find_cua_driver,
-    find_node,
+    harness_blocker,
     run_checks,
 )
 from .result import format_result
-from .runtime import get_manifest
 from .supervisor import run_task
 
 
 def _doctor() -> int:
-    results = run_checks()
+    harness = resolve_harness()
+    print(
+        f"Harness: {harness} (switch with {ENV_VAR_HARNESS} or the tool's harness parameter)"
+    )
+    results = run_checks(harness)
     for result in results:
         print(f"{'PASS' if result.ok else 'BLOCKED'} {result.name}: {result.detail}")
         if result.remediation:
             print(f"  Fix: {result.remediation}")
+    for other in HARNESSES:
+        if other == harness:
+            continue
+        blocker = harness_blocker(other)
+        status = "available" if blocker is None else f"unavailable ({blocker.detail})"
+        print(f"INFO harness '{other}': {status}")
     return 0 if all(result.ok for result in results) else 1
 
 
@@ -38,16 +53,15 @@ def _download_installer(url: str) -> bytes:
 
 
 def _setup() -> int:
-    node_result = check_node()
-    if not node_result.ok:
-        print(node_result.remediation)
+    blocker = harness_blocker()
+    if blocker is not None:
+        print(blocker.remediation)
         return 1
-    manifest = get_manifest()
-    version = str(manifest["driver_version"])
+    version = DRIVER_VERSION
     installer = _download_installer(
         f"https://github.com/trycua/cua/releases/download/cua-driver-rs-v{version}/install.sh"
     )
-    if hashlib.sha256(installer).hexdigest() != manifest["driver_installer_sha256"]:
+    if hashlib.sha256(installer).hexdigest() != DRIVER_INSTALLER_SHA256:
         print("Driver installer checksum mismatch; nothing was executed.")
         return 1
     with tempfile.TemporaryDirectory() as directory:
@@ -74,9 +88,9 @@ def _setup() -> int:
 
 
 async def _smoke_live() -> int:
-    node = find_node()
-    if node is None:
-        print("Install Node 22 with: brew install node@22")
+    blocker = harness_blocker()
+    if blocker is not None:
+        print(blocker.remediation)
         return 1
     mechanical = await asyncio.create_subprocess_exec(
         "osascript",
@@ -100,7 +114,6 @@ async def _smoke_live() -> int:
         start_url=None,
         minutes=1,
         max_steps=10,
-        node=str(node),
         api_key=resolve_api_key_for_environment("dev"),
         api_base_url="https://api.dev.yutori.com/v1",
     )
@@ -121,10 +134,16 @@ def register_parser(
 
 
 def dispatch(command: str) -> int:
-    if command == "setup":
-        return _setup()
-    if command == "doctor":
-        return _doctor()
-    if command == "smoke":
+    if command not in {"setup", "doctor", "smoke"}:
+        raise ValueError(f"Unknown computer-use command: {command}")
+    try:
+        if command == "setup":
+            return _setup()
+        if command == "doctor":
+            return _doctor()
         return asyncio.run(_smoke_live())
-    raise ValueError(f"Unknown computer-use command: {command}")
+    except ValueError as error:
+        # An invalid YUTORI_COMPUTER_USE_HARNESS value should read as the same
+        # clear message run_task reports, not a traceback.
+        print(error)
+        return 1
