@@ -8,12 +8,12 @@ PROTOCOL_VERSION = 1
 MCP_VERSION = __version__
 MODEL = "n2-preview"
 TOOL_SET = "computer_use_tools-20260815"
-SDK_VERSION = "0.9.1"
+SDK_VERSION = "0.9.2"
 # The PyPI wheel digest and a digest derived from its stable RECORD entries.
 # Doctor compares the latter with the unpacked installation before any task runs.
-SDK_ARTIFACT_SHA256 = "f29f7281e7f4664657d86db622d453c0f824c74b4b8c08e8dcef0e51004d354a"
-SDK_INSTALLATION_SHA256 = "f30ae52505f674d3842add33f7912ad4e647ce5afc2c7a84e5a84571dc4cb28c"
-SDK_PROVENANCE_SHA256 = "c496f00cc9db293dfbef0fea37e896eba0262205b66577d5fcfa0b243ed8e339"
+SDK_ARTIFACT_SHA256 = "bb2de3d77e73be6abe8e27663e425518dc6fe0170502a7337c5b59456a9e8cad"
+SDK_INSTALLATION_SHA256 = "19af218c916ad34efd8212377ed9b540b87b825fda8e42b98066f8bd723f7d64"
+SDK_PROVENANCE_SHA256 = "aa3c8b58281f0dcde3446cc87cfd8b9c4e57b6c5e0b2be56450eef33c09dd59c"
 
 # The cua-driver release that implements this tool contract, and the checksum
 # of its installer script. Both are hard gates.
