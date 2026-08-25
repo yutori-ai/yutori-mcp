@@ -255,6 +255,17 @@ def pick_best_window(windows: list[dict[str, Any]], min_edge_points: float = 100
     )
 
 
+def _find_running_app(payload: dict[str, Any], requested: str) -> dict[str, Any] | None:
+    requested = requested.casefold()
+    for app in payload.get("apps") or []:
+        if not isinstance(app, dict) or not isinstance(app.get("pid"), int) or app["pid"] <= 0:
+            continue
+        identities = (app.get("name"), app.get("bundle_id"))
+        if any(isinstance(value, str) and value.casefold() == requested for value in identities):
+            return app
+    return None
+
+
 async def prepare_app(cli: DriverCLI, app: str, start_url: str | None) -> dict[str, Any]:
     """Launch and front the requested app before the driver session starts.
 
@@ -280,7 +291,14 @@ async def prepare_app(cli: DriverCLI, app: str, start_url: str | None) -> dict[s
         payload = await cli.call("launch_app", {"name": app, **launch_args})
     pid = payload.get("pid")
     if not isinstance(pid, int):
-        raise DriverError(f"launch_app returned no pid for {app!r}")
+        # Persistent system apps such as Finder are present in list_apps but
+        # have no launch path, so launch_app reports APP_NOT_INSTALLED even
+        # while their process is healthy and can be foregrounded by pid.
+        running = _find_running_app(await cli.call("list_apps", {}), app)
+        if running is None:
+            raise DriverError(f"launch_app returned no pid for {app!r}")
+        payload = running
+        pid = running["pid"]
     name = str(payload.get("name") or app)
     window = pick_best_window(_parse_windows(payload))
     try:

@@ -26,6 +26,7 @@ from yutori_mcp.computer_use.driver import (
     DriverError,
     DriverRefusal,
     _SHELL_PROXY_PATH,
+    _find_running_app,
     _payload_ok,
     chunk_type_text,
     format_shell_result,
@@ -1234,6 +1235,18 @@ def test_pick_best_window_excludes_helper_strips():
     assert pick_best_window(strips)["window_id"] == 0
 
 
+def test_find_running_app_matches_name_or_bundle_id_and_requires_a_live_pid():
+    payload = {
+        "apps": [
+            {"name": "Finder", "bundle_id": "com.apple.finder", "pid": 42},
+            {"name": "Safari", "bundle_id": "com.apple.Safari", "pid": 0},
+        ]
+    }
+    assert _find_running_app(payload, "finder")["pid"] == 42
+    assert _find_running_app(payload, "COM.APPLE.FINDER")["pid"] == 42
+    assert _find_running_app(payload, "Safari") is None
+
+
 class _FakeCLI:
     def __init__(self, responses=None):
         self.calls: list[tuple[str, dict]] = []
@@ -1293,6 +1306,33 @@ async def test_prepare_app_fronting_failures_are_not_fatal():
     with patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()):
         target = await prepare_app(cli, "TextEdit", None)
     assert target["pid"] == 7
+
+
+async def test_prepare_app_falls_back_to_an_already_running_system_app():
+    cli = _FakeCLI(
+        {
+            "launch_app": {"error": "APP_NOT_INSTALLED", "name": "Finder"},
+            "list_apps": {
+                "apps": [
+                    {
+                        "name": "Finder",
+                        "bundle_id": "com.apple.finder",
+                        "pid": 42,
+                        "running": True,
+                    }
+                ]
+            },
+            "bring_to_front": {},
+        }
+    )
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()):
+        target = await prepare_app(cli, "Finder", None)
+    assert target == {"name": "Finder", "pid": 42}
+    assert cli.calls == [
+        ("launch_app", {"name": "Finder"}),
+        ("list_apps", {}),
+        ("bring_to_front", {"pid": 42}),
+    ]
 
 
 async def test_desktop_screenshot_returns_base64_and_caches_native_size():
