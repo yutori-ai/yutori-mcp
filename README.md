@@ -15,7 +15,8 @@ You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and 
 ### macOS computer-use preview
 
 This development-only preview is available only when the MCP server runs on macOS with
-`YUTORI_ENV=dev`. It runs the SDK-owned Python n2 loop. Run:
+`YUTORI_ENV=dev`. The runtime is Python-only and requires Python 3.10 or later. Setup installs
+CuaDriver, requests its macOS permissions, and prepares the optional native reasoning overlay:
 
 ```bash
 uvx yutori-mcp computer-use setup
@@ -439,20 +440,18 @@ That writes an `environments.dev` entry alongside the existing top-level `api_ke
 machine can hold both without either shadowing the other. `YUTORI_API_KEY` still takes
 precedence over both when set.
 
-## Computer-use preview: SDK dependency
+## Computer-use preview: runtime dependency
 
-The macOS computer-use tool uses the SDK-owned n2 agent loop
-(`yutori.navigator.N2ComputerAgent`), currently pinned by commit to the private
-[`yutori-ai/yutori-sdk-python-private`](https://github.com/yutori-ai/yutori-sdk-python-private)
-fork until the SDK ships a release carrying it. At that point the pin becomes a plain
-`yutori>=X` index requirement. There is no Cua framework, litellm, or Node runtime.
-
-Neither package is on any index — public or private — because the preview is unreleased, so
-installing needs SSH access to the SDK repository:
+The SDK-owned `yutori.navigator.N2ComputerAgent` and `MacOSComputer` provide the complete
+runtime. The MCP package pins SDK 0.9.1 and verifies the installed files against the immutable
+published wheel plus its packaged provenance during `computer-use doctor`. There is no
+TypeScript bundle, Node executable, or alternate harness. A normal source checkout needs no
+private dependency access:
 
 ```sh
-ssh -T git@github.com          # must authenticate as a yutori-ai member
-uv sync --extra dev            # base install: resolves the yutori SDK fork over SSH
+uv sync --extra dev
 ```
 
-`uvx yutori-mcp` alone will not resolve them without that access.
+SDK contributors may deliberately test an editable 0.9.1 checkout by setting
+`YUTORI_MCP_ALLOW_EDITABLE_SDK=1`; without that explicit override, doctor rejects editable or
+modified SDK installations.

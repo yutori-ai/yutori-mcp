@@ -385,7 +385,7 @@ async def run_computer_use_task(
     app: str | None = None,
     start_url: str | None = None,
     minutes: float = 3,
-    max_steps: int = 200,
+    max_steps: int = 60,
     ctx: Context | None = None,
 ) -> str:
     # `ctx` is FastMCP's injected request context (excluded from the client-facing
@@ -609,18 +609,20 @@ async def _handle_computer_use(
             blocker = first_blocker()
             if blocker is not None:
                 return failure(f"{blocker.detail} Fix: {blocker.remediation}"), {}
-            result = await run_task(
-                **params.model_dump(),
-                api_key=resolve_api_key_for_environment(
-                    os.environ.get(ENV_VAR_ENVIRONMENT) or DEFAULT_ENVIRONMENT
+            return (
+                await run_task(
+                    **params.model_dump(),
+                    api_key=resolve_api_key_for_environment(
+                        os.environ.get(ENV_VAR_ENVIRONMENT) or DEFAULT_ENVIRONMENT
+                    ),
+                    api_base_url=resolve_base_url(),
+                    lock=lock,
+                    on_event=_progress_reporter(ctx, params.max_steps) if ctx else None,
                 ),
-                api_base_url=resolve_base_url(),
-                lock=lock,
-                on_event=_progress_reporter(ctx, params.max_steps) if ctx else None,
+                {},
             )
     except ComputerUseBusyError as error:
         return failure(str(error)), {}
-    return result, {}
 
 
 # Tool-name -> handler registry, consulted by _invoke() above. Mirrors

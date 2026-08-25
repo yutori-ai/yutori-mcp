@@ -174,7 +174,7 @@ def test_the_missing_key_remediation_points_at_the_dev_login():
     """It said `uvx yutori-mcp login`, which stores a production key — the original misdiagnosis."""
     from yutori_mcp.computer_use import preflight
 
-    with patch.object(preflight, "resolve_api_key_for_environment", return_value=None):
+    with patch("yutori_mcp.credentials.resolve_api_key_for_environment", return_value=None):
         result = preflight.check_api_key()
     assert not result.ok
     assert "--env dev login" in (result.remediation or "")

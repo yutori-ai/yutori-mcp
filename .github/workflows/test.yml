@@ -22,26 +22,21 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
 
-      # The Python SDK is a private PEP 508 git reference, so uv needs a read-only
-      # deploy key to resolve it on every platform.
-      - name: Authorize the private SDK dependency
-        env:
-          PYSDK_DEPLOY_KEY: ${{ secrets.PYSDK_DEPLOY_KEY }}
-        run: |
-          if [ -z "${PYSDK_DEPLOY_KEY:-}" ]; then
-            echo "::error title=Missing deploy key secret::Add a read-only yutori-sdk-python-private deploy key as PYSDK_DEPLOY_KEY."
-            exit 1
-          fi
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "$PYSDK_DEPLOY_KEY" > ~/.ssh/pysdk_deploy
-          chmod 600 ~/.ssh/pysdk_deploy
-          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
-          printf 'Host github-pysdk\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/pysdk_deploy\n  IdentitiesOnly yes\n' > ~/.ssh/config
-          chmod 600 ~/.ssh/config
-          # known_hosts entry for the alias so StrictHostKeyChecking still passes.
-          ssh-keyscan -t ed25519 github.com 2>/dev/null | sed 's/^github.com/github-pysdk/' >> ~/.ssh/known_hosts
-          git config --global url."ssh://git@github-pysdk/yutori-ai/yutori-sdk-python-private".insteadOf "ssh://git@github.com/yutori-ai/yutori-sdk-python-private"
-
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} --extra dev pytest -q
+
+      - name: Verify the published SDK wheel
+        if: matrix.python-version == '3.12'
+        env:
+          YUTORI_MCP_VERIFY_PUBLISHED_ARTIFACT: "1"
+        run: >-
+          uv run --python ${{ matrix.python-version }} --extra dev pytest -q
+          tests/test_computer_use.py::test_published_sdk_wheel_matches_artifact_hash
+
+      - name: Verify a pip-installed runtime
+        if: matrix.python-version == '3.12'
+        run: |
+          python -m venv "$RUNNER_TEMP/pip-install"
+          "$RUNNER_TEMP/pip-install/bin/pip" install .
+          "$RUNNER_TEMP/pip-install/bin/python" -c \
+            'from yutori_mcp.computer_use.preflight import check_runtime; result = check_runtime(); assert result.ok, result.detail'

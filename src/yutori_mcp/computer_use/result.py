@@ -17,12 +17,7 @@ def _phase(label: str, total_ms: Any, count: Any, unit: str) -> str:
 
 
 def format_perf(result: dict[str, Any]) -> list[str]:
-    """Render the run's perf numbers, matching depth to what the wire carried.
-
-    The runner normally reports a full phase breakdown in the playground's
-    StepTimings vocabulary. Older payloads may carry only elapsed time and
-    steps, in which case the summary stops at time per step.
-    """
+    """Render the phase breakdown when the runner supplies one."""
     elapsed_ms = result.get("elapsed_ms")
     steps = result.get("steps")
     if not isinstance(elapsed_ms, (int, float)) or not isinstance(steps, int):
@@ -56,6 +51,8 @@ def format_perf(result: dict[str, Any]) -> list[str]:
                         "captures",
                     ),
                     f"settle {_seconds(timings.get('settle_ms'))}",
+                    f"polling {_seconds(timings.get('polling_ms'))}",
+                    f"shell {_seconds(timings.get('shell_ms'))}",
                     f"other {_seconds(timings.get('other_ms'))}",
                 ]
             )
@@ -72,6 +69,9 @@ def format_result(result: dict[str, Any]) -> str:
         lines.append(f"Final text: {result['final_text']}")
     if result.get("elapsed_ms") is not None:
         lines.append(f"Elapsed: {result['elapsed_ms']} ms")
+    if result.get("reasoning_overlay_requested"):
+        state = "active" if result.get("reasoning_overlay_effective") else "unavailable"
+        lines.append(f"Reasoning overlay: {state}; codec: {result.get('codec') or 'unknown'}")
     lines.extend(format_perf(result))
     actions = result.get("actions", [])
     if actions:
@@ -89,9 +89,7 @@ def format_result(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def failure(
-    message: str, *, actions: list[dict[str, Any]] | None = None
-) -> dict[str, Any]:
+def failure(message: str, *, actions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     return {
         "outcome": "failed",
         "delivery_mode": "foreground",

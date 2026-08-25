@@ -1,24 +1,31 @@
 from __future__ import annotations
 
-import importlib.util
+import base64
+import hashlib
+import importlib.metadata
 import json
+import os
 import platform
 import re
 import subprocess
-import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
-
-from ..credentials import resolve_api_key_for_environment
+from urllib.parse import urlparse
+from urllib.request import Request, url2pathname, urlopen
 
 from .constants import (
     DRIVER_VERSION,
+    MCP_VERSION,
+    SDK_ARTIFACT_SHA256,
+    SDK_INSTALLATION_SHA256,
+    SDK_PROVENANCE_SHA256,
+    SDK_VERSION,
     TOOL_SET,
 )
+
 DRIVER_APP = Path("/Applications/CuaDriver.app")
 DEV_ACCESS_REMEDIATION = (
     "Store a dev key with: yutori-mcp --env dev login "
@@ -49,6 +56,9 @@ TOOL_SEARCH_DIRECTORIES = (
     "/usr/sbin",
     "/sbin",
 )
+_EDITABLE_SDK_OVERRIDE = "YUTORI_MCP_ALLOW_EDITABLE_SDK"
+_INSTALLER_GENERATED_FILES = {"INSTALLER", "RECORD", "REQUESTED", "direct_url.json"}
+_SDK_PROVENANCE_PATH = Path("yutori/navigator/macos/assets/provenance.json")
 
 
 def find_cua_driver() -> Path | None:
@@ -73,17 +83,22 @@ class CheckResult:
     ok: bool
     detail: str
     remediation: str | None = None
+    blocking: bool = True
 
 
-def _result(name: str, ok: bool, detail: str, remediation: str) -> CheckResult:
-    return CheckResult(name, ok, detail, None if ok else remediation)
+def _result(
+    name: str,
+    ok: bool,
+    detail: str,
+    remediation: str,
+    *,
+    blocking: bool = True,
+) -> CheckResult:
+    return CheckResult(name, ok, detail, None if ok else remediation, blocking)
 
 
 def check_macos() -> CheckResult:
-    ok = (
-        platform.system() == "Darwin"
-        and int(platform.mac_ver()[0].split(".")[0] or 0) >= 15
-    )
+    ok = platform.system() == "Darwin" and int(platform.mac_ver()[0].split(".")[0] or 0) >= 15
     return _result(
         "macOS",
         ok,
@@ -102,23 +117,133 @@ def check_architecture() -> CheckResult:
     )
 
 
-def check_harness() -> CheckResult:
-    """Whether the installed yutori SDK carries the n2 computer-use loop.
+def _editable_distribution(distribution: importlib.metadata.Distribution) -> bool:
+    direct_url = distribution.read_text("direct_url.json")
+    if not direct_url:
+        return False
+    try:
+        metadata = json.loads(direct_url)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(metadata, dict) or not isinstance(metadata.get("dir_info"), dict):
+        return False
+    return metadata["dir_info"].get("editable") is True
 
-    The loop lives in the SDK itself (yutori.navigator.n2), so the only way
-    this fails is a yutori version predating it — which this reports up front
-    instead of as an ImportError mid-run. find_spec keeps the probe cheap.
-    """
-    remediation = "Reinstall to pick up the pinned yutori SDK: uvx --refresh yutori-mcp"
-    version = ".".join(str(part) for part in sys.version_info[:3])
-    if importlib.util.find_spec("yutori.navigator.n2") is None:
-        return _result(
-            "harness",
-            False,
-            "the installed yutori SDK has no navigator n2 loop",
-            remediation,
+
+def _provenance_path(distribution: importlib.metadata.Distribution, *, editable: bool) -> Path:
+    if not editable:
+        return Path(distribution.locate_file(_SDK_PROVENANCE_PATH))
+    direct_url = json.loads(distribution.read_text("direct_url.json") or "{}")
+    parsed = urlparse(direct_url.get("url", ""))
+    if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
+        raise ValueError("editable SDK source is not a local file URL")
+    return Path(url2pathname(parsed.path)) / _SDK_PROVENANCE_PATH
+
+
+def _stable_distribution_digest(distribution: importlib.metadata.Distribution) -> str:
+    """Hash installed wheel-owned files using normalized RECORD-style entries."""
+    records: list[str] = []
+    for package_path in distribution.files or ():
+        relative_path = str(package_path)
+        path = Path(relative_path)
+        if (
+            ".." in path.parts
+            or path.is_absolute()
+            or "__pycache__" in path.parts
+            or path.suffix in {".pyc", ".pyo"}
+            or path.name in _INSTALLER_GENERATED_FILES
+        ):
+            continue
+        installed_path = Path(distribution.locate_file(package_path))
+        if not installed_path.is_file():
+            raise FileNotFoundError(relative_path)
+        digest = hashlib.sha256(installed_path.read_bytes()).digest()
+        encoded_digest = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+        records.append(f"{relative_path},sha256={encoded_digest}")
+    payload = "".join(f"{record}\n" for record in sorted(records)).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def check_runtime() -> CheckResult:
+    remediation = f"Reinstall the pinned runtime: uvx --refresh --from yutori-mcp=={MCP_VERSION} yutori-mcp"
+    try:
+        distribution = importlib.metadata.distribution("yutori")
+        version = distribution.version
+    except (ImportError, importlib.metadata.PackageNotFoundError, OSError, ValueError) as error:
+        return _result("Python runtime", False, str(error), remediation)
+
+    editable = _editable_distribution(distribution)
+    if editable:
+        override = os.environ.get(_EDITABLE_SDK_OVERRIDE) == "1"
+        detail = f"yutori {version}; editable installation; override {'enabled' if override else 'required'}"
+        if not override or version != SDK_VERSION:
+            return _result("Python runtime", False, detail, remediation)
+        try:
+            provenance = _provenance_path(distribution, editable=True).read_bytes()
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            return _result("Python runtime", False, str(error), remediation)
+        ok = hashlib.sha256(provenance).hexdigest() == SDK_PROVENANCE_SHA256
+        return _result("Python runtime", ok, detail, remediation)
+
+    try:
+        installation_digest = _stable_distribution_digest(distribution)
+    except OSError as error:
+        return _result("Python runtime", False, f"installed file unavailable: {error}", remediation)
+    if version != SDK_VERSION or installation_digest != SDK_INSTALLATION_SHA256:
+        detail = (
+            f"yutori {version}; artifact sha256 {SDK_ARTIFACT_SHA256}; installation sha256 {installation_digest}"
         )
-    return _result("harness", True, f"yutori.navigator n2 loop on Python {version}", remediation)
+        return _result("Python runtime", False, detail, remediation)
+    try:
+        provenance = _provenance_path(distribution, editable=False).read_bytes()
+    except (OSError, ValueError) as error:
+        return _result("Python runtime", False, str(error), remediation)
+    provenance_digest = hashlib.sha256(provenance).hexdigest()
+    detail = (
+        f"yutori {version}; artifact sha256 {SDK_ARTIFACT_SHA256}; installation sha256 {installation_digest}; "
+        f"provenance sha256 {provenance_digest}"
+    )
+    return _result("Python runtime", provenance_digest == SDK_PROVENANCE_SHA256, detail, remediation)
+
+
+def check_compiler() -> CheckResult:
+    try:
+        result = subprocess.run(
+            ["xcrun", "--sdk", "macosx", "--find", "swiftc"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        compiler = result.stdout.strip()
+        ok = result.returncode == 0 and bool(compiler)
+    except (OSError, subprocess.SubprocessError):
+        compiler, ok = "not found", False
+    return _result(
+        "Swift compiler",
+        ok,
+        compiler or "not found",
+        "Install Xcode Command Line Tools, then rerun computer-use setup.",
+        blocking=False,
+    )
+
+
+def check_overlay() -> CheckResult:
+    try:
+        from yutori.navigator.macos import check_macos_overlay
+
+        check = check_macos_overlay()
+        detail = str(check.prepared.binary) if check.available and check.prepared else str(check.reason)
+        ok = check.available
+    except (ImportError, OSError, RuntimeError) as error:
+        detail, ok = str(error), False
+    return _result(
+        "reasoning overlay",
+        ok,
+        detail,
+        "Run: yutori-mcp computer-use setup",
+        blocking=False,
+    )
 
 
 def check_driver_app() -> CheckResult:
@@ -179,7 +304,7 @@ def driver_version() -> str | None:
 
 
 def check_driver_contract() -> CheckResult:
-    """Require the exact cua-driver release this modifier-click lane targets."""
+    """Require the driver release that implements the advertised action contract."""
     installed = driver_version()
     if installed is None:
         return _result(
@@ -192,7 +317,7 @@ def check_driver_contract() -> CheckResult:
         "driver contract",
         installed == DRIVER_VERSION,
         installed,
-        f"Install cua-driver {DRIVER_VERSION}: yutori-mcp computer-use setup",
+        f"Install CuaDriver {DRIVER_VERSION}: yutori-mcp computer-use setup",
     )
 
 
@@ -269,6 +394,7 @@ def check_capture() -> CheckResult:
             False,
             "cua-driver not found",
             "Run: yutori-mcp computer-use setup",
+            blocking=False,
         )
     with tempfile.TemporaryDirectory(prefix="cua-capture-check-") as directory:
         # Under $TMPDIR, whose /var -> /private/var symlink the driver rejects as an unresolved
@@ -293,6 +419,7 @@ def check_capture() -> CheckResult:
                 False,
                 "driver capture failed",
                 "Run: cua-driver permissions grant",
+                blocking=False,
             )
         ok = target.is_file() and target.stat().st_size > 0
     return _result(
@@ -300,10 +427,13 @@ def check_capture() -> CheckResult:
         ok,
         "driver captured the desktop" if ok else "driver produced no image",
         "Allow Screen Recording for CuaDriver in System Settings.",
+        blocking=False,
     )
 
 
 def check_api_key() -> CheckResult:
+    from ..credentials import resolve_api_key_for_environment
+
     key = resolve_api_key_for_environment(DEV_ENVIRONMENT)
     return _result(
         "API key",
@@ -323,6 +453,8 @@ def check_dev_access() -> CheckResult:
     {"error": {"type": "billing_error"}} — a key with no prepaid balance looked healthy here while
     every task failed at zero steps with an empty stderr. Status codes alone cannot see that.
     """
+    from ..credentials import resolve_api_key_for_environment
+
     try:
         key = resolve_api_key_for_environment(DEV_ENVIRONMENT)
         request = Request(
@@ -343,15 +475,8 @@ def check_dev_access() -> CheckResult:
             payload = json.loads(response.read().decode() or "{}")
     except HTTPError as error:
         if error.code in {401, 403}:
-            return _result(
-                "dev API", False, "credential rejected", DEV_ACCESS_REMEDIATION
-            )
-        return _result(
-            "dev API",
-            False,
-            f"n2-preview with {TOOL_SET} was rejected (HTTP {error.code})",
-            DEV_ACCESS_REMEDIATION,
-        )
+            return _result("dev API", False, "credential rejected", DEV_ACCESS_REMEDIATION)
+        return _result("dev API", False, f"probe failed (HTTP {error.code})", DEV_ACCESS_REMEDIATION)
     except (URLError, OSError, ValueError):
         return _result("dev API", False, "unreachable", DEV_ACCESS_REMEDIATION)
 
@@ -366,12 +491,8 @@ def check_dev_access() -> CheckResult:
         )
         return _result("dev API", False, message, remediation)
     if not payload.get("choices"):
-        return _result(
-            "dev API", False, "no completion returned", DEV_ACCESS_REMEDIATION
-        )
-    return _result(
-        "dev API", True, "n2-preview returned a completion", DEV_ACCESS_REMEDIATION
-    )
+        return _result("dev API", False, "no completion returned", DEV_ACCESS_REMEDIATION)
+    return _result("dev API", True, "n2-preview returned a completion", DEV_ACCESS_REMEDIATION)
 
 
 _PLATFORM_CHECKS: tuple[Callable[[], CheckResult], ...] = (
@@ -379,9 +500,8 @@ _PLATFORM_CHECKS: tuple[Callable[[], CheckResult], ...] = (
     check_architecture,
 )
 
-_TOOLCHAIN_CHECKS: tuple[Callable[[], CheckResult], ...] = (check_harness,)
-
 _ENVIRONMENT_CHECKS: tuple[Callable[[], CheckResult], ...] = (
+    check_runtime,
     check_driver_app,
     # Ordered before the contract check, which shells out to the binary: "cua-driver is not
     # installed where we look" is the actionable blocker, not the timeout it would cause.
@@ -391,31 +511,28 @@ _ENVIRONMENT_CHECKS: tuple[Callable[[], CheckResult], ...] = (
     check_permissions,
     check_gui_session,
     check_capture,
+    check_compiler,
+    check_overlay,
     check_api_key,
     check_dev_access,
 )
 
 
 def checks_for() -> tuple[Callable[[], CheckResult], ...]:
-    return _PLATFORM_CHECKS + _TOOLCHAIN_CHECKS + _ENVIRONMENT_CHECKS
+    return _PLATFORM_CHECKS + _ENVIRONMENT_CHECKS
 
 
 def run_checks() -> list[CheckResult]:
-    return [check() for check in checks_for()]
+    platform_results = [check() for check in _PLATFORM_CHECKS]
+    runtime = check_runtime()
+    if not runtime.ok:
+        return [*platform_results, runtime]
+    return [*platform_results, runtime, *(check() for check in _ENVIRONMENT_CHECKS[1:])]
 
 
 def first_blocker() -> CheckResult | None:
     for check in checks_for():
         result = check()
-        if not result.ok:
-            return result
-    return None
-
-
-def harness_blocker() -> CheckResult | None:
-    """The first failing SDK-loop check, before environment probes."""
-    for check in _TOOLCHAIN_CHECKS:
-        result = check()
-        if not result.ok:
+        if not result.ok and result.blocking:
             return result
     return None

@@ -1,35 +1,39 @@
-"""The computer-use runner child process.
-
-Spawned by the supervisor as ``python -m yutori_mcp.computer_use.runner``. It
-reads one JSONL run request from stdin, drives the SDK-owned
-``yutori.navigator.N2ComputerAgent`` loop against the local desktop, and emits protocol-v1 events
-(``ready``, ``action``..., then exactly one ``result`` or ``error``) on stdout.
-
-It runs out of process on purpose: the agent loop's dependencies print to
-stdout (litellm announces every transient-error retry), and the parent is an
-MCP stdio server whose stdout is the protocol channel. The first thing this
-module does is claim the real stdout for the event stream and point fd 1 at
-stderr, so no library print can corrupt either process's framing.
-"""
+"""Isolated protocol-v1 child for the SDK-owned macOS computer-use runtime."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import os
+import re
+import signal
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import asdict
 from importlib import metadata
 from typing import Any, TextIO
 
 from yutori.navigator import N2ComputerAgent
+from yutori.navigator.macos import (
+    MacOSComputer,
+    MacOSPresentationStatus,
+    MacOSTargetCrashedError,
+    CancellationLatch,
+    ShellPresentationEvent,
+    sanitize_command_preview,
+)
 
-from .constants import DRIVER_VERSION, PROTOCOL_VERSION, TOOL_SET
-from .driver import CuaDriverDesktop, DriverCLI, DriverError, prepare_app
+from .app import prepare_app
+from .constants import (
+    DRIVER_VERSION,
+    PROTOCOL_VERSION,
+    SDK_ARTIFACT_SHA256,
+    SDK_PROVENANCE_SHA256,
+    SDK_VERSION,
+    TOOL_SET,
+)
 
-# Standing instructions for the macOS product lane. The trained prompt already
-# covers normalized coordinates, so this adds only host-specific corrections.
 SYSTEM_CONTEXT = (
     "You control the entire macOS screen. This is macOS, not Linux: do not use "
     "Ubuntu or Linux UI conventions. Use macOS conventions: cmd, not ctrl, for "
@@ -51,18 +55,12 @@ SYSTEM_CONTEXT = (
     "screenshot to confirm it before you summarize. Shell commands run in bash as "
     "the logged-in user; do not use sudo.\n\n"
     "Do not open or change System Settings, application settings, accounts, "
-    "permissions, or defaults unless the user explicitly asked for that settings "
-    "change."
+    "permissions, or defaults unless the user explicitly asked for that settings change."
 )
-
-STOP_SUMMARY_PROMPT = (
-    "Stop here. Briefly summarize what you accomplished and what you found."
-)
-
-# Terminal-text markers the model was trained to prefix a final answer with.
+STOP_SUMMARY_PROMPT = "Stop here. Briefly summarize what you accomplished and what you found."
 FINAL_TEXT_MARKERS = ("[DONE]", "[INFEASIBLE]")
-
-MAX_APP_RECOVERY_ATTEMPTS = 2
+_SHELL_TOOL_NAMES = frozenset({"bash", "shell_command", "run_command"})
+_BACKGROUND_TASK_PATTERN = re.compile(r"\bStarted background task ([A-Za-z0-9-]+)\b")
 
 
 class RequestError(ValueError):
@@ -82,10 +80,7 @@ def parse_request(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RequestError("INVALID_REQUEST", "Request must be a JSON object.")
     if payload.get("protocol_version") != PROTOCOL_VERSION:
-        raise RequestError(
-            "UNSUPPORTED_PROTOCOL_VERSION",
-            f"Expected protocol_version {PROTOCOL_VERSION}.",
-        )
+        raise RequestError("UNSUPPORTED_PROTOCOL_VERSION", f"Expected protocol_version {PROTOCOL_VERSION}.")
     if payload.get("type") != "run":
         raise RequestError("INVALID_REQUEST", "type must be 'run'.")
     task = _require_string(payload, "task")
@@ -94,9 +89,7 @@ def parse_request(payload: Any) -> dict[str, Any]:
         raise RequestError("INVALID_REQUEST", "app must be a non-empty string or null.")
     start_url = payload.get("start_url")
     if start_url is not None and (not isinstance(start_url, str) or not start_url):
-        raise RequestError(
-            "INVALID_REQUEST", "start_url must be a non-empty string or null."
-        )
+        raise RequestError("INVALID_REQUEST", "start_url must be a non-empty string or null.")
     if start_url is not None and app is None:
         raise RequestError("INVALID_REQUEST", "start_url requires app.")
     deadline_ms = payload.get("deadline_ms")
@@ -113,7 +106,6 @@ def parse_request(payload: Any) -> dict[str, Any]:
         "max_steps": max_steps,
         "model": _require_string(payload, "model"),
         "api_base_url": _require_string(payload, "api_base_url"),
-        "driver_path": _require_string(payload, "driver_path"),
     }
 
 
@@ -134,13 +126,6 @@ def _package_version() -> str:
 
 
 def classify_result(outputs: list[dict[str, Any]] | None) -> str:
-    """Map one tool call's output frames onto the action event's raw status.
-
-    Mirrors the previous runner's classification so hosts reading the event
-    stream see the same vocabulary: no ``[ERROR]`` anywhere means the driver
-    confirmed the dispatch; "refused" means a policy refusal; a timeout may
-    have dispatched before dying; anything else is unverifiable.
-    """
     for frame in outputs or []:
         output = frame.get("output")
         text: str | None = None
@@ -170,119 +155,71 @@ def _status_for(raw_status: str) -> str:
     return "uncertain"
 
 
-_SHELL_TOOL_NAMES = frozenset({"bash", "shell_command", "run_command"})
-_COMMAND_PREVIEW_MAX_CHARS = 300
+def _arguments(item: dict[str, Any]) -> dict[str, Any]:
+    value = item.get("arguments")
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return value if isinstance(value, dict) else {}
 
 
 def shell_command_preview(item: dict[str, Any]) -> str | None:
-    """The shell command a tool call is about to run, as a one-line preview.
-
-    Only shell tools carry it — a person watching the event stream needs to
-    see what ran on their machine, which a bare tool name does not convey.
-    Whitespace is collapsed and long scripts truncated so the preview stays a
-    readable line rather than splaying a multi-line script across the log.
-    """
     if str(item.get("name") or "").lower() not in _SHELL_TOOL_NAMES:
         return None
-    arguments = item.get("arguments")
-    if isinstance(arguments, str):
-        try:
-            arguments = json.loads(arguments)
-        except json.JSONDecodeError:
-            return None
-    if not isinstance(arguments, dict):
-        return None
-    command = arguments.get("command")
-    if not isinstance(command, str) or not command.strip():
-        return None
-    collapsed = " ".join(command.split())
-    if len(collapsed) > _COMMAND_PREVIEW_MAX_CHARS:
-        collapsed = collapsed[:_COMMAND_PREVIEW_MAX_CHARS] + "…"
-    return collapsed
+    command = _arguments(item).get("command")
+    return sanitize_command_preview(command) if isinstance(command, str) and command.strip() else None
 
 
-class RunTimings:
-    """Model and pure-action time, aggregated across the run.
-
-    Together with the handler's DesktopTimings (captures, settle) this yields
-    the playground StepTimings decomposition: model + actions + screenshots +
-    settle + other = total.
-    """
-
-    def __init__(self) -> None:
-        self.model_ms = 0
-        self.model_calls = 0
-        self.action_ms = 0
-        self.tool_calls = 0
-
-
-class ApiTimer:
-    """Times each model call through the loop's on_api_start/end callbacks."""
-
-    def __init__(self, timings: RunTimings, *, clock: Callable[[], float] = time.monotonic):
-        self._timings = timings
-        self._clock = clock
-        self._started: float | None = None
-
-    async def on_api_start(self, _kwargs: dict[str, Any]) -> None:
-        self._started = self._clock()
-
-    async def on_api_end(self, _kwargs: dict[str, Any], _result: Any) -> None:
-        if self._started is None:
-            return
-        self._timings.model_ms += int((self._clock() - self._started) * 1000)
-        self._timings.model_calls += 1
-        self._started = None
+def _background_task_id(outputs: list[dict[str, Any]] | None) -> str | None:
+    for frame in outputs or []:
+        output = frame.get("output")
+        result = output.get("result") if isinstance(output, dict) else output
+        if isinstance(result, str) and (match := _BACKGROUND_TASK_PATTERN.search(result)):
+            return match.group(1)
+    return None
 
 
 class ActionReporter:
-    """Emits one protocol action event per attempted tool call.
-
-    Each event carries ``duration_ms`` — the whole tool-call span — while the
-    aggregate's ``action_ms`` is that span minus the capture and settle time
-    the handler recorded within it, so the perf breakdown's phases do not
-    double count.
-    """
+    """Emit one privacy-safe action event for each attempted top-level tool call."""
 
     def __init__(
         self,
         emitter: Emitter,
         run_start: float,
         *,
-        timings: RunTimings | None = None,
-        desktop_timings: Any | None = None,
         clock: Callable[[], float] = time.monotonic,
-    ):
+    ) -> None:
         self._emitter = emitter
         self._run_start = run_start
-        self._timings = timings
-        self._desktop_timings = desktop_timings
         self._clock = clock
         self._index = 0
         self._call_start: float | None = None
-        self._overhead_ms_at_start = 0
+        self._pending_item: dict[str, Any] | None = None
+        self.tool_calls = 0
 
-    def _overhead_ms(self) -> int:
-        if self._desktop_timings is None:
-            return 0
-        return self._desktop_timings.capture_ms + self._desktop_timings.settle_ms
-
-    async def on_computer_call_start(self, _item: dict[str, Any]) -> None:
+    async def on_computer_call_start(self, item: dict[str, Any]) -> None:
         self._call_start = self._clock()
-        self._overhead_ms_at_start = self._overhead_ms()
+        self._pending_item = item
 
-    async def on_computer_call_end(
-        self, item: dict[str, Any], result: list[dict[str, Any]]
-    ) -> None:
-        raw_status = classify_result(result)
-        duration_ms: int | None = None
+    async def on_computer_call_end(self, item: dict[str, Any], result: list[dict[str, Any]]) -> None:
+        self._emit(item, classify_result(result), result)
+
+    def flush_interrupted(self) -> None:
+        if self._pending_item is not None:
+            self._emit(self._pending_item, "interrupted", [])
+
+    def _emit(self, item: dict[str, Any], raw_status: str, result: list[dict[str, Any]]) -> None:
+        duration_ms = None
         if self._call_start is not None:
-            duration_ms = max(0, int((self._clock() - self._call_start) * 1000))
-            self._call_start = None
-            if self._timings is not None:
-                overhead = self._overhead_ms() - self._overhead_ms_at_start
-                self._timings.action_ms += max(0, duration_ms - overhead)
-                self._timings.tool_calls += 1
+            duration_ms = max(0, round((self._clock() - self._call_start) * 1000))
+        self._call_start = None
+        self._pending_item = None
+        arguments = _arguments(item)
+        run_in_background = bool(
+            str(item.get("name") or "").lower() == "bash" and arguments.get("run_in_background") is True
+        )
         self._emitter.emit(
             {
                 "type": "action",
@@ -293,100 +230,60 @@ class ActionReporter:
                 "delivery_mode": "foreground",
                 "route": "pixel",
                 "refusal_code": "driver_refused" if raw_status == "refused" else None,
-                "elapsed_ms": max(0, int((time.monotonic() - self._run_start) * 1000)),
+                "elapsed_ms": max(0, round((self._clock() - self._run_start) * 1000)),
                 "duration_ms": duration_ms,
                 "command": shell_command_preview(item),
+                "run_in_background": run_in_background,
+                "background_task_id": _background_task_id(result) if run_in_background else None,
             }
         )
         self._index += 1
+        self.tool_calls += 1
+
+
+class ApiCounter:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def on_api_start(self, _kwargs: dict[str, Any]) -> None:
+        self.calls += 1
 
 
 class RunGuard:
-    """Bounds the run: model-step cap, wall-clock deadline, app liveness.
+    """Bound model turns independently of in-flight SDK cancellation."""
 
-    Deliberately never stops the very first iteration — the loop's
-    ``on_run_end`` references a variable bound inside its body, so breaking
-    before step one raises inside the library. The supervisor's process-group
-    deadline still bounds the pathological case.
-    """
-
-    def __init__(
-        self,
-        max_steps: int,
-        deadline: float,
-        *,
-        cli: DriverCLI | None = None,
-        app: str | None = None,
-        start_url: str | None = None,
-        target: dict[str, Any] | None = None,
-    ):
+    def __init__(self, max_steps: int, deadline: float) -> None:
         self.max_steps = max_steps
         self.deadline = deadline
         self.steps = 0
         self.limit_reached = False
         self.deadline_reached = False
-        self.target_crashed = False
-        self.recovery_attempts = 0
-        self._cli = cli
-        self._app = app
-        self._start_url = start_url
-        self._target = target
 
     async def on_run_continue(self, _kwargs: dict, _old_items: list, _new_items: list) -> bool:
-        if self.steps > 0:
-            if self.steps >= self.max_steps:
-                self.limit_reached = True
-                return False
-            if time.monotonic() >= self.deadline:
-                self.deadline_reached = True
-                return False
-            if not await self._target_alive():
-                return False
+        if time.monotonic() >= self.deadline:
+            self.deadline_reached = True
+            return False
+        if self.steps >= self.max_steps:
+            self.limit_reached = True
+            return False
         self.steps += 1
         return True
 
-    async def _target_alive(self) -> bool:
-        if self._target is None:
-            return True
-        try:
-            os.kill(self._target["pid"], 0)
-            return True
-        except ProcessLookupError:
-            pass
-        except OSError:
-            return True
-        # The launched app died mid-run. Relaunch it so the next observation
-        # shows a fresh instance; give up after two recoveries so a
-        # crash-looping app cannot consume the whole budget.
-        while self.recovery_attempts < MAX_APP_RECOVERY_ATTEMPTS:
-            self.recovery_attempts += 1
-            try:
-                assert self._cli is not None and self._app is not None
-                self._target = await prepare_app(self._cli, self._app, self._start_url)
-                return True
-            except DriverError:
-                continue
-        self.target_crashed = True
-        return False
-
 
 def _texts_from_items(items: list[dict[str, Any]]) -> list[str]:
-    texts: list[str] = []
-    for item in items:
-        if item.get("type") != "message":
-            continue
-        for part in item.get("content") or []:
-            if isinstance(part, dict) and isinstance(part.get("text"), str):
-                texts.append(part["text"])
-    return texts
+    return [
+        part["text"]
+        for item in items
+        if item.get("type") == "message"
+        for part in item.get("content") or []
+        if isinstance(part, dict) and isinstance(part.get("text"), str)
+    ]
 
 
 def _strip_final_markers(text: str | None) -> str | None:
     if text is None:
         return None
     stripped = text.strip()
-    # The model may place the marker before or after its summary; a live run
-    # produced a trailing "[DONE]", so both ends are stripped.
     for marker in FINAL_TEXT_MARKERS:
         if stripped.startswith(marker):
             stripped = stripped[len(marker) :].strip()
@@ -405,78 +302,118 @@ async def _collect_run(agent: Any, messages: Any) -> list[dict[str, Any]]:
 async def _summarize_limit_run(
     request: dict[str, Any],
     api_key: str,
-    desktop: CuaDriverDesktop,
+    computer: MacOSComputer,
     items: list[dict[str, Any]],
     deadline: float,
 ) -> str | None:
-    """Best-effort closing summary once the step cap is hit.
-
-    The previous runner made one extra, uncounted model call so a limited run
-    still reports what it accomplished. A fresh agent replays the collected
-    trajectory plus the stop instruction; a denying confirmation callback
-    keeps any further tool call from touching the desktop.
-    """
     async def deny(_request: dict[str, Any]) -> bool:
         return False
 
-    messages = (
-        [{"role": "user", "content": request["task"]}]
-        + items
-        + [{"role": "user", "content": STOP_SUMMARY_PROMPT}]
-    )
+    messages = [
+        {"role": "user", "content": request["task"]},
+        *items,
+        {"role": "user", "content": STOP_SUMMARY_PROMPT},
+    ]
     async with N2ComputerAgent(
-        computer=desktop,
+        computer=computer,
         tool_set=TOOL_SET,
         api_key=api_key,
         base_url=request["api_base_url"],
         model=request["model"],
         callbacks=[RunGuard(1, deadline)],
         action_confirmation_callback=deny,
-        temperature=0.6,
+        presentation=computer.presentation,
         supports_click_modifiers=True,
+        screenshot_delay=0,
+        execution_deadline=deadline,
     ) as agent:
         summary_items = await _collect_run(agent, messages)
     texts = _texts_from_items(summary_items)
-    return texts[-1] if texts else None
+    return _strip_final_markers(texts[-1] if texts else None)
+
+
+def _background_counts(events: tuple[ShellPresentationEvent, ...]) -> dict[str, int]:
+    counts = {state: 0 for state in ("started", "completed", "failed", "cancelled")}
+    for event in events:
+        if not event.run_in_background:
+            continue
+        if event.state == "running":
+            counts["started"] += 1
+        elif event.state == "timed_out":
+            counts["failed"] += 1
+        elif event.state in counts:
+            counts[event.state] += 1
+    return counts
 
 
 def _timings_payload(
     total_ms: int,
-    steps: int,
-    timings: RunTimings,
-    desktop_timings: Any | None,
-) -> dict[str, Any]:
-    """The result's perf breakdown, in the playground StepTimings vocabulary.
-
-    ``other_ms`` is the wall clock no measured phase accounts for (app launch
-    and fronting, JPEG re-encode inside the loop, event writes), clamped so a
-    measurement race can never render negative.
-    """
-    capture_ms = desktop_timings.capture_ms if desktop_timings else 0
-    captures = desktop_timings.captures if desktop_timings else 0
-    settle_ms = desktop_timings.settle_ms if desktop_timings else 0
-    accounted = timings.model_ms + timings.action_ms + capture_ms + settle_ms
+    agent: Any,
+    api_counter: ApiCounter,
+    reporter: ActionReporter,
+    computer: MacOSComputer,
+) -> dict[str, int]:
+    sdk = computer.timings
+    model_ms = round(getattr(agent, "timings", {}).get("model_ms", 0)) if agent is not None else 0
+    capture_ms = sdk.get("capture_ms", 0)
+    encode_ms = sdk.get("encode_ms", 0)
+    polling_ms = sdk.get("polling_ms", 0)
+    shell_ms = sdk.get("shell_ms", 0)
+    action_ms = sdk.get("action_ms", 0)
+    accounted = model_ms + action_ms + capture_ms + encode_ms + polling_ms + shell_ms
     return {
         "total_ms": total_ms,
-        "steps": steps,
-        "model_ms": timings.model_ms,
-        "model_calls": timings.model_calls,
-        "action_ms": timings.action_ms,
-        "tool_calls": timings.tool_calls,
-        "screenshot_ms": capture_ms,
-        "screenshots": captures,
-        "settle_ms": settle_ms,
+        "model_ms": model_ms,
+        "model_calls": api_counter.calls,
+        "action_ms": action_ms,
+        "tool_calls": reporter.tool_calls,
+        "screenshot_ms": capture_ms + encode_ms,
+        "screenshots": sdk.get("screenshots", 0),
+        "capture_ms": capture_ms,
+        "encode_ms": encode_ms,
+        "settle_ms": 0,
+        "polling_ms": polling_ms,
+        "shell_ms": shell_ms,
         "other_ms": max(0, total_ms - accounted),
     }
 
 
-async def run_request(request: dict[str, Any], emitter: Emitter, api_key: str) -> str:
-    """Execute one run request and emit its result. Returns the outcome.
+def _presentation_payload(computer: MacOSComputer, status: MacOSPresentationStatus) -> dict[str, Any]:
+    codec = status.codec
+    if codec is None and computer.current_observation is not None:
+        codec = computer.current_observation.media_type.rsplit("/", 1)[-1]
+    telemetry = list(computer.presentation.telemetry) if computer.presentation is not None else []
+    return {
+        "reasoning_overlay_requested": True,
+        "reasoning_overlay_effective": status.available,
+        "presentation": asdict(status),
+        "presentation_telemetry": telemetry,
+        "codec": codec,
+        "observation_format": codec,
+        "observation_format_fallback": codec == "jpeg",
+        "target_recovery_attempts": computer.target_recovery_attempts,
+        "no_progress_triggers": computer.no_progress_triggers,
+        "shell_events": [asdict(event) for event in computer.shell_events],
+        "background_command_counts": _background_counts(computer.shell_events),
+    }
 
-    Failures are emitted here rather than by the caller because only this
-    scope can still see the guard: a run that crashes on step 12 must report
-    12 steps and its real elapsed time, not zeros.
-    """
+
+def _cancelled_outcome(cause: str | None) -> tuple[str, str]:
+    if cause == "target_crash":
+        return "target_crashed", "The target app exited and could not be recovered."
+    if cause == "deadline":
+        return "limit", "The absolute deadline expired."
+    if cause == "transport_failure":
+        return "failed", "The CuaDriver transport failed."
+    return "aborted", "The computer-use run was stopped."
+
+
+async def run_request(
+    request: dict[str, Any],
+    emitter: Emitter,
+    api_key: str,
+    cancellation: CancellationLatch | None = None,
+) -> str:
     run_start = time.monotonic()
     remaining_seconds = request["deadline_ms"] / 1000 - time.time()
     if remaining_seconds <= 0:
@@ -491,91 +428,80 @@ async def run_request(request: dict[str, Any], emitter: Emitter, api_key: str) -
             }
         )
         return "limit"
+
     deadline = run_start + remaining_seconds
-
-    guard: RunGuard | None = None
-    timings = RunTimings()
-    desktop_timings: Any | None = None
+    guard = RunGuard(request["max_steps"], deadline)
+    reporter = ActionReporter(emitter, run_start)
+    api_counter = ApiCounter()
+    computer = MacOSComputer(
+        presentation=True,
+        allow_local_shell=True,
+        execution_deadline=deadline,
+        cancellation=cancellation or CancellationLatch(),
+        known_secrets=(api_key,),
+    )
+    agent: Any = None
+    outcome = "failed"
+    final_text: str | None = None
     try:
-        cli = DriverCLI(request["driver_path"])
-        target: dict[str, Any] | None = None
+        await computer.__aenter__()
         if request["app"]:
-            target = await prepare_app(cli, request["app"], request["start_url"])
+            # Consume the pre-launch frame captured during session startup so
+            # the first model observation is guaranteed to show the target.
+            await computer.screenshot()
+            target = await prepare_app(computer, request["app"], request["start_url"])
+            computer.target_pid = target["pid"]
 
-        guard = RunGuard(
-            request["max_steps"],
-            deadline,
-            cli=cli,
-            app=request["app"],
-            start_url=request["start_url"],
-            target=target,
-        )
-        async with CuaDriverDesktop(cli) as desktop:
-            desktop_timings = desktop.timings
-            reporter = ActionReporter(
-                emitter,
-                run_start,
-                timings=timings,
-                desktop_timings=desktop.timings,
-            )
-            async with N2ComputerAgent(
-                computer=desktop,
-                tool_set=TOOL_SET,
-                api_key=api_key,
-                base_url=request["api_base_url"],
-                model=request["model"],
-                callbacks=[guard, reporter, ApiTimer(timings)],
-                instructions=SYSTEM_CONTEXT,
-                # The handler owns the one-second post-action settle; adding the
-                # SDK's screenshot delay would double it.
-                screenshot_delay=0,
-                # Truncates in-flight batch execution at the wall clock; the
-                # step-level deadline lives in the guard.
-                execution_deadline=deadline,
-                temperature=0.6,
-                supports_click_modifiers=True,
-            ) as agent:
-                items = await _collect_run(agent, request["task"])
-            texts = _texts_from_items(items)
-            final_text = _strip_final_markers(texts[-1] if texts else None)
+            async def recover_target() -> int | None:
+                recovered = await prepare_app(computer, request["app"], request["start_url"])
+                return recovered["pid"]
 
-            if guard.target_crashed:
-                outcome = "target_crashed"
-                final_text = "The target app exited and could not be recovered."
-            elif guard.limit_reached or guard.deadline_reached:
-                outcome = "limit"
-                if guard.limit_reached:
-                    try:
-                        final_text = (
-                            await _summarize_limit_run(
-                                request, api_key, desktop, items, deadline
-                            )
-                            or final_text
-                        )
-                    except Exception as error:  # noqa: BLE001 - the summary is a nicety
-                        print(f"limit summary failed: {error}", file=sys.stderr)
-            else:
-                outcome = "completed"
-    except Exception as error:  # noqa: BLE001 - the wire carries the failure
-        message = str(error).replace(api_key, "[REDACTED]") or type(error).__name__
-        elapsed_ms = max(0, int((time.monotonic() - run_start) * 1000))
-        emitter.emit(
-            {
-                "type": "result",
-                "outcome": "failed",
-                "delivery_mode": "foreground",
-                "final_text": message,
-                "elapsed_ms": elapsed_ms,
-                "steps": guard.steps if guard else 0,
-                "target_recovery_attempts": guard.recovery_attempts if guard else 0,
-                "timings": _timings_payload(
-                    elapsed_ms, guard.steps if guard else 0, timings, desktop_timings
-                ),
-            }
-        )
-        return "failed"
+            computer.recover_target = recover_target
 
-    elapsed_ms = max(0, int((time.monotonic() - run_start) * 1000))
+        async with N2ComputerAgent(
+            computer=computer,
+            tool_set=TOOL_SET,
+            api_key=api_key,
+            base_url=request["api_base_url"],
+            model=request["model"],
+            callbacks=[guard, reporter, api_counter],
+            instructions=SYSTEM_CONTEXT,
+            presentation=computer.presentation,
+            screenshot_delay=0,
+            execution_deadline=deadline,
+            supports_click_modifiers=True,
+        ) as agent:
+            items = await _collect_run(agent, request["task"])
+        texts = _texts_from_items(items)
+        final_text = _strip_final_markers(texts[-1] if texts else None)
+        if guard.limit_reached or guard.deadline_reached:
+            outcome = "limit"
+            if guard.limit_reached:
+                try:
+                    final_text = await _summarize_limit_run(request, api_key, computer, items, deadline) or final_text
+                except Exception as error:  # noqa: BLE001 - final summary is best effort
+                    print(f"limit summary failed: {error}", file=sys.stderr)
+        else:
+            outcome = "completed"
+    except asyncio.CancelledError as error:
+        cause = computer.cancellation.cause or (str(error) if str(error) else None)
+        outcome, final_text = _cancelled_outcome(cause)
+    except MacOSTargetCrashedError:
+        outcome, final_text = _cancelled_outcome("target_crash")
+    except Exception as error:  # noqa: BLE001 - the protocol carries a redacted failure
+        outcome = "failed"
+        final_text = str(error).replace(api_key, "[REDACTED]") or type(error).__name__
+    finally:
+        status = computer.presentation_status
+        try:
+            await computer.aclose()
+        except Exception as error:  # noqa: BLE001 - preserve the primary outcome
+            if outcome == "completed":
+                outcome = "failed"
+                final_text = str(error).replace(api_key, "[REDACTED]") or type(error).__name__
+
+    reporter.flush_interrupted()
+    elapsed_ms = max(0, round((time.monotonic() - run_start) * 1000))
     emitter.emit(
         {
             "type": "result",
@@ -584,22 +510,14 @@ async def run_request(request: dict[str, Any], emitter: Emitter, api_key: str) -
             "final_text": final_text,
             "elapsed_ms": elapsed_ms,
             "steps": guard.steps,
-            "target_recovery_attempts": guard.recovery_attempts,
-            "timings": _timings_payload(
-                elapsed_ms, guard.steps, timings, desktop_timings
-            ),
+            "timings": _timings_payload(elapsed_ms, agent, api_counter, reporter, computer),
+            **_presentation_payload(computer, status),
         }
     )
     return outcome
 
 
 def _claim_protocol_stream() -> TextIO:
-    """Own the real stdout for events; route everything else to stderr.
-
-    Duplicated at the fd level so that library prints, C extensions, and
-    inherited descriptors in grandchildren all land on stderr — the parent
-    treats stdout as JSONL and stderr as diagnostics.
-    """
     protocol_fd = os.dup(1)
     os.dup2(2, 1)
     sys.stdout = sys.stderr
@@ -607,39 +525,66 @@ def _claim_protocol_stream() -> TextIO:
 
 
 def _read_request_line() -> str:
-    data = sys.stdin.read()
-    lines = [line for line in data.splitlines() if line.strip()]
+    lines = [line for line in sys.stdin.read().splitlines() if line.strip()]
     if len(lines) != 1:
-        raise RequestError(
-            "INVALID_REQUEST", "Expected exactly one JSONL request line."
-        )
+        raise RequestError("INVALID_REQUEST", "Expected exactly one JSONL request line.")
     return lines[0]
 
 
+def _take_api_key() -> str | None:
+    """Move the API key out of the environment before model-owned shells exist."""
+    return os.environ.pop("YUTORI_API_KEY", None)
+
+
+async def _run_until_terminated(request: dict[str, Any], emitter: Emitter, api_key: str) -> str:
+    """Turn supervisor SIGTERM into SDK cancellation so teardown can reap shells."""
+    cancellation = CancellationLatch()
+    task = asyncio.create_task(run_request(request, emitter, api_key, cancellation))
+    loop = asyncio.get_running_loop()
+    terminating = False
+
+    def terminate() -> None:
+        nonlocal terminating
+        if terminating:
+            return
+        terminating = True
+        cancellation.request("supervisor")
+        task.cancel("supervisor")
+
+    loop.add_signal_handler(signal.SIGTERM, terminate)
+    try:
+        return await task
+    finally:
+        loop.remove_signal_handler(signal.SIGTERM)
+
+
 def main() -> int:
+    api_key = _take_api_key()
     emitter = Emitter(_claim_protocol_stream())
     emitter.emit(
         {
             "type": "ready",
             "protocol_version": PROTOCOL_VERSION,
             "package_version": _package_version(),
+            "sdk_version": SDK_VERSION,
+            "sdk_artifact_sha256": SDK_ARTIFACT_SHA256,
+            "sdk_provenance_sha256": SDK_PROVENANCE_SHA256,
             "driver_version_pinned": DRIVER_VERSION,
-            "observation_format": "jpeg",
-            "observation_format_fallback": False,
-            "reasoning_overlay_requested": False,
+            "observation_format": "webp",
+            "observation_format_fallback": True,
+            "observation_fallback_format": "jpeg",
+            "reasoning_overlay_requested": True,
         }
     )
     try:
-        line = _read_request_line()
         try:
-            payload = json.loads(line)
+            payload = json.loads(_read_request_line())
         except json.JSONDecodeError:
             raise RequestError("INVALID_JSON", "Request was not valid JSON.") from None
         request = parse_request(payload)
     except RequestError as error:
         emitter.emit({"type": "error", "code": error.code, "message": str(error)})
         return 1
-    api_key = os.environ.get("YUTORI_API_KEY")
     if not api_key:
         emitter.emit(
             {
@@ -650,11 +595,8 @@ def main() -> int:
         )
         return 1
     try:
-        # run_request emits the failed result itself (it can still see the
-        # guard's step count there); this fallback only covers a failure to
-        # start or tear down the event loop.
-        outcome = asyncio.run(run_request(request, emitter, api_key))
-    except Exception as error:  # noqa: BLE001 - the wire carries the failure
+        outcome = asyncio.run(_run_until_terminated(request, emitter, api_key))
+    except Exception as error:  # noqa: BLE001 - last-resort protocol boundary
         message = str(error).replace(api_key, "[REDACTED]") or type(error).__name__
         emitter.emit(
             {
@@ -666,7 +608,7 @@ def main() -> int:
             }
         )
         return 1
-    return 0 if outcome in {"completed", "limit"} else 1
+    return 0 if outcome in {"completed", "limit", "aborted"} else 1
 
 
 if __name__ == "__main__":

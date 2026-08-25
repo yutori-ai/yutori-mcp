@@ -386,7 +386,6 @@ class BrowsingTaskInput(ToolInput):
     )
     webhook_format: WebhookFormat = _webhook_format_field()
 
-
 class ComputerUseTaskInput(ToolInput):
     task: str = Field(..., description="Task to perform on the visible Mac desktop")
     app: str | None = Field(default=None, description="Optional application to target")
@@ -394,12 +393,11 @@ class ComputerUseTaskInput(ToolInput):
         default=None, description="Optional URL to open in the target app"
     )
     minutes: float = Field(
-        default=3, ge=1, le=60, description="Absolute run deadline in minutes (1-60)"
+        default=3, ge=1, le=15, description="Absolute run deadline in minutes (1-15)"
     )
     max_steps: int = Field(
-        default=200, ge=1, le=200, description="Maximum model steps (1-200)"
+        default=60, ge=1, le=100, description="Maximum actions (1-100)"
     )
-
     @model_validator(mode="after")
     def require_app_for_start_url(self) -> ComputerUseTaskInput:
         if self.start_url is not None and self.app is None:

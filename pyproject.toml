@@ -1,15 +1,10 @@
-# hatchling refuses PEP 508 direct references unless this is set, and the computer-use
-# SDK is pinned to a private git commit rather than published to an index.
-[tool.hatch.metadata]
-allow-direct-references = true
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.4.0"
+version = "0.5.0"
 description = "MCP server for Yutori - web monitoring, deep research, and browser automation"
 readme = "README.md"
 license = "Apache-2.0"
@@ -35,12 +30,9 @@ dependencies = [
     # breaks the install as soon as 2.x resolves.
     "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
-    # Pinned to the SDK fork commit that owns the n2 computer-use loop
-    # (yutori.navigator.N2ComputerAgent). INTERIM: replace with the plain
-    # `yutori>=0.9` index requirement as soon as the SDK ships a release
-    # carrying the loop — that removes the last private git dependency from
-    # the base install.
-    "yutori @ git+ssh://git@github.com/yutori-ai/yutori-sdk-python-private.git@f7b609510f40247ad6b9c4a55ae81fe1a95c8b50",
+    # SDK 0.9.1 owns the complete Python/Swift macOS runtime. Doctor verifies
+    # the installed payload against the exact published wheel before use.
+    "yutori==0.9.1",
 ]
 
 [project.optional-dependencies]
@@ -48,13 +40,14 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
 ]
+
 [project.urls]
 Homepage = "https://yutori.com"
 Documentation = "https://docs.yutori.com"
 Repository = "https://github.com/yutori-ai/yutori-mcp"
 
 [project.scripts]
-yutori-mcp = "yutori_mcp.server:main"
+yutori-mcp = "yutori_mcp.entrypoint:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/yutori_mcp"]
