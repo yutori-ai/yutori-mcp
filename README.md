@@ -10,6 +10,30 @@ You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and 
 - **Scouting** — Monitor the web continuously for anything you care about at a desired frequency
 - **Research** — Run one-time deep web research tasks
 - **Browsing** — Automate websites with an AI navigator
+- **Computer use preview** — On macOS 15+, opt in to foreground desktop automation against the dev endpoint
+
+### macOS computer-use preview
+
+This development-only preview is available only when the MCP server runs on macOS with
+`YUTORI_ENV=dev`. The runtime is Python-only and requires Python 3.10 or later. Setup installs
+CuaDriver, requests its macOS permissions, and prepares the optional native reasoning overlay:
+
+```bash
+uvx yutori-mcp computer-use setup
+uvx yutori-mcp computer-use doctor
+uvx yutori-mcp computer-use smoke
+```
+
+`computer-use run` executes one custom task from the terminal — the same run the MCP tool
+performs, with per-action progress printed as it happens:
+
+```bash
+uvx yutori-mcp computer-use run "In Calculator, compute 17 * 23 and report the result." --app Calculator
+```
+
+The `run_computer_use_task` tool controls the visible foreground desktop. Do not touch the
+Mac while it runs. Visible desktop content is sent to Yutori's dev model endpoint. Only one
+task can control a Mac at a time.
 
 **Workflow skills** (for clients that support slash commands):
 - [`/yutori-scout`](skills/01-scout/SKILL.md) — Set up continuous web monitoring
@@ -400,3 +424,34 @@ For full API documentation, visit [docs.yutori.com](https://docs.yutori.com).
 ## License
 
 Apache 2.0
+
+## Computer-use preview: authenticating against dev
+
+`login` authenticates against production and saves a production key, which the dev stack
+rejects with a 401. Store a dev key separately:
+
+```sh
+uvx yutori-mcp --env dev login      # prompts for a key from platform.dev.yutori.com
+uvx yutori-mcp --env dev status
+uvx yutori-mcp --env dev logout
+```
+
+That writes an `environments.dev` entry alongside the existing top-level `api_key`, so one
+machine can hold both without either shadowing the other. `YUTORI_API_KEY` still takes
+precedence over both when set.
+
+## Computer-use preview: runtime dependency
+
+The SDK-owned `yutori.navigator.N2ComputerAgent` and `MacOSComputer` provide the complete
+runtime. The MCP package pins SDK 0.9.1 and verifies the installed files against the immutable
+published wheel plus its packaged provenance during `computer-use doctor`. There is no
+TypeScript bundle, Node executable, or alternate harness. A normal source checkout needs no
+private dependency access:
+
+```sh
+uv sync --extra dev
+```
+
+SDK contributors may deliberately test an editable 0.9.1 checkout by setting
+`YUTORI_MCP_ALLOW_EDITABLE_SDK=1`; without that explicit override, doctor rejects editable or
+modified SDK installations.

@@ -562,7 +562,10 @@ class TestFormatTaskList:
 
     def test_null_summary_does_not_crash(self):
         """An explicit `summary: null` must not raise (regression guard for `or {}`)."""
-        response = {"tasks": [{"task_id": "t1", "query": "q", "status": "succeeded"}], "summary": None}
+        response = {
+            "tasks": [{"task_id": "t1", "query": "q", "status": "succeeded"}],
+            "summary": None,
+        }
         result = format_task_list(response, task_type="Research")
 
         assert "Found 1 research tasks." in result
