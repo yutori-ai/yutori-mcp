@@ -38,17 +38,14 @@ def resolve_harness(requested: str | None = None) -> str:
     return value
 
 # The dated id decides which tools the model may call, and the server default
-# has already moved twice — so a run always sends it explicitly. 20260729 is
-# the hybrid batch surface (GUI computer_batch + screenshot + shell_command)
-# the previous Node runner shipped; 20260815 is deliberately not used because
-# it advertises a held `modifier` on the click family that this executor
-# cannot deliver.
-TOOL_SET = "computer_use_tools-20260729"
+# has already moved twice — so a run always sends it explicitly. 20260815 is
+# the trained batch-only surface: nested computer_batch members, screenshot,
+# bash, and held modifiers on clicks.
+TOOL_SET = "computer_use_tools-20260815"
 
 # The cua-driver release this harness was verified against, and the checksum of
-# its installer script. check_driver_contract reports drift against the version
-# without blocking (0.18.0 drove full tasks correctly while the pin read
-# 0.19.3); the installer checksum is a hard gate because setup executes it.
+# its installer script. Both are hard gates: modifier-click fidelity depends on
+# the exact driver contract, and setup executes the installer.
 DRIVER_VERSION = "0.19.3"
 DRIVER_INSTALLER_SHA256 = (
     "52293f8683c6c41ef8df0bb17907f3bd9266314e04f7b0c8f3c4576e7ba139f7"

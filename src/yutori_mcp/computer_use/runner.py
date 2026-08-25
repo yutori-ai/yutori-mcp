@@ -33,7 +33,8 @@ from .driver import CuaDriverDesktop, DriverCLI, DriverError, prepare_app
 # swap; the trained prompt already covers the normalized-coordinate rule, so
 # this deliberately does not restate it.
 SYSTEM_CONTEXT = (
-    "You control the entire macOS screen. Use macOS conventions: cmd, not ctrl, for "
+    "You control the entire macOS screen. This is macOS, not Linux. Use macOS "
+    "conventions: cmd, not ctrl, for "
     "standard shortcuts. Prefer reliable keyboard shortcuts such as cmd+w to close the "
     "current window, cmd+q to quit, and cmd+shift+s for Save As. If one visual attempt "
     "to click a title-bar or menu close control misses, do not repeat the same "
@@ -49,7 +50,8 @@ SYSTEM_CONTEXT = (
     "somewhere the screen does not show, so progress stays visible while the task is "
     "still running. When you finish, open the final artifact (the document, file, "
     "page, or app view holding the result) so it is visible on screen, then take a "
-    "screenshot to confirm it before you summarize.\n\n"
+    "screenshot to confirm it before you summarize. When using bash, run commands "
+    "as the logged-in user and do not use sudo.\n\n"
     "Do not open or change System Settings, application settings, accounts, "
     "permissions, or defaults unless the user explicitly asked for that settings "
     "change."
@@ -430,6 +432,7 @@ async def _summarize_limit_run(
         api_key=api_key,
         base_url=request["api_base_url"],
         model=request["model"],
+        temperature=0.6,
         callbacks=[RunGuard(1, deadline)],
         action_confirmation_callback=deny,
     ) as agent:
@@ -522,12 +525,11 @@ async def run_request(request: dict[str, Any], emitter: Emitter, api_key: str) -
                 api_key=api_key,
                 base_url=request["api_base_url"],
                 model=request["model"],
+                temperature=0.6,
                 callbacks=[guard, reporter, ApiTimer(timings)],
                 instructions=SYSTEM_CONTEXT,
-                # 0, not the library's 0.5 default: the post-action pause is the
-                # handler's 0.3s settle, matching the previous runner's
-                # SETTLE_AFTER_ACTION_MS, so both harnesses capture the
-                # post-action frame on the same clock.
+                # 0, not the library's 0.5 default: the handler owns the 1.0s
+                # settle that matches the trained lane's post-action pause.
                 screenshot_delay=0,
                 # Truncates in-flight batch execution at the wall clock; the
                 # step-level deadline lives in the guard.

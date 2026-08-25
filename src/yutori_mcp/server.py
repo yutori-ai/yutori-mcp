@@ -385,7 +385,7 @@ async def run_computer_use_task(
     app: str | None = None,
     start_url: str | None = None,
     minutes: float = 3,
-    max_steps: int = 60,
+    max_steps: int = 200,
     harness: Literal["node", "python"] | None = None,
     ctx: Context | None = None,
 ) -> str:

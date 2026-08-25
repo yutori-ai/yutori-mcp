@@ -15,8 +15,8 @@ Visible desktop content is sent to Yutori's dev model endpoint.
 | `task` | Yes | Natural-language desktop task |
 | `app` | No | Application to target; omit for cross-app tasks |
 | `start_url` | No | Starting URL; requires `app` |
-| `minutes` | No | Absolute deadline, 1–15 minutes (default 3) |
-| `max_steps` | No | Maximum actions, 1–100 (default 60) |
+| `minutes` | No | Absolute deadline, 1–60 minutes (default 3) |
+| `max_steps` | No | Maximum model steps, 1–200 (default 200) |
 | `harness` | No | Evaluation-only runner override: `python` (default) or `node` (needs the `node-harness` install extra) |
 
 First-time setup: authenticate, then run

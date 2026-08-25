@@ -26,7 +26,7 @@ CAPTURE_ATTEMPTS = 3
 CAPTURE_RETRY_DELAY_SECONDS = 0.25
 # macOS reports an action before the surface repaints, so a capture taken
 # immediately after would show the pre-action screen.
-SETTLE_AFTER_ACTION_SECONDS = 0.3
+SETTLE_AFTER_ACTION_SECONDS = 1.0
 # launch_app deliberately does not foreground; without this pause the model is
 # told the app is open while the first observation still shows whatever was in
 # front, and it burns its budget hunting other windows.
@@ -449,11 +449,21 @@ class CuaDriverDesktop:
         self.timings.captures += 1
         return encoded
 
-    async def click(self, x: int, y: int, button: str = "left") -> None:
-        await self._act("click", self._routed(x=x, y=y, count=1, button=button))
+    async def click(
+        self, x: int, y: int, button: str = "left", modifier: list[str] | None = None
+    ) -> None:
+        arguments = self._routed(x=x, y=y, count=1, button=button)
+        if modifier:
+            arguments["modifier"] = [normalize_key(key) for key in modifier]
+        await self._act("click", arguments)
 
-    async def double_click(self, x: int, y: int) -> None:
-        await self._act("click", self._routed(x=x, y=y, count=2, button="left"))
+    async def double_click(
+        self, x: int, y: int, modifier: list[str] | None = None
+    ) -> None:
+        arguments = self._routed(x=x, y=y, count=2, button="left")
+        if modifier:
+            arguments["modifier"] = [normalize_key(key) for key in modifier]
+        await self._act("click", arguments)
 
     async def scroll(self, x: int, y: int, scroll_x: int, scroll_y: int) -> None:
         if scroll_x == 0 and scroll_y == 0:
@@ -572,8 +582,7 @@ class CuaDriverDesktop:
         A different contract from ``shell_command``: the loop bounds ``timeout``
         to [0, 600], there is no per-call ``cwd`` because the working directory
         persists across calls, and ``run_in_background`` detaches the command
-        and returns a handle. Unused by the pinned tool set, kept so moving to
-        a bash tool set is a one-constant change.
+        and returns a handle.
         """
         if run_in_background:
             return await self._run_bash_in_background(command)

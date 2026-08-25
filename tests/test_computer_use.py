@@ -30,7 +30,7 @@ from yutori_mcp.computer_use.driver import (
     pick_best_window,
     prepare_app,
 )
-from yutori_mcp.computer_use.constants import resolve_harness
+from yutori_mcp.computer_use.constants import DRIVER_VERSION, TOOL_SET, resolve_harness
 from yutori_mcp.computer_use.lock import ComputerUseBusyError, DesktopLock
 from yutori_mcp.computer_use.runner import (
     ActionReporter,
@@ -51,16 +51,27 @@ from yutori_mcp.computer_use.supervisor import (
 from yutori_mcp.schemas import ComputerUseTaskInput
 
 
-@pytest.mark.parametrize("minutes", [0.9, 15.1])
+@pytest.mark.parametrize("minutes", [0.9, 60.1])
 def test_schema_rejects_minutes(minutes):
     with pytest.raises(ValidationError):
         ComputerUseTaskInput(task="x", minutes=minutes)
 
 
-@pytest.mark.parametrize("max_steps", [0, 101])
+@pytest.mark.parametrize("max_steps", [0, 201])
 def test_schema_rejects_max_steps(max_steps):
     with pytest.raises(ValidationError):
         ComputerUseTaskInput(task="x", max_steps=max_steps)
+
+
+@pytest.mark.parametrize("max_steps", [100, 101, 200])
+def test_schema_accepts_the_extended_model_step_budget(max_steps):
+    assert ComputerUseTaskInput(task="x", max_steps=max_steps).max_steps == max_steps
+    assert ComputerUseTaskInput(task="x").max_steps == 200
+
+
+def test_mac_lane_pins_the_trained_tool_set_and_driver():
+    assert TOOL_SET == "computer_use_tools-20260815"
+    assert DRIVER_VERSION == "0.19.3"
 
 
 def test_schema_requires_app_for_url_and_forbids_unknowns():
@@ -653,12 +664,13 @@ def test_capture_goes_through_the_driver_not_screencapture(tmp_path):
             assert preflight.check_capture().ok
 
 
-def test_driver_contract_reports_drift_without_blocking_a_working_driver():
-    """0.18.0 drove a full task while the pin read 0.19.3; refusing that would be wrong."""
+def test_driver_contract_requires_the_pinned_release():
+    with patch.object(preflight, "driver_version", return_value=DRIVER_VERSION):
+        assert preflight.check_driver_contract().ok
     with patch.object(preflight, "driver_version", return_value="0.18.0"):
         result = preflight.check_driver_contract()
-    assert result.ok
-    assert "0.18.0" in result.detail and preflight.DRIVER_VERSION in result.detail
+    assert not result.ok
+    assert "0.18.0" in result.detail and DRIVER_VERSION in result.detail
 
 
 def test_driver_contract_blocks_when_the_driver_cannot_answer():
@@ -744,8 +756,10 @@ def test_dev_access_passes_only_on_a_real_completion():
     with patch.object(
         preflight, "resolve_api_key_for_environment", return_value="yt-test"
     ):
-        with patch.object(preflight, "urlopen", return_value=Response()):
+        with patch.object(preflight, "urlopen", return_value=Response()) as urlopen:
             assert preflight.check_dev_access().ok
+    request = urlopen.call_args.args[0]
+    assert json.loads(request.data)["tool_set"] == TOOL_SET
 
 
 def test_lock_module_avoids_apis_newer_than_the_declared_python_floor():
@@ -1325,12 +1339,17 @@ async def test_driver_cli_capture_reports_a_permanently_missing_frame(tmp_path):
             await cli.capture("get_desktop_state", {"session": "s"})
 
 
-async def test_sdk_loop_executes_against_the_desktop_handler():
-    """The desktop handler satisfies the SDK loop's duck-typed surface.
-
-    Exercises a real translated click through yutori.navigator's executor
-    against the driver adapter, pinning the handler/loop seam end to end.
-    """
+@pytest.mark.parametrize(
+    ("action", "modifier", "expected_clicks"),
+    [
+        ("left_click", "ctrl", [(1, "left", ["ctrl"])]),
+        ("right_click", "shift", [(1, "right", ["shift"])]),
+        ("middle_click", "alt", [(1, "middle", ["option"])]),
+        ("double_click", "command", [(2, "left", ["cmd"])]),
+        ("triple_click", "meta", [(2, "left", ["cmd"]), (1, "left", ["cmd"])]),
+    ],
+)
+async def test_sdk_loop_forwards_click_modifiers_to_the_desktop_handler(action, modifier, expected_clicks):
     from yutori.navigator import parse_n2_tool_calls
     from yutori.navigator.n2 import _CallbackDispatcher, execute_n2_computer_call
 
@@ -1342,22 +1361,44 @@ async def test_sdk_loop_executes_against_the_desktop_handler():
                 {
                     "id": "c1",
                     "function": {
-                        "name": "left_click",
-                        "arguments": '{"coordinates": [500, 500]}',
+                        "name": "computer_batch",
+                        "arguments": json.dumps(
+                            {
+                                "actions": [
+                                    {
+                                        "name": action,
+                                        "arguments": {
+                                            "coordinates": [500, 500],
+                                            "modifier": modifier,
+                                        },
+                                    }
+                                ]
+                            }
+                        ),
                     },
                 }
             ],
         },
         200,
         100,
+        allow_click_modifiers=True,
     )[-1]
-    result = await execute_n2_computer_call(
-        item, desktop, callbacks=_CallbackDispatcher(None), screenshot_delay=0
-    )
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()) as settle:
+        result = await execute_n2_computer_call(
+            item, desktop, callbacks=_CallbackDispatcher(None), screenshot_delay=0
+        )
     output = result[0]["output"]
     assert isinstance(output, dict) and output["type"] == "input_image"
-    assert ("click", {"delivery_mode": "foreground", "scope": "desktop", "session": "s1",
-                      "x": 100, "y": 50, "count": 1, "button": "left"}) in desktop.cli.calls
+    click_args = [args for tool, args in desktop.cli.calls if tool == "click"]
+    assert [(args["count"], args["button"], args["modifier"]) for args in click_args] == expected_clicks
+    assert all(
+        args["delivery_mode"] == "foreground"
+        and args["scope"] == "desktop"
+        and args["session"] == "s1"
+        and (args["x"], args["y"]) == (100, 50)
+        for args in click_args
+    )
+    assert [awaited.args for awaited in settle.await_args_list] == [(1.0,)] * len(expected_clicks)
     # The optional shell capabilities are duck-typed by method presence.
     assert hasattr(desktop, "run_shell_command")
     assert hasattr(desktop, "run_bash_command")
@@ -1406,6 +1447,43 @@ async def test_failed_run_reports_completed_steps_and_redacts_the_key(monkeypatc
     assert "[REDACTED]" in result["final_text"]
 
 
+async def test_runner_uses_trained_sampling_for_the_task_and_limit_summary(monkeypatch):
+    agent_kwargs: list[dict] = []
+
+    class _FakeAgent:
+        def __init__(self, **kwargs):
+            agent_kwargs.append(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+        async def run(self, _messages):
+            yield {"output": [{"type": "message", "content": [{"text": "done"}]}]}
+
+    monkeypatch.setattr(runner_module, "N2ComputerAgent", _FakeAgent)
+    monkeypatch.setattr(runner_module, "DriverCLI", lambda _path: _FakeCLI())
+    request = parse_request(
+        _valid_request(deadline_ms=int((time.time() + 60) * 1000))
+    )
+
+    assert await runner_module.run_request(request, Emitter(_CollectStream()), "yt-key") == "completed"
+    await runner_module._summarize_limit_run(
+        request,
+        "yt-key",
+        CuaDriverDesktop(_FakeCLI()),
+        [],
+        time.monotonic() + 60,
+    )
+
+    assert [kwargs["temperature"] for kwargs in agent_kwargs] == [0.6, 0.6]
+    assert agent_kwargs[0]["instructions"] == runner_module.SYSTEM_CONTEXT
+    assert "macOS, not Linux" in runner_module.SYSTEM_CONTEXT
+    assert "do not use sudo" in runner_module.SYSTEM_CONTEXT
+
+
 @pytest.mark.parametrize("command", ["setup", "doctor", "smoke"])
 def test_cli_reports_a_bad_harness_env_without_a_traceback(
     command, monkeypatch, capsys
@@ -1441,7 +1519,7 @@ def _run_namespace(**overrides):
         "app": None,
         "start_url": None,
         "minutes": 3,
-        "max_steps": 60,
+        "max_steps": 200,
     }
     values.update(overrides)
     return argparse.Namespace(**values)

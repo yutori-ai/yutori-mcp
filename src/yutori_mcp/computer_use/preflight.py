@@ -19,6 +19,7 @@ from .constants import (
     DRIVER_VERSION,
     HARNESS_NODE,
     HARNESS_PYTHON,
+    TOOL_SET,
     resolve_harness,
 )
 from .runtime import RuntimeValidationError, get_manifest
@@ -225,14 +226,7 @@ def driver_version() -> str | None:
 
 
 def check_driver_contract() -> CheckResult:
-    """Require a driver that answers, and report whether it matches the pin.
-
-    Deliberately not an equality gate. DRIVER_VERSION records the release this
-    harness was verified against, and a different one is not automatically broken: 0.18.0 drove a
-    full task correctly while the pin read 0.19.3. Blocking there would have refused a working
-    machine over a version string. A live smoke run is the real gate, so this reports the drift
-    rather than pretending to know it is fatal.
-    """
+    """Require the exact driver release whose modifier-click contract was verified."""
     installed = driver_version()
     if installed is None:
         return _result(
@@ -241,15 +235,13 @@ def check_driver_contract() -> CheckResult:
             "driver did not report a version",
             "Run: yutori-mcp computer-use setup",
         )
-    pinned = DRIVER_VERSION
-    matches = installed == pinned
-    detail = (
-        f"{installed}"
-        if matches
-        else f"{installed} (verified against {pinned}; run smoke to confirm)"
-    )
+    matches = installed == DRIVER_VERSION
+    detail = installed if matches else f"{installed} (expected {DRIVER_VERSION})"
     return _result(
-        "driver contract", True, detail, "Run: yutori-mcp computer-use setup"
+        "driver contract",
+        matches,
+        detail,
+        "Run: yutori-mcp computer-use setup",
     )
 
 
@@ -387,7 +379,7 @@ def check_dev_access() -> CheckResult:
             data=json.dumps(
                 {
                     "model": "n2-preview",
-                    "tool_set": "computer_use_tools-20260728",
+                    "tool_set": TOOL_SET,
                     "messages": [{"role": "user", "content": "ping"}],
                 }
             ).encode(),

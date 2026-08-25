@@ -194,7 +194,7 @@ async def _print_event(event: dict) -> None:
 
 async def _run_custom(args: argparse.Namespace) -> int:
     # Reuses the MCP tool's input schema so the CLI enforces the same bounds
-    # (minutes 1-15, steps 1-100, start_url requires app) with the same
+    # (minutes 1-60, steps 1-200, start_url requires app) with the same
     # messages; the resulting ValidationError is a ValueError, so dispatch's
     # handler prints it as a message rather than a traceback.
     params = ComputerUseTaskInput(
@@ -247,10 +247,10 @@ def register_parser(
         "--start-url", dest="start_url", default=None, help="URL to open in the app"
     )
     run_parser.add_argument(
-        "--minutes", type=float, default=3, help="Absolute deadline in minutes (1-15)"
+        "--minutes", type=float, default=3, help="Absolute deadline in minutes (1-60)"
     )
     run_parser.add_argument(
-        "--max-steps", dest="max_steps", type=int, default=60, help="Maximum actions (1-100)"
+        "--max-steps", dest="max_steps", type=int, default=200, help="Maximum model steps (1-200)"
     )
 
 
