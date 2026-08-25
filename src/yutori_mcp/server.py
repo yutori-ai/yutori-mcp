@@ -840,11 +840,6 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.command == "computer-use":
-        from .computer_use.cli import dispatch
-
-        raise SystemExit(dispatch(args.computer_use_command, args))
-
     # The flag is forwarded via the env var (rather than threaded through to
     # get_adapter()'s lazily-constructed, process-lifetime MCPClientAdapter)
     # so adapter.resolve_base_url() stays the single resolution point
@@ -852,6 +847,15 @@ def main() -> None:
     # config's `env` block.
     if args.env:
         os.environ[ENV_VAR_ENVIRONMENT] = args.env
+
+    if args.command == "computer-use":
+        # Public computer-use commands default to production even if a shell has
+        # stale YUTORI_ENV state. Internal testing can still pass --env explicitly.
+        if not args.env:
+            os.environ.pop(ENV_VAR_ENVIRONMENT, None)
+        from .computer_use.cli import dispatch
+
+        raise SystemExit(dispatch(args.computer_use_command, args))
 
     # Dispatched after --env is applied, not before: `login --env <name>` has to know which
     # environment it is storing a credential for, and the old ordering ran auth first.

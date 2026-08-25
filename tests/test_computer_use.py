@@ -120,6 +120,46 @@ def test_main_applies_explicit_environment_before_computer_use_registration(monk
     assert observed == ["prod"]
 
 
+def test_main_applies_explicit_environment_before_computer_use_dispatch(monkeypatch):
+    import yutori_mcp.computer_use.cli as computer_use_cli
+    from yutori_mcp import server
+
+    observed: dict[str, str | None] = {}
+
+    def record_dispatch(_command: str, _args: object) -> int:
+        observed["environment"] = os.environ.get("YUTORI_ENV")
+        return 0
+
+    monkeypatch.setenv("YUTORI_ENV", "prod")
+    monkeypatch.setattr(sys, "argv", ["yutori-mcp", "--env", "dev", "computer-use", "doctor"])
+    monkeypatch.setattr(computer_use_cli, "dispatch", record_dispatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        server.main()
+    assert exc_info.value.code == 0
+    assert observed == {"environment": "dev"}
+
+
+def test_main_clears_ambient_environment_for_computer_use_without_explicit_env(monkeypatch):
+    import yutori_mcp.computer_use.cli as computer_use_cli
+    from yutori_mcp import server
+
+    observed: dict[str, str | None] = {}
+
+    def record_dispatch(_command: str, _args: object) -> int:
+        observed["environment"] = os.environ.get("YUTORI_ENV")
+        return 0
+
+    monkeypatch.setenv("YUTORI_ENV", "dev")
+    monkeypatch.setattr(sys, "argv", ["yutori-mcp", "computer-use", "doctor"])
+    monkeypatch.setattr(computer_use_cli, "dispatch", record_dispatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        server.main()
+    assert exc_info.value.code == 0
+    assert observed == {"environment": None}
+
+
 def test_lock_rejects_second_owner_and_releases(tmp_path):
     path = tmp_path / "desktop.lock"
     with DesktopLock(path), pytest.raises(ComputerUseBusyError), DesktopLock(path):
