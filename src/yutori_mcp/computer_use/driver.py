@@ -287,10 +287,14 @@ async def prepare_app(cli: DriverCLI, app: str, start_url: str | None) -> dict[s
         if _BUNDLE_ID_PATTERN.match(app):
             try:
                 payload = await cli.call("launch_app", {"bundle_id": app, **launch_args})
+            except DriverRefusal:
+                raise
             except DriverError:
                 payload = await cli.call("launch_app", {"name": app, **launch_args})
         else:
             payload = await cli.call("launch_app", {"name": app, **launch_args})
+    except DriverRefusal:
+        raise
     except DriverError as error:
         launch_error = error
         payload = {}

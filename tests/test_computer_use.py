@@ -1390,6 +1390,27 @@ async def test_prepare_app_falls_back_when_launching_a_running_system_app_raises
     assert target == {"name": "Finder", "pid": 42}
 
 
+@pytest.mark.parametrize(
+    ("app", "launch_args"),
+    [
+        ("Finder", {"name": "Finder"}),
+        ("com.apple.finder", {"bundle_id": "com.apple.finder"}),
+    ],
+)
+async def test_prepare_app_does_not_bypass_driver_refusal_with_a_running_app(
+    app: str, launch_args: dict[str, str]
+) -> None:
+    cli = _FakeCLI(
+        {
+            "launch_app": DriverRefusal("protected_resource"),
+            "list_apps": {"apps": [{"name": "Finder", "pid": 42}]},
+        }
+    )
+    with pytest.raises(DriverRefusal, match="protected_resource"):
+        await prepare_app(cli, app, None)
+    assert cli.calls == [("launch_app", launch_args)]
+
+
 async def test_prepare_app_preserves_launch_error_when_no_running_app_matches():
     cli = _FakeCLI(
         {
