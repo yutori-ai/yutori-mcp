@@ -443,7 +443,7 @@ precedence over both when set.
 ## Computer-use preview: runtime dependency
 
 The SDK-owned `yutori.navigator.N2ComputerAgent` and `MacOSComputer` provide the complete
-runtime. The MCP package pins SDK 0.9.1 and verifies the installed files against the immutable
+runtime. The MCP package pins SDK 0.9.2 and verifies the installed files against the immutable
 published wheel plus its packaged provenance during `computer-use doctor`. There is no
 TypeScript bundle, Node executable, or alternate harness. A normal source checkout needs no
 private dependency access:
@@ -452,6 +452,6 @@ private dependency access:
 uv sync --extra dev
 ```
 
-SDK contributors may deliberately test an editable 0.9.1 checkout by setting
+SDK contributors may deliberately test an editable 0.9.2 checkout by setting
 `YUTORI_MCP_ALLOW_EDITABLE_SDK=1`; without that explicit override, doctor rejects editable or
 modified SDK installations.

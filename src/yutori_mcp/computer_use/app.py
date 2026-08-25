@@ -63,7 +63,7 @@ def _find_running_app(payload: dict[str, Any], requested: str) -> dict[str, Any]
 
 
 async def _running_app(computer: MacOSComputer, requested: str) -> dict[str, Any] | None:
-    # SDK 0.9.1 has no public list_apps convenience method. Its generic hook
+    # The pinned SDK has no public list_apps convenience method. Its generic hook
     # retains deadline/Stop cancellation while keeping the transport SDK-owned.
     result = await computer._call_tool("list_apps", {}, read_only=True)
     payload = result.get("structuredContent") or result.get("structured_content") or {}
