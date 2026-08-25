@@ -103,6 +103,23 @@ def test_registration_gate(platform, environment, expected):
         assert _computer_use_enabled() is expected
 
 
+def test_main_applies_explicit_environment_before_computer_use_registration(monkeypatch):
+    from yutori_mcp import server
+
+    observed = []
+
+    def record_registration() -> None:
+        observed.append(os.environ["YUTORI_ENV"])
+
+    monkeypatch.setenv("YUTORI_ENV", "dev")
+    monkeypatch.setattr(sys, "argv", ["yutori-mcp", "--env", "prod"])
+    monkeypatch.setattr(server, "_register_computer_use_tool", record_registration)
+    monkeypatch.setattr(server.mcp, "run", lambda **_kwargs: None)
+
+    server.main()
+    assert observed == ["prod"]
+
+
 def test_lock_rejects_second_owner_and_releases(tmp_path):
     path = tmp_path / "desktop.lock"
     with DesktopLock(path), pytest.raises(ComputerUseBusyError), DesktopLock(path):

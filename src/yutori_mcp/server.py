@@ -691,14 +691,7 @@ def _computer_use_enabled() -> bool:
 
 
 def _register_computer_use_tool() -> None:
-    """Expose the dev-only macOS computer-use tool, if this process should have it.
-
-    Called twice, and it has to be: once at import, which is what an MCP client passing
-    YUTORI_ENV in its config `env` block gets, and again from main() once `--env` has been
-    applied — that flag lands in the environment well after this module is imported, so the
-    import-time call alone left `uvx yutori-mcp --env dev` advertising no such tool. Idempotent,
-    so whichever call arrives second does nothing.
-    """
+    """Expose the macOS computer-use tool when the resolved environment is dev."""
     if "run_computer_use_task" in _TOOL_HANDLERS:
         return
     if not _computer_use_enabled():
@@ -712,9 +705,6 @@ def _register_computer_use_tool() -> None:
         annotations=_DESTRUCTIVE_OPEN_WORLD,
     )(run_computer_use_task)
     _TOOL_HANDLERS["run_computer_use_task"] = _handle_computer_use
-
-
-_register_computer_use_tool()
 
 
 # Each auth handler imports its dependencies lazily so normal server startup
@@ -883,8 +873,8 @@ def main() -> None:
         # stdout carries the stdio MCP transport; stderr is safe for humans.
         print(f"yutori-mcp: targeting non-default API {base_url}", file=sys.stderr)
 
-    # Re-run now that --env has been applied: the import-time call above saw the pre-flag
-    # environment, so a dev-targeted run would otherwise advertise no computer-use tool.
+    # Register only after --env has replaced any ambient value. Registering at import time
+    # would let ambient dev state leak the desktop tool into an explicit --env prod server.
     _register_computer_use_tool()
 
     mcp.run(transport="stdio")
