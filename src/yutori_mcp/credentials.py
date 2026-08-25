@@ -67,13 +67,30 @@ def resolve_api_key_for_environment(environment: str) -> str | None:
     return stored_environment_key(environment) or resolve_api_key()
 
 
+def _write_config_atomic(config_path: Path, config: dict[str, Any]) -> None:
+    """Write ``config`` to ``config_path`` atomically via a same-directory temp file.
+
+    A crash mid-write cannot leave a half-written config: the temp file is written in full and
+    only then swapped in with ``os.replace``. The file is created 0600 before any secret reaches
+    it, rather than chmod'ed afterwards.
+    """
+    handle, temporary = tempfile.mkstemp(dir=config_path.parent, prefix=".config-")
+    try:
+        os.fchmod(handle, stat.S_IRUSR | stat.S_IWUSR)
+        with os.fdopen(handle, "w") as stream:
+            json.dump(config, stream, indent=2)
+            stream.write("\n")
+        os.replace(temporary, config_path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
 def save_environment_key(environment: str, api_key: str) -> Path:
     """Store ``api_key`` for ``environment`` and return the config path.
 
     Merges rather than replaces: the SDK's top-level key and any other environment's entry
-    survive, which is the whole point of holding prod and dev side by side. Written through a
-    temporary file in the same directory so a crash cannot leave a half-written config, and the
-    file is created 0600 before any secret reaches it rather than chmod'ed afterwards.
+    survive, which is the whole point of holding prod and dev side by side.
     """
     if not api_key.strip():
         raise ValueError("Refusing to store an empty API key")
@@ -88,16 +105,7 @@ def save_environment_key(environment: str, api_key: str) -> Path:
     environments[environment] = {API_KEY_FIELD: api_key.strip()}
     config[ENVIRONMENTS_FIELD] = environments
 
-    handle, temporary = tempfile.mkstemp(dir=config_path.parent, prefix=".config-")
-    try:
-        os.fchmod(handle, stat.S_IRUSR | stat.S_IWUSR)
-        with os.fdopen(handle, "w") as stream:
-            json.dump(config, stream, indent=2)
-            stream.write("\n")
-        os.replace(temporary, config_path)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
+    _write_config_atomic(config_path, config)
     return config_path
 
 
@@ -113,17 +121,7 @@ def clear_environment_key(environment: str) -> bool:
     else:
         config.pop(ENVIRONMENTS_FIELD, None)
 
-    config_path = get_config_path()
-    handle, temporary = tempfile.mkstemp(dir=config_path.parent, prefix=".config-")
-    try:
-        os.fchmod(handle, stat.S_IRUSR | stat.S_IWUSR)
-        with os.fdopen(handle, "w") as stream:
-            json.dump(config, stream, indent=2)
-            stream.write("\n")
-        os.replace(temporary, config_path)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
+    _write_config_atomic(get_config_path(), config)
     return True
 
 
