@@ -72,7 +72,7 @@ def test_schema_requires_app_for_url_and_has_no_harness_override():
         ComputerUseTaskInput(task="x", harness="node")
 
 
-def test_computer_use_cli_imports_without_executing_the_sdk():
+def test_computer_use_cli_dispatches_without_executing_the_sdk():
     source = Path(__file__).parents[1] / "src"
     script = """
 import importlib.abc
@@ -86,15 +86,57 @@ class BlockSDK(importlib.abc.MetaPathFinder):
 
 sys.meta_path.insert(0, BlockSDK())
 import yutori_mcp.entrypoint
-import yutori_mcp.computer_use.cli
+import yutori_mcp.computer_use.cli as cli
+
+cli.dispatch = lambda command, args: 0
+sys.argv = ["yutori-mcp", "computer-use", "doctor"]
+try:
+    yutori_mcp.entrypoint._computer_use_main()
+except SystemExit as error:
+    assert error.code == 0
 """
-    environment = {**os.environ, "PYTHONPATH": str(source)}
+    environment = {key: value for key, value in os.environ.items() if key != "YUTORI_ENV"}
+    environment["PYTHONPATH"] = str(source)
     subprocess.run([sys.executable, "-c", script], env=environment, check=True)
+
+
+def test_computer_use_entrypoint_applies_explicit_environment(monkeypatch):
+    from yutori_mcp import entrypoint
+    from yutori_mcp.computer_use import cli
+
+    observed = []
+
+    def dispatch(command, args):
+        observed.append((command, args.env, os.environ["YUTORI_ENV"]))
+        return 0
+
+    monkeypatch.setenv("YUTORI_ENV", "dev")
+    monkeypatch.setattr(sys, "argv", ["yutori-mcp", "--env", "prod", "computer-use", "doctor"])
+    monkeypatch.setattr(cli, "dispatch", dispatch)
+    with pytest.raises(SystemExit) as exit_info:
+        entrypoint._computer_use_main()
+
+    assert exit_info.value.code == 0
+    assert observed == [("doctor", "prod", "prod")]
+
+
+def test_computer_use_entrypoint_rejects_invalid_ambient_environment(monkeypatch, capsys):
+    from yutori_mcp import entrypoint
+    from yutori_mcp.computer_use import cli
+
+    monkeypatch.setenv("YUTORI_ENV", "staging")
+    monkeypatch.setattr(sys, "argv", ["yutori-mcp", "computer-use", "setup"])
+    with patch.object(cli, "dispatch") as mock_dispatch, pytest.raises(SystemExit) as exit_info:
+        entrypoint._computer_use_main()
+
+    assert exit_info.value.code == 2
+    mock_dispatch.assert_not_called()
+    assert "Unknown Yutori environment 'staging'" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
     "platform,environment,expected",
-    [("linux", "dev", False), ("darwin", "prod", False), ("darwin", "dev", True)],
+    [("linux", "dev", False), ("darwin", "prod", True), ("darwin", "dev", True)],
 )
 def test_registration_gate(platform, environment, expected):
     with patch("yutori_mcp.server.sys.platform", platform), patch.dict("os.environ", {"YUTORI_ENV": environment}):
@@ -118,6 +160,40 @@ def test_main_applies_explicit_environment_before_computer_use_registration(monk
 
     server.main()
     assert observed == ["prod"]
+
+
+def test_server_module_applies_environment_before_computer_use_dispatch(monkeypatch):
+    from yutori_mcp import server
+    from yutori_mcp.computer_use import cli
+
+    observed = []
+
+    def dispatch(command, args):
+        observed.append((command, args.env, os.environ["YUTORI_ENV"]))
+        return 0
+
+    monkeypatch.setenv("YUTORI_ENV", "dev")
+    monkeypatch.setattr(sys, "argv", ["yutori-mcp", "--env", "prod", "computer-use", "doctor"])
+    monkeypatch.setattr(cli, "dispatch", dispatch)
+    with pytest.raises(SystemExit) as exit_info:
+        server.main()
+
+    assert exit_info.value.code == 0
+    assert observed == [("doctor", "prod", "prod")]
+
+
+def test_server_module_rejects_invalid_environment_before_computer_use_dispatch(monkeypatch, capsys):
+    from yutori_mcp import server
+    from yutori_mcp.computer_use import cli
+
+    monkeypatch.setenv("YUTORI_ENV", "staging")
+    monkeypatch.setattr(sys, "argv", ["yutori-mcp", "computer-use", "setup"])
+    with patch.object(cli, "dispatch") as mock_dispatch, pytest.raises(SystemExit) as exit_info:
+        server.main()
+
+    assert exit_info.value.code == 2
+    mock_dispatch.assert_not_called()
+    assert "Unknown Yutori environment 'staging'" in capsys.readouterr().err
 
 
 def test_lock_rejects_second_owner_and_releases(tmp_path):
@@ -581,7 +657,7 @@ async def test_run_task_uses_only_python_runner_and_sdk_driver_discovery(tmp_pat
     assert result["outcome"] == "completed"
     assert supervise.await_args.kwargs["command"] == python_runner_command()
     request = supervise.await_args.kwargs["request"]
-    assert request["model"] == "n2-preview"
+    assert request["model"] == "n2"
     assert "driver_path" not in request and "harness" not in request
 
 
@@ -654,8 +730,16 @@ def test_driver_contract_rejects_version_drift(monkeypatch):
     assert preflight.check_driver_contract().ok
 
 
-def test_dev_access_probes_the_runtime_toolset(monkeypatch):
+@pytest.mark.parametrize(
+    "environment,expected_url",
+    [
+        ("prod", "https://api.yutori.com/v1/chat/completions"),
+        ("dev", "https://api.dev.yutori.com/v1/chat/completions"),
+    ],
+)
+def test_api_access_probes_the_selected_environment(monkeypatch, environment, expected_url):
     requests = []
+    resolved_environments = []
 
     class Response:
         def __enter__(self):
@@ -669,24 +753,48 @@ def test_dev_access_probes_the_runtime_toolset(monkeypatch):
 
     monkeypatch.setattr(
         "yutori_mcp.credentials.resolve_api_key_for_environment",
-        lambda _environment: "dev-key",
+        lambda selected: resolved_environments.append(selected) or f"{selected}-key",
     )
+    monkeypatch.setenv("YUTORI_ENV", environment)
     monkeypatch.setattr(preflight, "urlopen", lambda request, timeout: requests.append(request) or Response())
 
-    assert preflight.check_dev_access().ok
-    assert json.loads(requests[0].data)["tool_set"] == TOOL_SET
+    result = preflight.check_api_access()
+    assert result.ok
+    assert result.name == f"{environment} API"
+    assert resolved_environments == [environment]
+    assert requests[0].full_url == expected_url
+    payload = json.loads(requests[0].data)
+    assert payload["model"] == "n2"
+    assert payload["tool_set"] == TOOL_SET
 
 
 @pytest.mark.parametrize("status", [429, 500])
-def test_dev_access_rejects_non_auth_http_failures(monkeypatch, status):
+def test_api_access_rejects_non_auth_http_failures(monkeypatch, status):
     def fail_probe(*_args: Any, **_kwargs: Any) -> None:
         raise HTTPError("https://api.dev.yutori.com", status, "failed", {}, None)
 
     monkeypatch.setattr("yutori_mcp.credentials.resolve_api_key_for_environment", lambda _: "dev-key")
     monkeypatch.setattr(preflight, "urlopen", fail_probe)
-    result = preflight.check_dev_access()
+    result = preflight.check_api_access()
     assert not result.ok
     assert result.detail == f"probe failed (HTTP {status})"
+
+
+def test_prod_api_rejection_recommends_prod_login(monkeypatch):
+    def reject_probe(*_args: Any, **_kwargs: Any) -> None:
+        raise HTTPError("https://api.yutori.com", 401, "failed", {}, None)
+
+    monkeypatch.setenv("YUTORI_ENV", "prod")
+    monkeypatch.setattr("yutori_mcp.credentials.resolve_api_key_for_environment", lambda _: "prod-key")
+    monkeypatch.setattr(preflight, "urlopen", reject_probe)
+
+    result = preflight.check_api_access()
+
+    assert not result.ok
+    assert result.name == "prod API"
+    assert result.detail == "credential rejected"
+    assert "uvx yutori-mcp login" in (result.remediation or "")
+    assert "--env dev" not in (result.remediation or "")
 
 
 def test_runtime_check_verifies_version_installation_and_provenance(monkeypatch, tmp_path):
@@ -780,6 +888,35 @@ def test_doctor_labels_nonblocking_failures_as_warnings(monkeypatch, capsys):
     )
     assert cli._doctor() == 0
     assert "WARNING overlay" in capsys.readouterr().out
+
+
+async def test_custom_run_uses_the_selected_environment(monkeypatch):
+    from yutori_mcp.computer_use import cli
+
+    run = AsyncMock(return_value={"outcome": "completed"})
+    resolved_environments = []
+    monkeypatch.setenv("YUTORI_ENV", "prod")
+    monkeypatch.setattr(cli, "first_blocker", lambda: None)
+    monkeypatch.setattr(cli, "run_task", run)
+    monkeypatch.setattr(
+        "yutori_mcp.credentials.resolve_api_key_for_environment",
+        lambda environment: resolved_environments.append(environment) or "prod-key",
+    )
+
+    result = await cli._run_custom(
+        SimpleNamespace(
+            task="open calculator",
+            app="Calculator",
+            start_url=None,
+            minutes=1,
+            max_steps=10,
+        )
+    )
+
+    assert result == 0
+    assert resolved_environments == ["prod"]
+    assert run.await_args.kwargs["api_key"] == "prod-key"
+    assert run.await_args.kwargs["api_base_url"] == "https://api.yutori.com/v1"
 
 
 def test_installer_checksum_aborts_before_execution(monkeypatch):
@@ -914,7 +1051,7 @@ def _valid_request(**overrides):
         "start_url": None,
         "deadline_ms": 1_000_000,
         "max_steps": 10,
-        "model": "n2-preview",
+        "model": "n2",
         "api_base_url": "https://api.dev.yutori.com/v1",
     }
     request.update(overrides)

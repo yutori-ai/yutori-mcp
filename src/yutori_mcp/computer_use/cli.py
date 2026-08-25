@@ -23,6 +23,14 @@ from .result import format_result
 from .supervisor import run_task
 
 
+def _runtime_target() -> tuple[str | None, str]:
+    from ..adapter import current_environment, resolve_base_url
+    from ..credentials import resolve_api_key_for_environment
+
+    environment = current_environment()
+    return resolve_api_key_for_environment(environment), resolve_base_url(environment)
+
+
 def _doctor() -> int:
     results = run_checks()
     for result in results:
@@ -109,7 +117,7 @@ async def _smoke_live() -> int:
     if blocker is not None:
         print(blocker.remediation)
         return 1
-    from ..credentials import resolve_api_key_for_environment
+    api_key, api_base_url = _runtime_target()
 
     # The result is read back through Calculator's own copy-result (cmd+c) and
     # the clipboard, not the accessibility tree: macOS 26 rewrote Calculator and
@@ -160,8 +168,8 @@ async def _smoke_live() -> int:
         start_url=None,
         minutes=1,
         max_steps=10,
-        api_key=resolve_api_key_for_environment("dev"),
-        api_base_url="https://api.dev.yutori.com/v1",
+        api_key=api_key,
+        api_base_url=api_base_url,
     )
     print(format_result(result))
     return 0 if result.get("outcome") == "completed" else 1
@@ -199,13 +207,13 @@ async def _run_custom(args: argparse.Namespace) -> int:
     if blocker is not None:
         print(f"{blocker.detail} Fix: {blocker.remediation}")
         return 1
-    from ..credentials import resolve_api_key_for_environment
+    api_key, api_base_url = _runtime_target()
 
     print("The model takes over this Mac's desktop now; do not touch it during the run.")
     result = await run_task(
         **params.model_dump(),
-        api_key=resolve_api_key_for_environment("dev"),
-        api_base_url="https://api.dev.yutori.com/v1",
+        api_key=api_key,
+        api_base_url=api_base_url,
         on_event=_print_event,
     )
     print(format_result(result))
@@ -220,7 +228,7 @@ def register_parser(
     commands.add_parser("setup", help="Install and configure the pinned CuaDriver")
     commands.add_parser("doctor", help="Run all computer-use readiness checks")
     commands.add_parser("smoke", help="Run Calculator mechanical and live checks")
-    run_parser = commands.add_parser("run", help="Run one custom task on the visible desktop (dev only)")
+    run_parser = commands.add_parser("run", help="Run one custom task on the visible desktop")
     run_parser.add_argument("task", help="Task for the model to perform")
     run_parser.add_argument("--app", default=None, help="Application to target")
     run_parser.add_argument("--start-url", dest="start_url", default=None, help="URL to open in the app")

@@ -170,11 +170,20 @@ def test_the_adapter_resolves_the_key_for_the_targeted_environment(config, monke
     )
 
 
-def test_the_missing_key_remediation_points_at_the_dev_login():
-    """It said `uvx yutori-mcp login`, which stores a production key — the original misdiagnosis."""
+@pytest.mark.parametrize(
+    "environment,expected_command",
+    [
+        ("prod", "uvx yutori-mcp login"),
+        ("dev", "uvx yutori-mcp --env dev login"),
+    ],
+)
+def test_the_missing_key_remediation_points_at_the_selected_login(
+    monkeypatch, environment, expected_command
+):
     from yutori_mcp.computer_use import preflight
 
+    monkeypatch.setenv("YUTORI_ENV", environment)
     with patch("yutori_mcp.credentials.resolve_api_key_for_environment", return_value=None):
         result = preflight.check_api_key()
     assert not result.ok
-    assert "--env dev login" in (result.remediation or "")
+    assert expected_command in (result.remediation or "")

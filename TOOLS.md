@@ -4,11 +4,12 @@ All tool outputs are formatted as human-readable text optimized for LLM consumpt
 
 All tool inputs enforce validation: webhook URLs must use HTTPS, and `output_fields` (where supported) must contain at least one entry. Unknown/extra fields are rejected.
 
-## `run_computer_use_task` (macOS dev preview)
+## `run_computer_use_task` (macOS preview)
 
-Runs a foreground task on the visible Mac desktop. This tool is listed only on macOS when
-`YUTORI_ENV=dev`; it is absent on Linux and in production. Do not touch the Mac during a run.
-Visible desktop content is sent to Yutori's dev model endpoint.
+Runs a foreground task on the visible Mac desktop. This tool is listed on macOS and absent on
+Linux. It targets production by default and follows `--env dev` or `YUTORI_ENV=dev` when
+configured. Do not touch the Mac during a run. Visible desktop content is sent to the selected
+Yutori API environment.
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
