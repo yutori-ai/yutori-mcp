@@ -10,13 +10,14 @@ You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and 
 - **Scouting** — Monitor the web continuously for anything you care about at a desired frequency
 - **Research** — Run one-time deep web research tasks
 - **Browsing** — Automate websites with an AI navigator
-- **Computer use preview** — On macOS 15+, opt in to foreground desktop automation against the dev endpoint
+- **Computer use preview** — On macOS 15+, opt in to foreground desktop automation
 
 ### macOS computer-use preview
 
-This development-only preview is available only when the MCP server runs on macOS with
-`YUTORI_ENV=dev`. The runtime is Python-only and requires Python 3.10 or later. Setup installs
-CuaDriver, requests its macOS permissions, and prepares the optional native reasoning overlay:
+This preview is available when the MCP server runs on macOS. It targets production by default
+and follows `--env dev` or `YUTORI_ENV=dev` when you explicitly select the dev stack. The runtime
+is Python-only and requires Python 3.10 or later. Setup installs CuaDriver, requests its macOS
+permissions, and prepares the optional native reasoning overlay:
 
 ```bash
 uvx yutori-mcp computer-use setup
@@ -32,8 +33,8 @@ uvx yutori-mcp computer-use run "In Calculator, compute 17 * 23 and report the r
 ```
 
 The `run_computer_use_task` tool controls the visible foreground desktop. Do not touch the
-Mac while it runs. Visible desktop content is sent to Yutori's dev model endpoint. Only one
-task can control a Mac at a time.
+Mac while it runs. Visible desktop content is sent to the configured Yutori API environment.
+Only one task can control a Mac at a time.
 
 **Workflow skills** (for clients that support slash commands):
 - [`/yutori-scout`](skills/01-scout/SKILL.md) — Set up continuous web monitoring
@@ -425,10 +426,17 @@ For full API documentation, visit [docs.yutori.com](https://docs.yutori.com).
 
 Apache 2.0
 
-## Computer-use preview: authenticating against dev
+## Computer-use preview: choosing an environment
 
-`login` authenticates against production and saves a production key, which the dev stack
-rejects with a 401. Store a dev key separately:
+Production is the default for setup, doctor, smoke, terminal runs, and the MCP tool. A normal
+login saves the production credential they use:
+
+```sh
+uvx yutori-mcp login
+uvx yutori-mcp computer-use doctor
+```
+
+To test against dev, select it consistently and store a dev key separately:
 
 ```sh
 uvx yutori-mcp --env dev login      # prompts for a key from platform.dev.yutori.com
@@ -436,9 +444,10 @@ uvx yutori-mcp --env dev status
 uvx yutori-mcp --env dev logout
 ```
 
-That writes an `environments.dev` entry alongside the existing top-level `api_key`, so one
-machine can hold both without either shadowing the other. `YUTORI_API_KEY` still takes
-precedence over both when set.
+That writes an `environments.dev` entry alongside the existing top-level production `api_key`,
+so one machine can hold both without either shadowing the other. Pass `--env dev` to each
+computer-use command, or set `YUTORI_ENV=dev`. `YUTORI_API_KEY` still takes precedence over both
+stored credentials when set.
 
 ## Computer-use preview: runtime dependency
 

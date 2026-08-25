@@ -685,22 +685,23 @@ def _computer_use_enabled() -> bool:
     if sys.platform != "darwin":
         return False
     try:
-        return resolve_base_url() == ENVIRONMENT_BASE_URLS["dev"]
+        resolve_base_url()
     except ValueError:
         return False
+    return True
 
 
 def _register_computer_use_tool() -> None:
-    """Expose the macOS computer-use tool when the resolved environment is dev."""
+    """Expose the computer-use tool on macOS for a valid API environment."""
     if "run_computer_use_task" in _TOOL_HANDLERS:
         return
     if not _computer_use_enabled():
         return
     mcp.tool(
         description=(
-            "Operate the foreground Mac desktop using Yutori's dev n2-preview model. "
+            "Operate the foreground Mac desktop using Yutori's n2-preview model. "
             "Do not touch the Mac during the run. Visible desktop content is sent to "
-            "Yutori's dev model endpoint."
+            "the configured Yutori API environment."
         ),
         annotations=_DESTRUCTIVE_OPEN_WORLD,
     )(run_computer_use_task)
@@ -840,18 +841,22 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.command == "computer-use":
-        from .computer_use.cli import dispatch
-
-        raise SystemExit(dispatch(args.computer_use_command, args))
-
     # The flag is forwarded via the env var (rather than threaded through to
     # get_adapter()'s lazily-constructed, process-lifetime MCPClientAdapter)
     # so adapter.resolve_base_url() stays the single resolution point
     # whether the environment came from the CLI or from an MCP client
-    # config's `env` block.
+    # config's `env` block. Apply it before every subcommand, including computer-use.
     if args.env:
         os.environ[ENV_VAR_ENVIRONMENT] = args.env
+
+    if args.command == "computer-use":
+        from .computer_use.cli import dispatch
+
+        try:
+            resolve_base_url()
+        except ValueError as error:
+            parser.error(str(error))
+        raise SystemExit(dispatch(args.computer_use_command, args))
 
     # Dispatched after --env is applied, not before: `login --env dev` has to know which
     # environment it is storing a credential for, and the old ordering ran auth first.
