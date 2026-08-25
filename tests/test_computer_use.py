@@ -5,32 +5,37 @@ import json
 import os
 import signal
 import pathlib
+import shlex
 import subprocess
 import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from pydantic import ValidationError
 
 from yutori_mcp.computer_use import preflight
 from yutori_mcp.computer_use import runner as runner_module
+from yutori_mcp.computer_use import shell_proxy
 from yutori_mcp.computer_use import supervisor
 from yutori_mcp.computer_use.driver import (
     CuaDriverDesktop,
     DriverCLI,
     DriverError,
     DriverRefusal,
+    _SHELL_PROXY_PATH,
+    _find_running_app,
     _payload_ok,
+    _stop_shell_proxy,
     chunk_type_text,
     format_shell_result,
     normalize_key,
     pick_best_window,
     prepare_app,
 )
-from yutori_mcp.computer_use.constants import resolve_harness
+from yutori_mcp.computer_use.constants import TOOL_SET
 from yutori_mcp.computer_use.lock import ComputerUseBusyError, DesktopLock
 from yutori_mcp.computer_use.runner import (
     ActionReporter,
@@ -41,7 +46,6 @@ from yutori_mcp.computer_use.runner import (
     parse_request,
 )
 from yutori_mcp.computer_use.result import format_result
-from yutori_mcp.computer_use.runtime import RuntimeValidationError, load_runtime
 from yutori_mcp.computer_use.supervisor import (
     _stop_process_group,
     _supervise,
@@ -51,16 +55,23 @@ from yutori_mcp.computer_use.supervisor import (
 from yutori_mcp.schemas import ComputerUseTaskInput
 
 
-@pytest.mark.parametrize("minutes", [0.9, 15.1])
+@pytest.mark.parametrize("minutes", [0.9, 60.1])
 def test_schema_rejects_minutes(minutes):
     with pytest.raises(ValidationError):
         ComputerUseTaskInput(task="x", minutes=minutes)
 
 
-@pytest.mark.parametrize("max_steps", [0, 101])
+@pytest.mark.parametrize("max_steps", [0, 201])
 def test_schema_rejects_max_steps(max_steps):
     with pytest.raises(ValidationError):
         ComputerUseTaskInput(task="x", max_steps=max_steps)
+
+
+def test_schema_accepts_the_200_step_and_60_minute_boundaries():
+    assert ComputerUseTaskInput(task="x").max_steps == 200
+    assert ComputerUseTaskInput(task="x", max_steps=100).max_steps == 100
+    params = ComputerUseTaskInput(task="x", max_steps=200, minutes=60)
+    assert params.max_steps == 200 and params.minutes == 60
 
 
 def test_schema_requires_app_for_url_and_forbids_unknowns():
@@ -68,6 +79,8 @@ def test_schema_requires_app_for_url_and_forbids_unknowns():
         ComputerUseTaskInput(task="x", start_url="https://example.com")
     with pytest.raises(ValidationError):
         ComputerUseTaskInput(task="x", surprise=True)
+    with pytest.raises(ValidationError):
+        ComputerUseTaskInput(task="x", harness="node")
 
 
 @pytest.mark.parametrize(
@@ -112,6 +125,19 @@ def test_lock_rejects_second_owner_and_releases(tmp_path):
         pass
 
 
+def test_same_lock_instance_is_reentrant_without_releasing_early(tmp_path):
+    path = tmp_path / "desktop.lock"
+    lock = DesktopLock(path)
+    with lock:
+        with lock:
+            with pytest.raises(ComputerUseBusyError), DesktopLock(path):
+                pass
+        with pytest.raises(ComputerUseBusyError), DesktopLock(path):
+            pass
+    with DesktopLock(path):
+        pass
+
+
 @pytest.mark.parametrize("error", [RuntimeError("failed"), asyncio.CancelledError()])
 def test_lock_releases_on_exception_and_cancellation(tmp_path, error):
     path = tmp_path / "desktop.lock"
@@ -124,70 +150,11 @@ def test_lock_releases_on_exception_and_cancellation(tmp_path, error):
 def test_installer_checksum_aborts_before_execution(monkeypatch):
     from yutori_mcp.computer_use import cli
 
-    monkeypatch.setattr(cli, "harness_blocker", lambda harness=None: None)
+    monkeypatch.setattr(cli, "harness_blocker", lambda: None)
     monkeypatch.setattr(cli, "_download_installer", lambda _: b"installer")
     with patch("yutori_mcp.computer_use.cli.subprocess.run") as run:
         assert cli._setup() == 1
     run.assert_not_called()
-
-
-def test_harness_resolution_orders_request_env_default(monkeypatch):
-    monkeypatch.delenv("YUTORI_COMPUTER_USE_HARNESS", raising=False)
-    assert resolve_harness() == "python"
-    monkeypatch.setenv("YUTORI_COMPUTER_USE_HARNESS", "node")
-    assert resolve_harness() == "node"
-    assert resolve_harness("python") == "python"
-    with pytest.raises(ValueError, match="Unknown computer-use harness"):
-        resolve_harness("typescript")
-
-
-def test_schema_accepts_only_known_harnesses():
-    assert ComputerUseTaskInput(task="x").harness is None
-    assert ComputerUseTaskInput(task="x", harness="python").harness == "python"
-    with pytest.raises(ValidationError):
-        ComputerUseTaskInput(task="x", harness="typescript")
-
-
-def test_runtime_protocol_mismatch_has_one_remediation():
-    with (
-        patch(
-            "yutori_mcp.computer_use.runtime.import_module",
-            return_value=SimpleNamespace(PROTOCOL_VERSION=2, verify_runner=lambda: True),
-        ),
-        pytest.raises(RuntimeValidationError) as error,
-    ):
-        load_runtime()
-    assert "protocol mismatch" in str(error.value)
-    assert str(error.value).count(error.value.remediation) == 1
-
-
-def test_runtime_hash_mismatch_has_one_remediation():
-    with (
-        patch(
-            "yutori_mcp.computer_use.runtime.import_module",
-            return_value=SimpleNamespace(PROTOCOL_VERSION=1, verify_runner=lambda: False),
-        ),
-        pytest.raises(RuntimeValidationError) as error,
-    ):
-        load_runtime()
-    assert "integrity" in str(error.value)
-    assert str(error.value).count(error.value.remediation) == 1
-    # Installed-but-broken must steer to a refresh of the extra, not suggest
-    # the wheel was never asked for.
-    assert "--refresh" in error.value.remediation
-
-
-def test_runtime_not_installed_points_at_the_optional_extra():
-    with (
-        patch(
-            "yutori_mcp.computer_use.runtime.import_module",
-            side_effect=ModuleNotFoundError("yutori_computer_use_runtime"),
-        ),
-        pytest.raises(RuntimeValidationError) as error,
-    ):
-        load_runtime()
-    assert "optional" in error.value.remediation
-    assert "node-harness" in error.value.remediation
 
 
 class _Writer:
@@ -209,7 +176,8 @@ class _Writer:
 
 class _Process:
     def __init__(self, stdout, stderr):
-        self.pid = 123
+        self.pid = 2_000_000
+        self._yutori_session_identity = 1
         self.returncode = None
         self.stdin = _Writer()
         self.stdout = stdout
@@ -247,30 +215,218 @@ async def test_supervisor_redacts_key_and_keeps_it_out_of_argv():
     assert process.stdin.data.count(b"\n") == 1
 
 
+async def test_supervisor_checks_the_runner_session_after_a_normal_exit():
+    process = _Process(
+        _stream(json.dumps({"type": "result", "outcome": "completed", "final_text": "ok"})),
+        _stream(""),
+    )
+    stop = AsyncMock()
+    with (
+        patch("asyncio.create_subprocess_exec", return_value=process),
+        patch("yutori_mcp.computer_use.supervisor._stop_process_group", stop),
+    ):
+        result = await _supervise(
+            command=["/python", "-m", "yutori_mcp.computer_use.runner"],
+            request={"type": "run"},
+            api_key="secret",
+            deadline=time.monotonic() + 1,
+        )
+    assert result["outcome"] == "completed"
+    stop.assert_awaited_once_with(process)
+
+
 async def test_stop_process_group_escalates_to_kill():
     process = SimpleNamespace(pid=123, returncode=None, wait=AsyncMock(return_value=0))
+    signals = []
 
-    def killed(_pid, sig):
-        if sig == signal.SIGKILL:
-            process.returncode = -signal.SIGKILL
-
-    async def expire(awaitable, _timeout):
-        awaitable.close()
-        raise TimeoutError
+    def signaled(_session_id, sent_signal, _session_identity):
+        signals.append(sent_signal)
+        return True
 
     with (
         patch(
-            "yutori_mcp.computer_use.supervisor.os.killpg", side_effect=killed
-        ) as kill,
+            "yutori_mcp.computer_use.supervisor._signal_runner_session",
+            side_effect=signaled,
+        ),
         patch(
-            "yutori_mcp.computer_use.supervisor.asyncio.wait_for", side_effect=expire
+            "yutori_mcp.computer_use.supervisor._wait_for_empty_session",
+            AsyncMock(side_effect=[False, True]),
         ),
     ):
         await _stop_process_group(process)
-    assert [call.args[1] for call in kill.call_args_list] == [
-        signal.SIGTERM,
-        signal.SIGKILL,
-    ]
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+
+
+def test_runner_session_enumeration_failure_is_not_an_empty_session():
+    with patch.object(
+        supervisor.subprocess,
+        "run",
+        side_effect=subprocess.TimeoutExpired("ps", 5),
+    ):
+        assert supervisor._runner_session_pids(123) is None
+
+
+def test_darwin_session_enumeration_prefers_the_kernel_path():
+    with (
+        patch.object(shell_proxy.sys, "platform", "darwin"),
+        patch.object(shell_proxy, "_kernel_session_pids", return_value=[123]) as shell_kernel,
+        patch.object(shell_proxy, "_ps_session_pids") as shell_ps,
+        patch.object(supervisor.sys, "platform", "darwin"),
+        patch.object(supervisor, "_process_identity", return_value=None),
+        patch.object(supervisor, "_kernel_runner_session_pids", return_value=[456]) as runner_kernel,
+        patch.object(supervisor, "_runner_session_pids") as runner_ps,
+    ):
+        assert shell_proxy._session_pids(123) == [123]
+        assert supervisor._owned_runner_session_pids(456) == [456]
+    shell_kernel.assert_called_once_with(123)
+    shell_ps.assert_not_called()
+    runner_kernel.assert_called_once_with(456)
+    runner_ps.assert_not_called()
+
+
+def test_confirmed_empty_runner_session_does_not_signal_a_stale_group():
+    with (
+        patch.object(supervisor, "_runner_session_pids", return_value=[]),
+        patch.object(supervisor.os, "killpg") as kill_group,
+    ):
+        assert supervisor._signal_runner_session(123, signal.SIGKILL) is True
+    kill_group.assert_not_called()
+
+
+def test_reused_session_leader_identity_is_not_signaled():
+    with (
+        patch.object(supervisor, "_process_identity", return_value=2),
+        patch.object(supervisor, "_runner_session_pids", return_value=[123]),
+        patch.object(supervisor.os, "kill") as kill_process,
+    ):
+        assert supervisor._signal_runner_session(123, signal.SIGKILL, session_identity=1) is True
+    kill_process.assert_not_called()
+
+
+async def _wait_until_process_stops(pid: int) -> None:
+    for _ in range(100):
+        state = subprocess.run(
+            ["/bin/ps", "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        if not state or state.startswith("Z"):
+            return
+        await asyncio.sleep(0.01)
+    pytest.fail(f"process {pid} survived cleanup")
+
+
+async def test_stop_process_group_also_kills_an_unregistered_child():
+    script = (
+        "import subprocess,time; child=subprocess.Popen(['sleep','30']); print(child.pid,flush=True); time.sleep(30)"
+    )
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        script,
+        stdout=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    assert process.stdout is not None
+    child_pid = int((await process.stdout.readline()).decode())
+    await _stop_process_group(process)
+    await _wait_until_process_stops(child_pid)
+
+
+async def test_stop_process_group_kills_a_child_after_the_session_leader_exits():
+    script = "import subprocess; child=subprocess.Popen(['sleep','30']); print(child.pid,flush=True)"
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        script,
+        stdout=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    identity = supervisor._process_identity(process.pid)
+    assert identity is not None
+    setattr(process, "_yutori_session_identity", identity)
+    assert process.stdout is not None
+    child_pid = int((await process.stdout.readline()).decode())
+    await process.wait()
+    await _stop_process_group(process)
+    await _wait_until_process_stops(child_pid)
+
+
+async def test_stop_process_group_uses_kernel_fallback_when_ps_fails():
+    script = (
+        "import os,subprocess,time; "
+        "child=subprocess.Popen(['sleep','30'],preexec_fn=lambda: os.setpgid(0,0)); "
+        "print(child.pid,flush=True); time.sleep(30)"
+    )
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        script,
+        stdout=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    assert process.stdout is not None
+    child_pid = int((await process.stdout.readline()).decode())
+    with patch.object(supervisor, "_runner_session_pids", return_value=None):
+        await _stop_process_group(process)
+    await _wait_until_process_stops(child_pid)
+
+
+async def test_stop_process_group_kills_child_that_ignores_sigterm(tmp_path):
+    ready_path = tmp_path / "child-ready"
+    child_script = (
+        "import pathlib,signal,sys,time; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "pathlib.Path(sys.argv[1]).write_text('ready'); time.sleep(30)"
+    )
+    parent_script = (
+        "import pathlib,subprocess,sys,time; "
+        "child=subprocess.Popen([sys.executable,'-c',sys.argv[2],sys.argv[1]]); "
+        "ready=pathlib.Path(sys.argv[1]); "
+        "[(time.sleep(.01)) for _ in range(100) if not ready.exists()]; "
+        "print(child.pid,flush=True); time.sleep(30)"
+    )
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        parent_script,
+        str(ready_path),
+        child_script,
+        stdout=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    assert process.stdout is not None
+    child_pid = int((await process.stdout.readline()).decode())
+    assert ready_path.exists()
+    await _stop_process_group(process)
+    await _wait_until_process_stops(child_pid)
+
+
+async def test_stop_process_group_drains_a_shell_proxy_child_session(tmp_path):
+    child_pid_file = tmp_path / "detached-shell-child.pid"
+    command = f"set -m; sleep 30 & child=$!; printf '%s' \"$child\" > {shlex.quote(str(child_pid_file))}"
+    runner_script = (
+        "import subprocess,sys,time; "
+        "subprocess.Popen([sys.executable,'-I',sys.argv[1],sys.argv[2],'background']); "
+        "time.sleep(30)"
+    )
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        runner_script,
+        str(_SHELL_PROXY_PATH),
+        command,
+        start_new_session=True,
+    )
+    for _ in range(100):
+        if child_pid_file.exists():
+            break
+        await asyncio.sleep(0.01)
+    assert child_pid_file.exists()
+    child_pid = int(child_pid_file.read_text())
+    await _stop_process_group(process)
+    await _wait_until_process_stops(child_pid)
 
 
 async def test_cancellation_returns_structured_result_and_stops_group():
@@ -284,9 +440,7 @@ async def test_cancellation_returns_structured_result_and_stops_group():
 
     with (
         patch("asyncio.create_subprocess_exec", create),
-        patch(
-            "yutori_mcp.computer_use.supervisor._stop_process_group", side_effect=stop
-        ) as stopped,
+        patch("yutori_mcp.computer_use.supervisor._stop_process_group", side_effect=stop) as stopped,
     ):
         task = asyncio.create_task(
             _supervise(
@@ -302,6 +456,47 @@ async def test_cancellation_returns_structured_result_and_stops_group():
     assert result["outcome"] == "failed"
     assert "cancelled" in result["final_text"]
     stopped.assert_awaited()
+
+
+async def test_expired_deadline_returns_a_structured_limit_on_python_310():
+    process = _Process(asyncio.StreamReader(), _stream(""))
+    create = AsyncMock(return_value=process)
+
+    async def stop(_process):
+        process.returncode = -signal.SIGTERM
+
+    with (
+        patch("asyncio.create_subprocess_exec", create),
+        patch("yutori_mcp.computer_use.supervisor._stop_process_group", side_effect=stop),
+    ):
+        result = await _supervise(
+            command=["/python", "-m", "yutori_mcp.computer_use.runner"],
+            request={"type": "run"},
+            api_key="secret",
+            deadline=time.monotonic() - 1,
+        )
+    assert result["outcome"] == "limit"
+    assert result["final_text"] == "The absolute deadline expired."
+
+
+async def test_wait_for_timeout_returns_a_structured_limit_on_python_310():
+    process = _Process(asyncio.StreamReader(), _stream(""))
+    create = AsyncMock(return_value=process)
+
+    async def stop(_process):
+        process.returncode = -signal.SIGTERM
+
+    with (
+        patch("asyncio.create_subprocess_exec", create),
+        patch("yutori_mcp.computer_use.supervisor._stop_process_group", side_effect=stop),
+    ):
+        result = await _supervise(
+            command=["/python", "-m", "yutori_mcp.computer_use.runner"],
+            request={"type": "run"},
+            api_key="secret",
+            deadline=time.monotonic() + 0.01,
+        )
+    assert result["outcome"] == "limit"
 
 
 @pytest.mark.parametrize("command", ["setup", "doctor", "smoke"])
@@ -324,15 +519,9 @@ def test_cli_dispatches_commands(command):
             called.assert_called_once()
 
 
-async def test_child_environment_has_path_and_disables_harness_telemetry():
-    """Shell commands the model runs resolve tools from PATH, and the harness
-    fires an import-time telemetry event unless the env var is off — the
-    constructor flag alone is too late for that one.
-    """
+async def test_child_environment_has_path_for_shell_commands():
     process = _Process(
-        _stream(
-            json.dumps({"type": "result", "outcome": "completed", "final_text": "ok"})
-        ),
+        _stream(json.dumps({"type": "result", "outcome": "completed", "final_text": "ok"})),
         _stream(""),
     )
     create = AsyncMock(return_value=process)
@@ -371,27 +560,7 @@ def _run_task_kwargs(tmp_path, **overrides):
     return kwargs
 
 
-async def test_run_task_python_harness_carries_driver_path_and_model(tmp_path):
-    driver = tmp_path / "cua-driver"
-    driver.write_text("")
-    supervise = AsyncMock(return_value={"outcome": "completed"})
-    with (
-        patch.object(supervisor, "_supervise", supervise),
-        patch.object(supervisor, "find_cua_driver", return_value=driver),
-    ):
-        result = await run_task(
-            **_run_task_kwargs(tmp_path, harness="python")
-        )
-    assert result == {"outcome": "completed"}
-    request = supervise.await_args.kwargs["request"]
-    assert request["driver_path"] == str(driver)
-    assert request["model"] == "n2-preview"
-    assert request["protocol_version"] == 1
-    assert supervise.await_args.kwargs["command"][0] == sys.executable
-
-
-async def test_run_task_defaults_to_the_python_harness(tmp_path, monkeypatch):
-    monkeypatch.delenv("YUTORI_COMPUTER_USE_HARNESS", raising=False)
+async def test_run_task_carries_driver_path_and_model(tmp_path):
     driver = tmp_path / "cua-driver"
     driver.write_text("")
     supervise = AsyncMock(return_value={"outcome": "completed"})
@@ -401,90 +570,27 @@ async def test_run_task_defaults_to_the_python_harness(tmp_path, monkeypatch):
     ):
         result = await run_task(**_run_task_kwargs(tmp_path))
     assert result == {"outcome": "completed"}
-    assert supervise.await_args.kwargs["command"][1:] == [
+    request = supervise.await_args.kwargs["request"]
+    assert request["driver_path"] == str(driver)
+    assert request["model"] == "n2-preview"
+    assert request["protocol_version"] == 1
+    assert supervise.await_args.kwargs["command"] == [
+        sys.executable,
         "-I",
         "-m",
         "yutori_mcp.computer_use.runner",
     ]
 
 
-async def test_run_task_node_harness_is_opt_in(tmp_path, monkeypatch):
-    monkeypatch.setenv("YUTORI_COMPUTER_USE_HARNESS", "node")
-    supervise = AsyncMock(return_value={"outcome": "completed"})
-
-    class _RunnerPath:
-        def __enter__(self):
-            return "/wheel/runner.mjs"
-
-        def __exit__(self, *args):
-            return False
-
-    runtime = SimpleNamespace(runner_path=lambda: _RunnerPath())
-    with (
-        patch.object(supervisor, "_supervise", supervise),
-        patch.object(supervisor, "find_node", return_value=pathlib.Path("/opt/node")),
-        patch.object(supervisor, "load_runtime", return_value=runtime),
-    ):
-        result = await run_task(**_run_task_kwargs(tmp_path))
-    assert result == {"outcome": "completed"}
-    assert supervise.await_args.kwargs["command"] == ["/opt/node", "/wheel/runner.mjs"]
-    # The Node runner resolves cua-driver from PATH; the field is python-only.
-    assert "driver_path" not in supervise.await_args.kwargs["request"]
-
-
-async def test_run_task_reports_a_missing_node_wheel_as_the_optional_extra(
-    tmp_path,
-):
-    """Selecting the node harness without the node-harness extra installed must
-    point at the extra, not claim a broken install."""
-    from yutori_mcp.computer_use.runtime import RuntimeValidationError
-
-    supervise = AsyncMock()
-    with (
-        patch.object(supervisor, "_supervise", supervise),
-        patch.object(supervisor, "find_node", return_value=pathlib.Path("/opt/node")),
-        patch.object(
-            supervisor,
-            "load_runtime",
-            side_effect=RuntimeValidationError("is not installed"),
-        ),
-    ):
-        result = await run_task(**_run_task_kwargs(tmp_path, harness="node"))
-    assert result["outcome"] == "failed"
-    assert "node-harness" in result["final_text"]
-    supervise.assert_not_awaited()
-
-
-async def test_run_task_rejects_an_unknown_harness(tmp_path):
-    supervise = AsyncMock()
-    with patch.object(supervisor, "_supervise", supervise):
-        result = await run_task(**_run_task_kwargs(tmp_path, harness="typescript"))
-    assert result["outcome"] == "failed"
-    assert "Unknown computer-use harness" in result["final_text"]
-    supervise.assert_not_awaited()
-
-
-async def test_run_task_python_reports_a_missing_driver_without_spawning(tmp_path):
+async def test_run_task_reports_a_missing_driver_without_spawning(tmp_path):
     supervise = AsyncMock()
     with (
         patch.object(supervisor, "_supervise", supervise),
         patch.object(supervisor, "find_cua_driver", return_value=None),
     ):
-        result = await run_task(**_run_task_kwargs(tmp_path, harness="python"))
+        result = await run_task(**_run_task_kwargs(tmp_path))
     assert result["outcome"] == "failed"
     assert "cua-driver" in result["final_text"]
-    supervise.assert_not_awaited()
-
-
-async def test_run_task_node_reports_missing_node_without_spawning(tmp_path):
-    supervise = AsyncMock()
-    with (
-        patch.object(supervisor, "_supervise", supervise),
-        patch.object(supervisor, "find_node", return_value=None),
-    ):
-        result = await run_task(**_run_task_kwargs(tmp_path, harness="node"))
-    assert result["outcome"] == "failed"
-    assert "Node 22" in result["final_text"]
     supervise.assert_not_awaited()
 
 
@@ -509,26 +615,19 @@ def test_missing_driver_binary_is_the_reported_blocker_before_the_contract_check
         result = preflight.check_driver_binary()
     assert not result.ok
     assert result.remediation == "Run: yutori-mcp computer-use setup"
-    for harness in ("node", "python"):
-        names = [check.__name__ for check in preflight.checks_for(harness)]
-        assert names.index("check_driver_binary") < names.index("check_driver_contract")
+    names = [check.__name__ for check in preflight.checks_for()]
+    assert names.index("check_driver_binary") < names.index("check_driver_contract")
 
 
-def test_checks_gate_each_harness_on_its_own_toolchain():
-    node_names = [check.__name__ for check in preflight.checks_for("node")]
-    python_names = [check.__name__ for check in preflight.checks_for("python")]
-    assert "check_node" in node_names and "check_runtime" in node_names
-    assert "check_harness" not in node_names
-    assert "check_harness" in python_names
-    assert "check_node" not in python_names and "check_runtime" not in python_names
+def test_checks_use_only_the_sdk_owned_python_loop():
+    names = [check.__name__ for check in preflight.checks_for()]
+    assert "check_harness" in names
+    assert "check_node" not in names and "check_runtime" not in names
 
 
-def test_harness_blocker_reports_only_toolchain_failures():
-    with patch.object(preflight, "find_node", return_value=None):
-        blocker = preflight.harness_blocker("node")
-    assert blocker is not None and blocker.name == "Node 22"
+def test_harness_blocker_reports_only_the_sdk_failure():
     with patch.object(preflight.importlib.util, "find_spec", return_value=object()):
-        assert preflight.harness_blocker("python") is None
+        assert preflight.harness_blocker() is None
 
 
 @pytest.mark.parametrize(
@@ -643,9 +742,7 @@ def test_capture_goes_through_the_driver_not_screencapture(tmp_path):
     def fake_run(argv, **kwargs):
         # The driver writes the file; this proves we asked IT, not /usr/sbin/screencapture.
         assert argv[0] == str(driver) and argv[1:3] == ["call", "get_desktop_state"]
-        pathlib.Path(json.loads(argv[3])["screenshot_out_file"]).write_bytes(
-            b"png-bytes"
-        )
+        pathlib.Path(json.loads(argv[3])["screenshot_out_file"]).write_bytes(b"png-bytes")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     with patch.object(preflight, "DRIVER_PATHS", (driver,)):
@@ -653,12 +750,12 @@ def test_capture_goes_through_the_driver_not_screencapture(tmp_path):
             assert preflight.check_capture().ok
 
 
-def test_driver_contract_reports_drift_without_blocking_a_working_driver():
-    """0.18.0 drove a full task while the pin read 0.19.3; refusing that would be wrong."""
+def test_driver_contract_blocks_version_drift():
     with patch.object(preflight, "driver_version", return_value="0.18.0"):
         result = preflight.check_driver_contract()
-    assert result.ok
-    assert "0.18.0" in result.detail and preflight.DRIVER_VERSION in result.detail
+    assert not result.ok
+    assert result.detail == "0.18.0"
+    assert preflight.DRIVER_VERSION in (result.remediation or "")
 
 
 def test_driver_contract_blocks_when_the_driver_cannot_answer():
@@ -668,30 +765,20 @@ def test_driver_contract_blocks_when_the_driver_cannot_answer():
 
 def test_driver_version_parses_plain_text_output():
     """`status --json` is not JSON on 0.18.0; --version is the stable surface."""
-    with patch.object(
-        preflight, "find_cua_driver", return_value=preflight.Path("/x/cua-driver")
-    ):
+    with patch.object(preflight, "find_cua_driver", return_value=preflight.Path("/x/cua-driver")):
         with patch.object(preflight.subprocess, "run") as run:
-            run.return_value = SimpleNamespace(
-                stdout="cua-driver 0.18.0\n", returncode=0
-            )
+            run.return_value = SimpleNamespace(stdout="cua-driver 0.18.0\n", returncode=0)
             assert preflight.driver_version() == "0.18.0"
 
 
-@pytest.mark.parametrize(
-    "code,expected", [(401, False), (403, False), (400, True), (422, True)]
-)
-def test_dev_access_treats_only_auth_rejections_as_failure(code, expected):
+@pytest.mark.parametrize("code", [400, 401, 403, 422, 429, 500])
+def test_dev_access_fails_closed_on_http_errors(code):
     """/v1/models 403s for keys that drive n2-preview fine, so probe what a run actually uses."""
     from urllib.error import HTTPError
 
-    with patch.object(
-        preflight, "resolve_api_key_for_environment", return_value="yt-test"
-    ):
-        with patch.object(
-            preflight, "urlopen", side_effect=HTTPError("u", code, "m", {}, None)
-        ):
-            assert preflight.check_dev_access().ok is expected
+    with patch.object(preflight, "resolve_api_key_for_environment", return_value="yt-test"):
+        with patch.object(preflight, "urlopen", side_effect=HTTPError("u", code, "m", {}, None)):
+            assert not preflight.check_dev_access().ok
 
 
 def test_dev_access_catches_a_billing_error_returned_with_http_200():
@@ -700,9 +787,7 @@ def test_dev_access_catches_a_billing_error_returned_with_http_200():
     A key with no prepaid balance passed this check while every task failed at zero steps with an
     empty stderr, so the status code alone is not enough to tell.
     """
-    body = json.dumps(
-        {"error": {"message": "Insufficient prepaid balance.", "type": "billing_error"}}
-    ).encode()
+    body = json.dumps({"error": {"message": "Insufficient prepaid balance.", "type": "billing_error"}}).encode()
 
     class Response:
         status = 200
@@ -716,9 +801,7 @@ def test_dev_access_catches_a_billing_error_returned_with_http_200():
         def __exit__(self, *args):
             return False
 
-    with patch.object(
-        preflight, "resolve_api_key_for_environment", return_value="yt-test"
-    ):
+    with patch.object(preflight, "resolve_api_key_for_environment", return_value="yt-test"):
         with patch.object(preflight, "urlopen", return_value=Response()):
             result = preflight.check_dev_access()
     assert not result.ok
@@ -741,11 +824,11 @@ def test_dev_access_passes_only_on_a_real_completion():
         def __exit__(self, *args):
             return False
 
-    with patch.object(
-        preflight, "resolve_api_key_for_environment", return_value="yt-test"
-    ):
-        with patch.object(preflight, "urlopen", return_value=Response()):
+    with patch.object(preflight, "resolve_api_key_for_environment", return_value="yt-test"):
+        with patch.object(preflight, "urlopen", return_value=Response()) as open_url:
             assert preflight.check_dev_access().ok
+    request = open_url.call_args.args[0]
+    assert json.loads(request.data)["tool_set"] == TOOL_SET
 
 
 def test_lock_module_avoids_apis_newer_than_the_declared_python_floor():
@@ -775,9 +858,7 @@ async def test_supervisor_forwards_ready_and_action_events():
         },
         {"type": "result", "outcome": "completed", "final_text": "ok"},
     ]
-    process = _Process(
-        _stream(*(json.dumps(event) for event in events)), _stream("")
-    )
+    process = _Process(_stream(*(json.dumps(event) for event in events)), _stream(""))
     seen: list[dict] = []
 
     async def on_event(event):
@@ -799,10 +880,19 @@ async def test_supervisor_forwards_ready_and_action_events():
 async def test_supervisor_survives_raising_event_callback():
     process = _Process(
         _stream(
-            json.dumps({"type": "action", "index": 1, "tool": "screenshot",
-                        "status": "executed", "raw_status": "confirmed",
-                        "delivery_mode": "foreground", "route": "pixel",
-                        "refusal_code": None, "elapsed_ms": 5}),
+            json.dumps(
+                {
+                    "type": "action",
+                    "index": 1,
+                    "tool": "screenshot",
+                    "status": "executed",
+                    "raw_status": "confirmed",
+                    "delivery_mode": "foreground",
+                    "route": "pixel",
+                    "refusal_code": None,
+                    "elapsed_ms": 5,
+                }
+            ),
             json.dumps({"type": "result", "outcome": "completed", "final_text": "ok"}),
         ),
         _stream(""),
@@ -829,10 +919,17 @@ async def test_supervisor_disables_hanging_event_callback(monkeypatch):
     is disabled, so later events don't pay the timeout again.
     """
     monkeypatch.setattr(supervisor, "EVENT_CALLBACK_TIMEOUT_SECONDS", 0.05)
-    action = {"type": "action", "index": 1, "tool": "screenshot",
-              "status": "executed", "raw_status": "confirmed",
-              "delivery_mode": "foreground", "route": "pixel",
-              "refusal_code": None, "elapsed_ms": 5}
+    action = {
+        "type": "action",
+        "index": 1,
+        "tool": "screenshot",
+        "status": "executed",
+        "raw_status": "confirmed",
+        "delivery_mode": "foreground",
+        "route": "pixel",
+        "refusal_code": None,
+        "elapsed_ms": 5,
+    }
     process = _Process(
         _stream(
             json.dumps(action),
@@ -903,14 +1000,20 @@ async def test_handle_computer_use_pops_ctx_and_wires_on_event():
         ),
         patch("yutori_mcp.server.resolve_base_url", return_value="https://api"),
     ):
-        result, _ = await server._handle_computer_use(
-            None, {"task": "open calculator", "ctx": ctx}
-        )
+        result, _ = await server._handle_computer_use(None, {"task": "open calculator", "ctx": ctx})
     assert result == {"outcome": "completed"}
     on_event = run_task.await_args.kwargs["on_event"]
     assert on_event is not None
-    await on_event({"type": "action", "index": 1, "tool": "screenshot",
-                    "status": "executed", "refusal_code": None, "elapsed_ms": 3})
+    await on_event(
+        {
+            "type": "action",
+            "index": 1,
+            "tool": "screenshot",
+            "status": "executed",
+            "refusal_code": None,
+            "elapsed_ms": 3,
+        }
+    )
     ctx.info.assert_awaited()
 
     run_task.reset_mock()
@@ -925,6 +1028,41 @@ async def test_handle_computer_use_pops_ctx_and_wires_on_event():
     ):
         await server._handle_computer_use(None, {"task": "open calculator"})
     assert run_task.await_args.kwargs["on_event"] is None
+
+
+async def test_handle_computer_use_locks_before_subprocess_preflight(tmp_path):
+    import yutori_mcp.server as server
+
+    entered_run = asyncio.Event()
+    release_run = asyncio.Event()
+
+    async def hold_run(**_kwargs):
+        entered_run.set()
+        await release_run.wait()
+        return {"outcome": "completed"}
+
+    blocker = Mock(return_value=None)
+    lock_path = tmp_path / "handler.lock"
+    with (
+        patch("yutori_mcp.computer_use.lock.DesktopLock", side_effect=lambda: DesktopLock(lock_path)),
+        patch("yutori_mcp.computer_use.preflight.first_blocker", blocker),
+        patch("yutori_mcp.computer_use.supervisor.run_task", side_effect=hold_run),
+        patch(
+            "yutori_mcp.credentials.resolve_api_key_for_environment",
+            return_value="yt-key",
+        ),
+        patch("yutori_mcp.server.resolve_base_url", return_value="https://api"),
+    ):
+        first = asyncio.create_task(server._handle_computer_use(None, {"task": "first"}))
+        await entered_run.wait()
+        second, _ = await server._handle_computer_use(None, {"task": "second"})
+        release_run.set()
+        first_result, _ = await first
+
+    assert first_result == {"outcome": "completed"}
+    assert second["outcome"] == "failed"
+    assert "Another computer-use task" in second["final_text"]
+    blocker.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------
@@ -981,15 +1119,27 @@ def test_parse_request_rejects_malformed_requests(overrides, code):
         ("Batch completed; completed=3.", "confirmed", "executed"),
         ("[ERROR] Refused an action.", "refused", "refused"),
         ("[ERROR] Action was not confirmed by the user.", "refused", "refused"),
-        ("[ERROR] shell_command failed: command was killed after exceeding its "
-         "10-second timeout", "timeout_after_possible_dispatch", "uncertain"),
+        (
+            "[ERROR] shell_command failed: command was killed after exceeding its 10-second timeout",
+            "timeout_after_possible_dispatch",
+            "uncertain",
+        ),
         ("[ERROR] Invalid left_click call: bad coordinates", "unverifiable", "uncertain"),
-        ({"type": "input_image", "image_url": "data:...",
-          "result": {"status": "stopped", "error": "boom"}}, "unverifiable", "uncertain"),
-        ({"type": "input_image", "image_url": "data:...",
-          "result": {"status": "completed", "completed": 3}}, "confirmed", "executed"),
-        ({"type": "input_image", "image_url": "data:...",
-          "result": "[ERROR] bash failed: nope"}, "unverifiable", "uncertain"),
+        (
+            {"type": "input_image", "image_url": "data:...", "result": {"status": "stopped", "error": "boom"}},
+            "unverifiable",
+            "uncertain",
+        ),
+        (
+            {"type": "input_image", "image_url": "data:...", "result": {"status": "completed", "completed": 3}},
+            "confirmed",
+            "executed",
+        ),
+        (
+            {"type": "input_image", "image_url": "data:...", "result": "[ERROR] bash failed: nope"},
+            "unverifiable",
+            "uncertain",
+        ),
     ],
 )
 def test_classify_result_maps_outputs_to_statuses(output, raw_status, status):
@@ -1020,8 +1170,7 @@ async def test_action_reporter_events_satisfy_the_result_formatter():
     )
     await reporter.on_computer_call_end(
         {"type": "function_call", "name": "left_click"},
-        [{"type": "function_call_output", "call_id": "c2",
-          "output": "[ERROR] Refused a click."}],
+        [{"type": "function_call_output", "call_id": "c2", "output": "[ERROR] Refused a click."}],
     )
     events = [json.loads(line) for line in stream.lines]
     assert [event["index"] for event in events] == [0, 1]
@@ -1029,9 +1178,7 @@ async def test_action_reporter_events_satisfy_the_result_formatter():
     assert events[1]["status"] == "refused"
     assert events[1]["refusal_code"] == "driver_refused"
     # format_result formats each action with **action, so every key must exist.
-    formatted = format_result(
-        {"outcome": "completed", "final_text": "ok", "actions": events}
-    )
+    formatted = format_result({"outcome": "completed", "final_text": "ok", "actions": events})
     assert "#0 computer_batch: executed" in formatted
 
 
@@ -1095,9 +1242,7 @@ def test_payload_validation_raises_refusals_with_the_word_refused():
 def test_payload_validation_applies_the_bare_code_rule():
     # Driver >=0.16 stamps informational codes on successful payloads.
     assert _payload_ok("click", {"code": "ok", "activated": True})["code"] == "ok"
-    assert _payload_ok(
-        "click", {"code": "ok", "request_accepted": True, "status": "done"}
-    )
+    assert _payload_ok("click", {"code": "ok", "request_accepted": True, "status": "done"})
     with pytest.raises(DriverError):
         _payload_ok("click", {"code": "something_failed"})
     with pytest.raises(DriverError):
@@ -1121,10 +1266,7 @@ def test_normalize_key_maps_aliases_and_punctuation():
 
 
 def test_pick_best_window_excludes_helper_strips():
-    strips = [
-        {"window_id": index, "bounds": {"width": 600, "height": 20}, "z_index": 9}
-        for index in range(4)
-    ]
+    strips = [{"window_id": index, "bounds": {"width": 600, "height": 20}, "z_index": 9} for index in range(4)]
     main_window = {
         "window_id": 99,
         "bounds": {"width": 400, "height": 500},
@@ -1133,6 +1275,18 @@ def test_pick_best_window_excludes_helper_strips():
     assert pick_best_window(strips + [main_window])["window_id"] == 99
     # All-helper fallback: the largest window by area.
     assert pick_best_window(strips)["window_id"] == 0
+
+
+def test_find_running_app_matches_name_or_bundle_id_and_requires_a_live_pid():
+    payload = {
+        "apps": [
+            {"name": "Finder", "bundle_id": "com.apple.finder", "pid": 42},
+            {"name": "Safari", "bundle_id": "com.apple.Safari", "pid": 0},
+        ]
+    }
+    assert _find_running_app(payload, "finder")["pid"] == 42
+    assert _find_running_app(payload, "COM.APPLE.FINDER")["pid"] == 42
+    assert _find_running_app(payload, "Safari") is None
 
 
 class _FakeCLI:
@@ -1183,15 +1337,89 @@ async def test_prepare_app_uses_the_bundle_id_heuristic_with_name_retry():
 async def test_prepare_app_fronting_failures_are_not_fatal():
     cli = _FakeCLI(
         {
-            "launch_app": {"pid": 7, "name": "TextEdit", "windows": [
-                {"window_id": 3, "bounds": {"width": 800, "height": 600}}
-            ]},
+            "launch_app": {
+                "pid": 7,
+                "name": "TextEdit",
+                "windows": [{"window_id": 3, "bounds": {"width": 800, "height": 600}}],
+            },
             "bring_to_front": DriverError("bring_to_front_exact_window_unverified"),
         }
     )
     with patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()):
         target = await prepare_app(cli, "TextEdit", None)
     assert target["pid"] == 7
+
+
+async def test_prepare_app_falls_back_to_an_already_running_system_app():
+    cli = _FakeCLI(
+        {
+            "launch_app": {"error": "APP_NOT_INSTALLED", "name": "Finder"},
+            "list_apps": {
+                "apps": [
+                    {
+                        "name": "Finder",
+                        "bundle_id": "com.apple.finder",
+                        "pid": 42,
+                        "running": True,
+                    }
+                ]
+            },
+            "bring_to_front": {},
+        }
+    )
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()):
+        target = await prepare_app(cli, "Finder", None)
+    assert target == {"name": "Finder", "pid": 42}
+    assert cli.calls == [
+        ("launch_app", {"name": "Finder"}),
+        ("list_apps", {}),
+        ("bring_to_front", {"pid": 42}),
+    ]
+
+
+async def test_prepare_app_falls_back_when_launching_a_running_system_app_raises():
+    cli = _FakeCLI(
+        {
+            "launch_app": DriverError("APP_NOT_INSTALLED"),
+            "list_apps": {"apps": [{"name": "Finder", "pid": 42}]},
+            "bring_to_front": {},
+        }
+    )
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()):
+        target = await prepare_app(cli, "Finder", None)
+    assert target == {"name": "Finder", "pid": 42}
+
+
+@pytest.mark.parametrize(
+    ("app", "launch_args"),
+    [
+        ("Finder", {"name": "Finder"}),
+        ("com.apple.finder", {"bundle_id": "com.apple.finder"}),
+    ],
+)
+async def test_prepare_app_does_not_bypass_driver_refusal_with_a_running_app(
+    app: str, launch_args: dict[str, str]
+) -> None:
+    cli = _FakeCLI(
+        {
+            "launch_app": DriverRefusal("protected_resource"),
+            "list_apps": {"apps": [{"name": "Finder", "pid": 42}]},
+        }
+    )
+    with pytest.raises(DriverRefusal, match="protected_resource"):
+        await prepare_app(cli, app, None)
+    assert cli.calls == [("launch_app", launch_args)]
+
+
+async def test_prepare_app_preserves_launch_error_when_no_running_app_matches():
+    cli = _FakeCLI(
+        {
+            "launch_app": DriverError("launch failed"),
+            "list_apps": {"apps": []},
+        }
+    )
+    with pytest.raises(DriverError, match="launch failed"):
+        await prepare_app(cli, "Missing", None)
 
 
 async def test_desktop_screenshot_returns_base64_and_caches_native_size():
@@ -1202,19 +1430,161 @@ async def test_desktop_screenshot_returns_base64_and_caches_native_size():
     assert await desktop.get_dimensions() == (3840, 2160)
 
 
-async def test_desktop_scroll_recovers_direction_and_amount():
+@pytest.mark.parametrize(
+    ("scroll_x", "scroll_y", "direction"),
+    [
+        (0, -2160, "up"),
+        (0, 2160, "down"),
+        (-3840, 0, "left"),
+        (3840, 0, "right"),
+    ],
+)
+async def test_desktop_scroll_recovers_direction_and_amount(scroll_x, scroll_y, direction):
     cli = _FakeCLI()
     desktop = CuaDriverDesktop(cli, session="s1")
     desktop._native_size = (3840, 2160)
-    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()):
-        # The loop converts the model's amount=5 into pixels: 5 * 2160 * 0.1.
-        await desktop.scroll(100, 200, 0, 1080)
+    sleep = AsyncMock()
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", sleep):
+        # The SDK converts amount=10 into 100% of the relevant screen dimension.
+        await desktop.scroll(100, 200, scroll_x, scroll_y)
     tool, args = cli.calls[-1]
     assert tool == "scroll"
-    assert args["direction"] == "down"
-    assert args["amount"] == 15  # model amount 5, tripled like the previous runner
+    assert args["direction"] == direction
+    assert args["amount"] == 30
     assert args["by"] == "line"
     assert args["scope"] == "desktop" and args["session"] == "s1"
+    sleep.assert_awaited_once_with(1.0)
+    assert desktop.timings.settle_ms == 1000
+
+
+@pytest.mark.parametrize("amount", range(1, 51))
+@pytest.mark.parametrize("direction", ["up", "down", "left", "right"])
+async def test_sdk_scroll_amount_survives_the_full_translation_chain(amount, direction):
+    from yutori.navigator import parse_n2_tool_calls
+    from yutori.navigator.n2 import _CallbackDispatcher, execute_n2_computer_call
+
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    desktop._native_size = (1280, 800)
+    item = parse_n2_tool_calls(
+        {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "s1",
+                    "function": {
+                        "name": "computer_batch",
+                        "arguments": json.dumps(
+                            {
+                                "actions": [
+                                    {
+                                        "name": "scroll",
+                                        "arguments": {
+                                            "coordinates": [250, 750],
+                                            "direction": direction,
+                                            "amount": amount,
+                                        },
+                                    }
+                                ]
+                            }
+                        ),
+                    },
+                }
+            ],
+        },
+        1280,
+        800,
+    )[-1]
+    sleep = AsyncMock()
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", sleep):
+        result = await execute_n2_computer_call(item, desktop, callbacks=_CallbackDispatcher(None), screenshot_delay=0)
+    output = result[0]["output"]
+    assert isinstance(output, dict) and output["type"] == "input_image"
+    scroll_calls = [args for tool, args in desktop.cli.calls if tool == "scroll"]
+    assert sum(call["amount"] for call in scroll_calls) == amount * 3
+    assert all(1 <= call["amount"] <= 50 for call in scroll_calls)
+    assert all(
+        {
+            "delivery_mode": call["delivery_mode"],
+            "scope": call["scope"],
+            "session": call["session"],
+            "x": call["x"],
+            "y": call["y"],
+            "direction": call["direction"],
+            "by": call["by"],
+        }
+        == {
+            "delivery_mode": "foreground",
+            "scope": "desktop",
+            "session": "s1",
+            "x": 320,
+            "y": 600,
+            "direction": direction,
+            "by": "line",
+        }
+        for call in scroll_calls
+    )
+    total = amount * 3
+    expected_chunks = [50] * (total // 50)
+    if remainder := total % 50:
+        expected_chunks.append(remainder)
+    assert [call["amount"] for call in scroll_calls] == expected_chunks
+    sleep.assert_awaited_once_with(1.0)
+
+
+async def test_zero_distance_scroll_is_a_true_no_op():
+    cli = _FakeCLI()
+    desktop = CuaDriverDesktop(cli, session="s1")
+    await desktop.scroll(100, 200, 0, 0)
+    assert cli.calls == []
+    assert desktop.timings.settle_ms == 0
+
+
+async def test_partial_multi_chunk_scroll_settles_before_error_propagates():
+    cli = _FakeCLI()
+    cli.call = AsyncMock(side_effect=[{}, DriverError("second chunk failed")])
+    desktop = CuaDriverDesktop(cli, session="s1")
+    desktop._native_size = (1280, 800)
+    sleep = AsyncMock()
+    with (
+        patch("yutori_mcp.computer_use.driver.asyncio.sleep", sleep),
+        pytest.raises(DriverError, match="second chunk failed"),
+    ):
+        # amount=17 becomes two driver chunks: 50, then 1.
+        await desktop.scroll(100, 200, 0, 17 * 80)
+    assert [call.args[0] for call in cli.call.await_args_list] == ["scroll", "scroll"]
+    sleep.assert_awaited_once_with(1.0)
+    assert desktop.timings.settle_ms == 1000
+
+
+async def test_unmodified_click_omits_the_modifier_field():
+    cli = _FakeCLI()
+    desktop = CuaDriverDesktop(cli, session="s1")
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()):
+        await desktop.click(10, 20)
+    assert cli.calls == [
+        (
+            "click",
+            {
+                "delivery_mode": "foreground",
+                "scope": "desktop",
+                "session": "s1",
+                "x": 10,
+                "y": 20,
+                "count": 1,
+                "button": "left",
+            },
+        )
+    ]
+
+
+async def test_triple_click_is_one_native_driver_call():
+    cli = _FakeCLI()
+    desktop = CuaDriverDesktop(cli, session="s1")
+    sleep = AsyncMock()
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", sleep):
+        await desktop.triple_click(10, 20, ["command"])
+    assert [(args["count"], args["modifier"]) for _, args in cli.calls] == [(3, ["cmd"])]
+    sleep.assert_awaited_once_with(1.0)
 
 
 async def test_desktop_keypress_normalizes_and_routes_chords():
@@ -1231,6 +1601,21 @@ async def test_desktop_keypress_normalizes_and_routes_chords():
     ]
 
 
+async def test_mouse_move_matches_driver_schema_and_settles():
+    cli = _FakeCLI()
+    desktop = CuaDriverDesktop(cli, session="s1")
+    sleep = AsyncMock()
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", sleep):
+        await desktop.move(10, 20)
+    assert cli.calls == [
+        (
+            "move_cursor",
+            {"scope": "desktop", "session": "s1", "x": 10, "y": 20},
+        )
+    ]
+    sleep.assert_awaited_once_with(1.0)
+
+
 async def test_desktop_type_chunks_long_text_with_zero_delay():
     cli = _FakeCLI()
     desktop = CuaDriverDesktop(cli, session="s1")
@@ -1241,19 +1626,53 @@ async def test_desktop_type_chunks_long_text_with_zero_delay():
     assert all(args["delay_ms"] == 0 for args in type_calls)
 
 
-async def test_run_shell_command_kills_the_group_on_timeout():
+async def test_run_shell_command_kills_the_process_tree_on_timeout():
     desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
     with pytest.raises(TimeoutError, match="1-second timeout"):
         await desktop.run_shell_command("sleep 30", timeout_seconds=1)
 
 
+async def test_timeout_kills_background_child_after_bash_leader_exits(tmp_path):
+    child_pid_file = tmp_path / "orphan.pid"
+    command = f"sleep 30 & child=$!; printf '%s' \"$child\" > {shlex.quote(str(child_pid_file))}"
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    with pytest.raises(TimeoutError, match="0.05-second timeout"):
+        await desktop.run_bash_command(command, timeout=0.05)
+    child_pid = int(child_pid_file.read_text())
+    await _wait_until_process_stops(child_pid)
+
+
+async def test_timeout_kills_child_that_bash_moves_to_a_job_control_group(tmp_path):
+    child_pid_file = tmp_path / "job-control-child.pid"
+    command = f'set -m; sleep 30 & child=$!; printf \'%s\' "$child" > {shlex.quote(str(child_pid_file))}; wait "$child"'
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    with pytest.raises(TimeoutError, match="0.05-second timeout"):
+        await desktop.run_bash_command(command, timeout=0.05)
+    child_pid = int(child_pid_file.read_text())
+    await _wait_until_process_stops(child_pid)
+
+
+async def test_timeout_kills_reparented_child_in_a_job_control_group(tmp_path):
+    child_pid_file = tmp_path / "reparented-job-control-child.pid"
+    command = f"set -m; sleep 30 & child=$!; printf '%s' \"$child\" > {shlex.quote(str(child_pid_file))}"
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    with pytest.raises(TimeoutError, match="0.05-second timeout"):
+        await desktop.run_bash_command(command, timeout=0.05)
+    child_pid = int(child_pid_file.read_text())
+    await _wait_until_process_stops(child_pid)
+
+
+async def test_shell_child_does_not_inherit_blocked_termination_signals():
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    result = await desktop.run_bash_command("kill -TERM $$; printf survived")
+    assert "survived" not in result
+
+
 async def test_run_shell_command_formats_exit_codes():
     desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
-    result = await desktop.run_shell_command("echo out; exit 3")
-    assert result == "out\n[exit code 3]"
-    assert await desktop.run_shell_command("true") == (
-        "Command exited with code 0 and produced no output."
-    )
+    result = await desktop.run_shell_command("printf out; printf err >&2; exit 3")
+    assert result == "outerr\n[exit code 3]"
+    assert await desktop.run_shell_command("true") == ("Command exited with code 0 and produced no output.")
 
 
 async def test_run_bash_command_persists_the_working_directory(tmp_path):
@@ -1261,6 +1680,112 @@ async def test_run_bash_command_persists_the_working_directory(tmp_path):
     await desktop.run_bash_command(f"cd {tmp_path}")
     result = await desktop.run_bash_command("pwd")
     assert tmp_path.name in result
+
+
+async def test_run_bash_command_uses_bash_not_bin_sh():
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    result = await desktop.run_bash_command('if [[ -n "$BASH_VERSION" ]]; then printf bash; fi')
+    assert result == "bash"
+
+
+async def test_run_bash_timeout_zero_disables_the_per_command_timer():
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    assert await desktop.run_bash_command("printf ok", timeout=0) == "ok"
+
+
+async def test_stop_shell_proxy_catches_asyncio_timeout_on_python_310():
+    process = SimpleNamespace(
+        returncode=None,
+        terminate=Mock(),
+        kill=Mock(),
+        wait=AsyncMock(return_value=0),
+    )
+    with (
+        patch.object(asyncio, "wait_for", AsyncMock(side_effect=asyncio.TimeoutError)),
+        pytest.raises(RuntimeError, match="Could not verify"),
+    ):
+        await _stop_shell_proxy(process)
+    process.terminate.assert_called_once_with()
+    process.kill.assert_called_once_with()
+    assert process.wait.await_count == 1
+
+
+async def test_sdk_bash_timeout_zero_executes_through_the_real_handler():
+    from yutori.navigator import parse_n2_tool_calls
+    from yutori.navigator.n2 import _CallbackDispatcher, execute_n2_computer_call
+
+    item = parse_n2_tool_calls(
+        {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "b1",
+                    "function": {
+                        "name": "bash",
+                        "arguments": json.dumps({"command": "printf ok", "timeout": 0}),
+                    },
+                }
+            ],
+        },
+        100,
+        100,
+    )[-1]
+    result = await execute_n2_computer_call(
+        item,
+        CuaDriverDesktop(_FakeCLI(), session="s1"),
+        callbacks=_CallbackDispatcher(None),
+        screenshot_delay=0,
+    )
+    assert result[0]["output"]["result"] == "ok"
+
+
+@pytest.mark.parametrize("method", ["run_shell_command", "run_bash_command"])
+async def test_cancelled_foreground_shell_process_tree_is_killed(method, tmp_path):
+    child_pid_file = tmp_path / f"{method}.pid"
+    command = f'sleep 30 & child=$!; printf \'%s\' "$child" > {shlex.quote(str(child_pid_file))}; wait "$child"'
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    task = asyncio.create_task(getattr(desktop, method)(command))
+    for _ in range(100):
+        if child_pid_file.exists():
+            break
+        await asyncio.sleep(0.01)
+    assert child_pid_file.exists()
+    child_pid = int(child_pid_file.read_text())
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await _wait_until_process_stops(child_pid)
+
+
+async def test_background_bash_tree_is_awaited_and_killed_at_teardown():
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    await desktop.run_bash_command("sleep 30", run_in_background=True)
+    process = next(iter(desktop._background_tasks.values()))
+    await desktop._terminate_background_tasks()
+    await _wait_until_process_stops(process.pid)
+
+
+async def test_background_bash_teardown_unwinds_in_reverse_launch_order():
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    first = SimpleNamespace(pid=1)
+    second = SimpleNamespace(pid=2)
+    desktop._background_tasks = {"first": first, "second": second}
+    with patch("yutori_mcp.computer_use.driver._stop_shell_proxy", new_callable=AsyncMock) as stop:
+        await desktop._terminate_background_tasks()
+    assert [call.args[0].pid for call in stop.await_args_list] == [2, 1]
+
+
+async def test_background_bash_teardown_attempts_every_task_after_an_error():
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    first = SimpleNamespace(pid=1)
+    second = SimpleNamespace(pid=2)
+    desktop._background_tasks = {"first": first, "second": second}
+    stop = AsyncMock(side_effect=[RuntimeError("second failed"), None])
+    with patch("yutori_mcp.computer_use.driver._stop_shell_proxy", stop):
+        with pytest.raises(RuntimeError, match="second failed"):
+            await desktop._terminate_background_tasks()
+    assert [call.args[0].pid for call in stop.await_args_list] == [2, 1]
+    assert desktop._background_tasks == {}
 
 
 def test_format_shell_result_keeps_the_exit_marker_within_the_cap():
@@ -1280,9 +1805,7 @@ class _RunnerCLITransportProcess:
 
 
 async def test_driver_cli_sends_compact_json_argv(tmp_path):
-    create = AsyncMock(
-        return_value=_RunnerCLITransportProcess(stdout=b'{"activated": true}')
-    )
+    create = AsyncMock(return_value=_RunnerCLITransportProcess(stdout=b'{"activated": true}'))
     cli = DriverCLI("/x/cua-driver", capture_dir=tmp_path)
     with patch("asyncio.create_subprocess_exec", create):
         payload = await cli.call("click", {"x": 1, "y": 2})
@@ -1325,12 +1848,18 @@ async def test_driver_cli_capture_reports_a_permanently_missing_frame(tmp_path):
             await cli.capture("get_desktop_state", {"session": "s"})
 
 
-async def test_sdk_loop_executes_against_the_desktop_handler():
-    """The desktop handler satisfies the SDK loop's duck-typed surface.
-
-    Exercises a real translated click through yutori.navigator's executor
-    against the driver adapter, pinning the handler/loop seam end to end.
-    """
+@pytest.mark.parametrize(
+    ("action", "expected_clicks"),
+    [
+        ("left_click", [(1, "left")]),
+        ("right_click", [(1, "right")]),
+        ("middle_click", [(1, "middle")]),
+        ("double_click", [(2, "left")]),
+        ("triple_click", [(3, "left")]),
+    ],
+)
+async def test_sdk_loop_routes_modified_click_batches_to_the_desktop_handler(action, expected_clicks):
+    """Exercise the nested trained envelope through the real SDK executor."""
     from yutori.navigator import parse_n2_tool_calls
     from yutori.navigator.n2 import _CallbackDispatcher, execute_n2_computer_call
 
@@ -1342,8 +1871,83 @@ async def test_sdk_loop_executes_against_the_desktop_handler():
                 {
                     "id": "c1",
                     "function": {
-                        "name": "left_click",
-                        "arguments": '{"coordinates": [500, 500]}',
+                        "name": "computer_batch",
+                        "arguments": json.dumps(
+                            {
+                                "actions": [
+                                    {
+                                        "name": action,
+                                        "arguments": {
+                                            "coordinates": [500, 500],
+                                            "modifier": "alt+command",
+                                        },
+                                    },
+                                    {
+                                        "name": "type",
+                                        "arguments": {"text": "hello"},
+                                    },
+                                ]
+                            }
+                        ),
+                    },
+                }
+            ],
+        },
+        200,
+        100,
+        allow_click_modifiers=True,
+    )[-1]
+    sleep = AsyncMock()
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", sleep):
+        result = await execute_n2_computer_call(item, desktop, callbacks=_CallbackDispatcher(None), screenshot_delay=0)
+    output = result[0]["output"]
+    assert isinstance(output, dict) and output["type"] == "input_image"
+    click_calls = [args for tool, args in desktop.cli.calls if tool == "click"]
+    assert [(args["count"], args["button"]) for args in click_calls] == expected_clicks
+    assert all(args["modifier"] == ["option", "cmd"] for args in click_calls)
+    assert all(args["scope"] == "desktop" and args["session"] == "s1" for args in click_calls)
+    type_calls = [args for tool, args in desktop.cli.calls if tool == "type_text"]
+    assert type_calls == [
+        {
+            "delivery_mode": "foreground",
+            "scope": "desktop",
+            "session": "s1",
+            "text": "hello",
+            "delay_ms": 0,
+        }
+    ]
+    assert sleep.await_count == 2
+    assert all(call.args == (1.0,) for call in sleep.await_args_list)
+    assert desktop.timings.settle_ms == 2000
+
+
+async def test_distinct_double_and_single_click_batch_members_each_settle():
+    from yutori.navigator import parse_n2_tool_calls
+    from yutori.navigator.n2 import _CallbackDispatcher, execute_n2_computer_call
+
+    desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
+    item = parse_n2_tool_calls(
+        {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "function": {
+                        "name": "computer_batch",
+                        "arguments": json.dumps(
+                            {
+                                "actions": [
+                                    {
+                                        "name": "double_click",
+                                        "arguments": {"coordinates": [500, 500]},
+                                    },
+                                    {
+                                        "name": "left_click",
+                                        "arguments": {"coordinates": [500, 500]},
+                                    },
+                                ]
+                            }
+                        ),
                     },
                 }
             ],
@@ -1351,16 +1955,12 @@ async def test_sdk_loop_executes_against_the_desktop_handler():
         200,
         100,
     )[-1]
-    result = await execute_n2_computer_call(
-        item, desktop, callbacks=_CallbackDispatcher(None), screenshot_delay=0
-    )
-    output = result[0]["output"]
-    assert isinstance(output, dict) and output["type"] == "input_image"
-    assert ("click", {"delivery_mode": "foreground", "scope": "desktop", "session": "s1",
-                      "x": 100, "y": 50, "count": 1, "button": "left"}) in desktop.cli.calls
-    # The optional shell capabilities are duck-typed by method presence.
-    assert hasattr(desktop, "run_shell_command")
-    assert hasattr(desktop, "run_bash_command")
+    sleep = AsyncMock()
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", sleep):
+        await execute_n2_computer_call(item, desktop, callbacks=_CallbackDispatcher(None), screenshot_delay=0)
+    assert [args["count"] for tool, args in desktop.cli.calls if tool == "click"] == [2, 1]
+    assert sleep.await_count == 2
+    assert desktop.timings.settle_ms == 2000
 
 
 async def test_failed_run_reports_completed_steps_and_redacts_the_key(monkeypatch):
@@ -1370,8 +1970,11 @@ async def test_failed_run_reports_completed_steps_and_redacts_the_key(monkeypatc
     still see the guard's counter and the run clock.
     """
 
+    agent_kwargs = []
+
     class _FakeAgent:
         def __init__(self, **kwargs):
+            agent_kwargs.append(kwargs)
             self.callbacks = kwargs.get("callbacks") or []
 
         async def __aenter__(self):
@@ -1391,12 +1994,8 @@ async def test_failed_run_reports_completed_steps_and_redacts_the_key(monkeypatc
     monkeypatch.setattr(runner_module, "N2ComputerAgent", _FakeAgent)
     monkeypatch.setattr(runner_module, "DriverCLI", lambda path: _FakeCLI())
     stream = _CollectStream()
-    request = parse_request(
-        _valid_request(deadline_ms=int((time.time() + 60) * 1000), max_steps=30)
-    )
-    outcome = await runner_module.run_request(
-        request, Emitter(stream), api_key="yt-secret"
-    )
+    request = parse_request(_valid_request(deadline_ms=int((time.time() + 60) * 1000), max_steps=30))
+    outcome = await runner_module.run_request(request, Emitter(stream), api_key="yt-secret")
     assert outcome == "failed"
     result = json.loads(stream.lines[-1])
     assert result["outcome"] == "failed"
@@ -1404,17 +2003,58 @@ async def test_failed_run_reports_completed_steps_and_redacts_the_key(monkeypatc
     assert result["elapsed_ms"] >= 0
     assert "yt-secret" not in json.dumps(result)
     assert "[REDACTED]" in result["final_text"]
+    assert agent_kwargs[0]["tool_set"] == TOOL_SET
+    assert agent_kwargs[0]["temperature"] == 0.6
+    assert agent_kwargs[0]["supports_click_modifiers"] is True
+    assert agent_kwargs[0]["instructions"] == runner_module.SYSTEM_CONTEXT
 
 
-@pytest.mark.parametrize("command", ["setup", "doctor", "smoke"])
-def test_cli_reports_a_bad_harness_env_without_a_traceback(
-    command, monkeypatch, capsys
+async def test_limit_summary_uses_the_same_tool_set_sampling_and_capabilities(
+    monkeypatch,
 ):
-    from yutori_mcp.computer_use import cli
+    agent_kwargs = []
 
-    monkeypatch.setenv("YUTORI_COMPUTER_USE_HARNESS", "typescript")
-    assert cli.dispatch(command) == 1
-    assert "Unknown computer-use harness" in capsys.readouterr().out
+    class _FakeAgent:
+        def __init__(self, **kwargs):
+            agent_kwargs.append(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+        async def run(self, _messages):
+            yield {
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "summary"}],
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(runner_module, "N2ComputerAgent", _FakeAgent)
+    result = await runner_module._summarize_limit_run(
+        _valid_request(),
+        "yt-test",
+        CuaDriverDesktop(_FakeCLI(), session="s1"),
+        [],
+        time.monotonic() + 60,
+    )
+    assert result == "summary"
+    assert agent_kwargs[0]["tool_set"] == TOOL_SET
+    assert agent_kwargs[0]["temperature"] == 0.6
+    assert agent_kwargs[0]["supports_click_modifiers"] is True
+
+
+def test_system_context_is_explicitly_macos_native():
+    prompt = runner_module.SYSTEM_CONTEXT.lower()
+    assert "macos, not linux" in prompt
+    assert "cmd, not ctrl" in prompt
+    assert "bash as the logged-in user" in prompt
+    assert "do not use sudo" in prompt
 
 
 @pytest.mark.parametrize(
@@ -1437,11 +2077,10 @@ def _run_namespace(**overrides):
 
     values = {
         "task": "open calculator",
-        "harness": None,
         "app": None,
         "start_url": None,
         "minutes": 3,
-        "max_steps": 60,
+        "max_steps": 200,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -1450,18 +2089,13 @@ def _run_namespace(**overrides):
 def test_cli_run_forwards_the_task_and_prints_the_result(monkeypatch, capsys):
     from yutori_mcp.computer_use import cli
 
-    run_task = AsyncMock(
-        return_value={"outcome": "completed", "final_text": "done", "actions": []}
-    )
-    monkeypatch.setattr(cli, "first_blocker", lambda harness=None: None)
+    run_task = AsyncMock(return_value={"outcome": "completed", "final_text": "done", "actions": []})
+    monkeypatch.setattr(cli, "first_blocker", lambda: None)
     monkeypatch.setattr(cli, "run_task", run_task)
-    monkeypatch.setattr(
-        cli, "resolve_api_key_for_environment", lambda environment: "yt-key"
-    )
-    code = cli.dispatch("run", _run_namespace(harness="python", app="Calculator"))
+    monkeypatch.setattr(cli, "resolve_api_key_for_environment", lambda environment: "yt-key")
+    code = cli.dispatch("run", _run_namespace(app="Calculator"))
     assert code == 0
     kwargs = run_task.await_args.kwargs
-    assert kwargs["harness"] == "python"
     assert kwargs["app"] == "Calculator"
     assert kwargs["on_event"] is not None
     assert "Outcome: completed" in capsys.readouterr().out
@@ -1477,7 +2111,7 @@ def test_cli_run_rejects_out_of_bounds_arguments_as_a_message(monkeypatch, capsy
     assert "minutes" in capsys.readouterr().out
 
 
-def test_cli_run_gates_on_the_selected_harness_blocker(monkeypatch, capsys):
+def test_cli_run_gates_on_the_sdk_blocker(monkeypatch, capsys):
     from yutori_mcp.computer_use import cli
 
     run_task = AsyncMock()
@@ -1485,14 +2119,12 @@ def test_cli_run_gates_on_the_selected_harness_blocker(monkeypatch, capsys):
     monkeypatch.setattr(
         cli,
         "first_blocker",
-        lambda harness=None: SimpleNamespace(
-            detail="Node 22 not found", remediation="brew install node@22"
-        ),
+        lambda: SimpleNamespace(detail="SDK loop not found", remediation="refresh yutori-mcp"),
     )
-    assert cli.dispatch("run", _run_namespace(harness="node")) == 1
+    assert cli.dispatch("run", _run_namespace()) == 1
     run_task.assert_not_awaited()
     output = capsys.readouterr().out
-    assert "Node 22 not found" in output and "brew install node@22" in output
+    assert "SDK loop not found" in output and "refresh yutori-mcp" in output
 
 
 async def test_api_timer_accumulates_model_time():
@@ -1512,7 +2144,7 @@ async def test_action_reporter_subtracts_capture_and_settle_from_action_time():
     breakdown's action_ms must not, or phases double count against total."""
     clock = iter([100.0, 104.0])  # call start, call end
     timings = runner_module.RunTimings()
-    desktop_timings = SimpleNamespace(capture_ms=1000, settle_ms=300, captures=2)
+    desktop_timings = SimpleNamespace(capture_ms=1000, settle_ms=1000, captures=2)
     stream = _CollectStream()
     reporter = runner_module.ActionReporter(
         Emitter(stream),
@@ -1523,13 +2155,11 @@ async def test_action_reporter_subtracts_capture_and_settle_from_action_time():
     )
     await reporter.on_computer_call_start({"name": "left_click"})
     desktop_timings.capture_ms += 700
-    desktop_timings.settle_ms += 300
-    await reporter.on_computer_call_end(
-        {"name": "left_click"}, [{"output": {"type": "input_image", "image_url": "d"}}]
-    )
+    desktop_timings.settle_ms += 1000
+    await reporter.on_computer_call_end({"name": "left_click"}, [{"output": {"type": "input_image", "image_url": "d"}}])
     event = json.loads(stream.lines[-1])
     assert event["duration_ms"] == 4000
-    assert timings.action_ms == 3000  # 4000 span - 700 capture - 300 settle
+    assert timings.action_ms == 2300  # 4000 span - 700 capture - 1000 settle
     assert timings.tool_calls == 1
 
 
@@ -1569,7 +2199,7 @@ def test_format_perf_renders_phases_and_basic_step_rate():
     assert "screenshots 9.8s over 14 captures (0.7s avg)" in detailed[1]
     assert "settle 3.6s" in detailed[1] and "other 10.6s" in detailed[1]
 
-    # The Node runner carries no phase timings; the summary stops at step rate.
+    # A legacy payload without phase timings stops at step rate.
     basic = format_perf({"elapsed_ms": 70000, "steps": 6})
     assert basic == ["Perf: total 70.0s over 6 steps (11.7s/step)"]
     assert format_perf({"elapsed_ms": 70000}) == []
@@ -1614,16 +2244,14 @@ async def test_smoke_seeds_the_clipboard_and_requires_an_exact_result(monkeypatc
         )
         if seed is not None:
             captured["seeded"] = seed.split('"')[1]
-            keystroke_index = next(
-                index for index, line in enumerate(lines) if "keystroke" in line
-            )
+            keystroke_index = next(index for index, line in enumerate(lines) if "keystroke" in line)
             assert lines.index(seed) < keystroke_index
             return cli._ScriptResult(0, "", "")
         # A copy attempt whose cmd+c silently did nothing: the clipboard
         # still holds the seeded sentinel.
         return cli._ScriptResult(0, captured["seeded"] + "\n", "")
 
-    monkeypatch.setattr(cli, "harness_blocker", lambda harness=None: None)
+    monkeypatch.setattr(cli, "harness_blocker", lambda: None)
     monkeypatch.setattr(cli, "_osascript", fake_osascript)
     run_task = AsyncMock()
     monkeypatch.setattr(cli, "run_task", run_task)
@@ -1648,14 +2276,10 @@ def test_shell_command_preview_collapses_caps_and_ignores_non_shell():
         {"name": "bash", "arguments": json.dumps({"command": "echo hi\n  ls  -la"})}
     )
     assert preview == "echo hi ls -la"
-    long = runner_module.shell_command_preview(
-        {"name": "shell_command", "arguments": {"command": "x" * 400}}
-    )
+    long = runner_module.shell_command_preview({"name": "shell_command", "arguments": {"command": "x" * 400}})
     assert long is not None and len(long) == 301 and long.endswith("…")
     assert (
-        runner_module.shell_command_preview(
-            {"name": "left_click", "arguments": {"command": "not a shell tool"}}
-        )
+        runner_module.shell_command_preview({"name": "left_click", "arguments": {"command": "not a shell tool"}})
         is None
     )
     assert runner_module.shell_command_preview({"name": "bash", "arguments": "{bad"}) is None
@@ -1664,9 +2288,7 @@ def test_shell_command_preview_collapses_caps_and_ignores_non_shell():
 async def test_action_event_carries_the_shell_command():
     stream = _CollectStream()
     reporter = runner_module.ActionReporter(Emitter(stream), run_start=0.0)
-    await reporter.on_computer_call_start(
-        {"name": "bash", "arguments": json.dumps({"command": "uname -a"})}
-    )
+    await reporter.on_computer_call_start({"name": "bash", "arguments": json.dumps({"command": "uname -a"})})
     await reporter.on_computer_call_end(
         {"name": "bash", "arguments": json.dumps({"command": "uname -a"})},
         [{"output": "Darwin"}],

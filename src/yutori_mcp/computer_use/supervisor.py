@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import json
 import logging
 import os
 import signal
+import subprocess
 import sys
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
-from .constants import HARNESS_NODE, MODEL, PROTOCOL_VERSION, resolve_harness
+from .constants import MODEL, PROTOCOL_VERSION
 from .lock import ComputerUseBusyError, DesktopLock
-from .preflight import child_search_path, find_cua_driver, find_node
+from .preflight import child_search_path, find_cua_driver
 from .result import failure
-from .runtime import load_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +29,38 @@ logger = logging.getLogger(__name__)
 EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 EVENT_CALLBACK_TIMEOUT_SECONDS = 5.0
+EMPTY_SESSION_CONFIRMATION_SECONDS = 0.1
+ProcessIdentity = int | tuple[int, int]
 
 
-async def _notify(
-    on_event: EventCallback | None, event: dict[str, Any]
-) -> EventCallback | None:
+class _MacBSDInfo(ctypes.Structure):
+    _fields_ = [
+        ("flags", ctypes.c_uint32),
+        ("status", ctypes.c_uint32),
+        ("xstatus", ctypes.c_uint32),
+        ("pid", ctypes.c_uint32),
+        ("ppid", ctypes.c_uint32),
+        ("uid", ctypes.c_uint32),
+        ("gid", ctypes.c_uint32),
+        ("ruid", ctypes.c_uint32),
+        ("rgid", ctypes.c_uint32),
+        ("svuid", ctypes.c_uint32),
+        ("svgid", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32),
+        ("command", ctypes.c_char * 16),
+        ("name", ctypes.c_char * 32),
+        ("nfiles", ctypes.c_uint32),
+        ("pgid", ctypes.c_uint32),
+        ("pjobc", ctypes.c_uint32),
+        ("tty_device", ctypes.c_uint32),
+        ("tty_pgid", ctypes.c_uint32),
+        ("nice", ctypes.c_int32),
+        ("start_seconds", ctypes.c_uint64),
+        ("start_microseconds", ctypes.c_uint64),
+    ]
+
+
+async def _notify(on_event: EventCallback | None, event: dict[str, Any]) -> EventCallback | None:
     """Invoke the callback and return it, or None once it must stay disabled."""
     if on_event is None:
         return None
@@ -38,8 +68,7 @@ async def _notify(
         await asyncio.wait_for(on_event(event), EVENT_CALLBACK_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
         logger.warning(
-            "Computer-use event callback timed out after %.0fs; "
-            "disabling notifications for the rest of the run",
+            "Computer-use event callback timed out after %.0fs; disabling notifications for the rest of the run",
             EVENT_CALLBACK_TIMEOUT_SECONDS,
         )
         return None
@@ -49,9 +78,8 @@ async def _notify(
 
 
 def _child_environment(api_key: str) -> dict[str, str]:
-    # PATH is not optional here even though the env is otherwise built from scratch: the Node
-    # runner execs `cua-driver` by bare name and its observation encoder execs `sips`, and
-    # shell commands the model runs resolve their tools from it in both harnesses.
+    # PATH is not optional even though the env is otherwise built from scratch:
+    # shell commands the model runs resolve their tools from it.
     env = {
         "YUTORI_API_KEY": api_key,
         "PATH": child_search_path(),
@@ -62,29 +90,167 @@ def _child_environment(api_key: str) -> dict[str, str]:
     return env
 
 
-async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
-    if process.returncode is not None:
-        return
+def _process_identity(pid: int) -> ProcessIdentity | None:
+    if sys.platform == "darwin":
+        libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+        info = _MacBSDInfo()
+        size = libproc.proc_pidinfo(pid, 3, 0, ctypes.byref(info), ctypes.sizeof(info))
+        if size != ctypes.sizeof(info) or info.uid != os.getuid():
+            return None
+        return info.start_seconds, info.start_microseconds
     try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        _prefix, separator, fields = stat.partition(") ")
+        if not separator:
+            return None
+        return int(fields.split()[19])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _runner_session_pids(session_id: int) -> list[int] | None:
     try:
-        await asyncio.wait_for(process.wait(), 2)
-    except TimeoutError:
+        output = subprocess.run(
+            ["/bin/ps", "-axo", "pid=,sess="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    pids: list[int] = []
+    for line in output.splitlines():
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            pid, process_session = (int(part) for part in line.split())
+        except (TypeError, ValueError):
+            continue
+        if process_session == session_id:
+            pids.append(pid)
+    return pids
+
+
+def _kernel_runner_session_pids(session_id: int) -> list[int] | None:
+    if sys.platform == "darwin":
+        libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+        capacity = libproc.proc_listallpids(None, 0)
+        if capacity <= 0:
+            return None
+        buffer = (ctypes.c_int * capacity)()
+        count = libproc.proc_listallpids(buffer, ctypes.sizeof(buffer))
+        if count <= 0:
+            return None
+        candidates = [pid for pid in buffer[:count] if pid > 0]
+    else:
+        try:
+            candidates = [int(path.name) for path in Path("/proc").iterdir() if path.name.isdigit()]
+        except OSError:
+            return None
+    members: list[int] = []
+    for pid in candidates:
+        try:
+            if os.getsid(pid) == session_id:
+                members.append(pid)
+        except (ProcessLookupError, PermissionError):
+            continue
+    return members
+
+
+def _owned_runner_session_pids(
+    session_id: int, session_identity: ProcessIdentity | None = None
+) -> list[int] | None:
+    leader_identity = _process_identity(session_id)
+    if session_identity is not None and leader_identity is not None and leader_identity != session_identity:
+        return []
+    if sys.platform == "darwin":
+        pids = _kernel_runner_session_pids(session_id)
+        if pids is None:
+            pids = _runner_session_pids(session_id)
+    else:
+        pids = _runner_session_pids(session_id)
+        if pids is None:
+            pids = _kernel_runner_session_pids(session_id)
+    leader_identity = _process_identity(session_id)
+    if session_identity is not None and leader_identity is not None and leader_identity != session_identity:
+        return []
+    return pids
+
+
+def _signal_runner_session(
+    session_id: int,
+    sent_signal: signal.Signals,
+    session_identity: ProcessIdentity | None = None,
+) -> bool:
+    """Signal every process still contained in the runner's private session."""
+    pids = _owned_runner_session_pids(session_id, session_identity)
+    if pids is None:
+        return False
+    leader_identity = _process_identity(session_id)
+    if session_identity is not None and leader_identity is not None and leader_identity != session_identity:
+        return True
+    for pid in pids:
+        try:
+            if os.getsid(pid) != session_id:
+                continue
         except ProcessLookupError:
+            continue
+        try:
+            os.kill(pid, sent_signal)
+        except (ProcessLookupError, PermissionError):
             pass
+    return True
+
+
+async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
+    """Terminate the runner session, escalating even after its leader exits."""
+    session_identity = getattr(process, "_yutori_session_identity", None)
+    if session_identity is None:
+        session_identity = _process_identity(process.pid)
+    enumerated = _signal_runner_session(process.pid, signal.SIGTERM, session_identity)
+    if not enumerated and process.returncode is None:
+        with suppress(ProcessLookupError):
+            process.terminate()
+    if await _wait_for_empty_session(process.pid, session_identity, timeout=2):
+        if process.returncode is None:
+            await process.wait()
+        return
+    enumerated = _signal_runner_session(process.pid, signal.SIGKILL, session_identity)
+    if not enumerated and process.returncode is None:
+        with suppress(ProcessLookupError):
+            process.kill()
+    if process.returncode is None:
         await process.wait()
+    if not await _wait_for_empty_session(process.pid, session_identity, timeout=2, kill=True):
+        raise RuntimeError("Could not verify that the process session stopped.")
+
+
+async def _wait_for_empty_session(
+    session_id: int,
+    session_identity: ProcessIdentity | None,
+    *,
+    timeout: float,
+    kill: bool = False,
+) -> bool:
+    deadline = time.monotonic() + timeout
+    empty_since: float | None = None
+    while time.monotonic() < deadline:
+        members = _owned_runner_session_pids(session_id, session_identity)
+        if members == []:
+            empty_since = empty_since or time.monotonic()
+            if time.monotonic() - empty_since >= EMPTY_SESSION_CONFIRMATION_SECONDS:
+                return True
+        else:
+            empty_since = None
+        if kill and members:
+            _signal_runner_session(session_id, signal.SIGKILL, session_identity)
+        await asyncio.sleep(0.02)
+    return False
 
 
 async def _drain_stderr(stream: asyncio.StreamReader, secret: str) -> list[str]:
     diagnostics: list[str] = []
     while line := await stream.readline():
-        diagnostics.append(
-            line.decode(errors="replace").replace(secret, "[REDACTED]").rstrip()
-        )
+        diagnostics.append(line.decode(errors="replace").replace(secret, "[REDACTED]").rstrip())
     return diagnostics[-20:]
 
 
@@ -109,6 +275,13 @@ async def _supervise(
         # runner on import.
         cwd=os.path.expanduser("~"),
     )
+    session_identity = getattr(process, "_yutori_session_identity", None) or _process_identity(process.pid)
+    if session_identity is None:
+        with suppress(ProcessLookupError):
+            process.terminate()
+        await process.wait()
+        return failure("Could not establish the computer-use runner process identity.")
+    setattr(process, "_yutori_session_identity", session_identity)
     assert process.stdin and process.stdout and process.stderr
     stderr_task = asyncio.create_task(_drain_stderr(process.stderr, api_key))
     actions: list[dict[str, Any]] = []
@@ -126,13 +299,9 @@ async def _supervise(
             if not line:
                 break
             try:
-                event = json.loads(
-                    line.decode(errors="replace").replace(api_key, "[REDACTED]")
-                )
+                event = json.loads(line.decode(errors="replace").replace(api_key, "[REDACTED]"))
             except (json.JSONDecodeError, UnicodeDecodeError):
-                return failure(
-                    "Computer-use runner emitted invalid JSON.", actions=actions
-                )
+                return failure("Computer-use runner emitted invalid JSON.", actions=actions)
             event_type = event.get("type")
             if event_type == "action":
                 actions.append(event)
@@ -151,9 +320,7 @@ async def _supervise(
         if terminal is None:
             diagnostics = await stderr_task
             suffix = f" Diagnostics: {'; '.join(diagnostics)}" if diagnostics else ""
-            return failure(
-                f"Computer-use runner exited without a result.{suffix}", actions=actions
-            )
+            return failure(f"Computer-use runner exited without a result.{suffix}", actions=actions)
         if terminal["type"] == "error":
             return failure(
                 f"{terminal.get('code', 'RUNNER_ERROR')}: {terminal.get('message', 'Runner error')}",
@@ -161,8 +328,19 @@ async def _supervise(
             )
         terminal.setdefault("actions", actions)
         return terminal
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
+        timeout_observed_at = time.monotonic()
         await _stop_process_group(process)
+        # Python 3.10's wait_for can translate cancellation of its inner read
+        # into TimeoutError. Capture time before cleanup for that version;
+        # newer Tasks also expose the cancellation count directly.
+        current_task = asyncio.current_task()
+        cancelling = getattr(current_task, "cancelling", None)
+        if timeout_observed_at < deadline or (cancelling is not None and cancelling()):
+            return failure(
+                "Computer-use task was cancelled; the runner process group was terminated.",
+                actions=actions,
+            )
         return {
             "outcome": "limit",
             "delivery_mode": "foreground",
@@ -176,8 +354,7 @@ async def _supervise(
             actions=actions,
         )
     finally:
-        if process.returncode is None:
-            await _stop_process_group(process)
+        await _stop_process_group(process)
         if not stderr_task.done():
             stderr_task.cancel()
         await asyncio.gather(stderr_task, return_exceptions=True)
@@ -186,9 +363,9 @@ async def _supervise(
 def python_runner_command() -> list[str]:
     """The Python runner child's argv: this interpreter, running the runner module.
 
-    The runner lives in this package and imports the pinned `cua-agent`
-    harness from the same environment, so the interpreter serving the MCP
-    process is exactly the one that can run it. `-I` (isolated mode) keeps the
+    The runner lives in this package and imports the pinned SDK loop from the
+    same environment, so the interpreter serving the MCP process is exactly
+    the one that can run it. `-I` (isolated mode) keeps the
     child's sys.path free of the working directory, PYTHONPATH, and user
     site-packages, so no ambient directory can shadow the installed packages;
     the venv's own site-packages still resolve.
@@ -205,14 +382,12 @@ async def run_task(
     max_steps: int,
     api_key: str,
     api_base_url: str,
-    harness: str | None = None,
     lock: DesktopLock | None = None,
     on_event: EventCallback | None = None,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + minutes * 60
     deadline_ms = int((time.time() + minutes * 60) * 1000)
     try:
-        resolved_harness = resolve_harness(harness)
         with lock or DesktopLock():
             request = {
                 "protocol_version": PROTOCOL_VERSION,
@@ -225,29 +400,9 @@ async def run_task(
                 "model": MODEL,
                 "api_base_url": api_base_url,
             }
-            # Both runners speak protocol v1; the Python runner additionally
-            # requires the resolved driver path, which the Node runner instead
-            # finds on PATH by bare name.
-            if resolved_harness == HARNESS_NODE:
-                node = find_node()
-                if node is None:  # Kept defensive; preflight already checked it.
-                    return failure(
-                        "Node 22 not found. Install Node 22 with: brew install node@22"
-                    )
-                runtime = load_runtime()
-                with runtime.runner_path() as path:
-                    return await _supervise(
-                        command=[str(node), str(path)],
-                        request=request,
-                        api_key=api_key,
-                        deadline=deadline,
-                        on_event=on_event,
-                    )
             driver = find_cua_driver()
             if driver is None:  # Kept defensive; preflight already checked it.
-                return failure(
-                    "cua-driver not found. Run: yutori-mcp computer-use setup"
-                )
+                return failure("cua-driver not found. Run: yutori-mcp computer-use setup")
             request["driver_path"] = str(driver)
             return await _supervise(
                 command=python_runner_command(),

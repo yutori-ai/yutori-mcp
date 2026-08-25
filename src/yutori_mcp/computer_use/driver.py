@@ -1,7 +1,7 @@
 """cua-driver transport and the desktop handler the agent loop drives.
 
 The transport is `cua-driver call <tool> <json> --raw`, one subprocess per
-call — the contract the previous Node runner measured against driver 0.19.x.
+call, pinned to the verified driver 0.19.x contract.
 The handler exposes the `AsyncComputerHandler` surface the pinned `cua-agent`
 loop dispatches to, plus the optional shell capability of the hybrid tool
 sets, executed headless on the host with captured output.
@@ -14,7 +14,7 @@ import base64
 import json
 import os
 import re
-import signal
+import sys
 import time
 import uuid
 from contextlib import suppress
@@ -26,11 +26,13 @@ CAPTURE_ATTEMPTS = 3
 CAPTURE_RETRY_DELAY_SECONDS = 0.25
 # macOS reports an action before the surface repaints, so a capture taken
 # immediately after would show the pre-action screen.
-SETTLE_AFTER_ACTION_SECONDS = 0.3
+SETTLE_AFTER_ACTION_SECONDS = 1.0
 # launch_app deliberately does not foreground; without this pause the model is
 # told the app is open while the first observation still shows whatever was in
 # front, and it burns its budget hunting other windows.
 FRONTING_SETTLE_SECONDS = 0.8
+SCROLL_LINES_PER_MODEL_UNIT = 3
+DRIVER_SCROLL_MAX_AMOUNT = 50
 
 # Shell result presentation shared with the n2 playground executor: the wire
 # contract bounds one shell result at 8,000 characters, and the cua adapter
@@ -75,6 +77,7 @@ _PUNCTUATION_MAP = {
 }
 
 TYPE_CHUNK_MAX_CHARS = 500
+_SHELL_PROXY_PATH = Path(__file__).with_name("shell_proxy.py")
 
 
 class DriverError(RuntimeError):
@@ -119,11 +122,7 @@ def _payload_ok(tool: str, payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise DriverError(f"cua-driver {tool} returned a non-object payload")
     refusal = payload.get("refusal")
-    if (
-        payload.get("status") == "refused"
-        or payload.get("effect") == "refused"
-        or isinstance(refusal, dict)
-    ):
+    if payload.get("status") == "refused" or payload.get("effect") == "refused" or isinstance(refusal, dict):
         detail = ""
         if isinstance(refusal, dict):
             detail = str(refusal.get("code") or refusal.get("reason") or "")
@@ -133,9 +132,11 @@ def _payload_ok(tool: str, payload: Any) -> dict[str, Any]:
     # call having taken effect.
     code = payload.get("code")
     if isinstance(code, str) and code:
-        accepted = payload.get("request_accepted") is True and payload.get(
-            "status"
-        ) != "partial" and payload.get("activated") is not False
+        accepted = (
+            payload.get("request_accepted") is True
+            and payload.get("status") != "partial"
+            and payload.get("activated") is not False
+        )
         if payload.get("activated") is not True and not accepted:
             raise DriverError(f"cua-driver {tool} failed: {code}")
     return payload
@@ -164,16 +165,12 @@ class DriverCLI:
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(), CLI_TIMEOUT_SECONDS
-            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(), CLI_TIMEOUT_SECONDS)
         except (TimeoutError, asyncio.TimeoutError):
             with suppress(ProcessLookupError):
                 process.kill()
             await process.wait()
-            raise DriverError(
-                f"cua-driver {tool} timed out after {CLI_TIMEOUT_SECONDS:g} seconds"
-            ) from None
+            raise DriverError(f"cua-driver {tool} timed out after {CLI_TIMEOUT_SECONDS:g} seconds") from None
         if process.returncode != 0:
             diagnostic = (
                 stderr.decode(errors="replace").strip()
@@ -187,9 +184,7 @@ class DriverCLI:
             raise DriverError(f"cua-driver {tool} returned invalid JSON") from error
         return _payload_ok(tool, payload)
 
-    async def capture(
-        self, tool: str, args: dict[str, Any]
-    ) -> tuple[dict[str, Any], bytes]:
+    async def capture(self, tool: str, args: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
         """A screenshot-bearing call: payload plus the image bytes.
 
         Retries when the driver answers without a pixel frame (mid-repaint it
@@ -202,22 +197,16 @@ class DriverCLI:
                 await asyncio.sleep(CAPTURE_RETRY_DELAY_SECONDS)
             out_file = self.capture_dir / f"{uuid.uuid4()}.png"
             try:
-                payload = await self.call(
-                    tool, {**args, "screenshot_out_file": str(out_file)}
-                )
+                payload = await self.call(tool, {**args, "screenshot_out_file": str(out_file)})
                 if not isinstance(payload.get("screenshot_width"), int) or not isinstance(
                     payload.get("screenshot_height"), int
                 ):
-                    last_error = DriverError(
-                        f"cua-driver {tool} returned no usable pixel frame"
-                    )
+                    last_error = DriverError(f"cua-driver {tool} returned no usable pixel frame")
                     continue
                 try:
                     image = out_file.read_bytes()
                 except OSError as error:
-                    raise DriverError(
-                        f"cua-driver {tool} wrote no screenshot file"
-                    ) from error
+                    raise DriverError(f"cua-driver {tool} wrote no screenshot file") from error
                 if not image:
                     last_error = DriverError(f"cua-driver {tool} wrote an empty image")
                     continue
@@ -237,17 +226,13 @@ def _parse_windows(payload: dict[str, Any]) -> list[dict[str, Any]]:
         bounds = window.get("bounds")
         if window.get("window_id") is None or not isinstance(bounds, dict):
             continue
-        if not isinstance(bounds.get("width"), (int, float)) or not isinstance(
-            bounds.get("height"), (int, float)
-        ):
+        if not isinstance(bounds.get("width"), (int, float)) or not isinstance(bounds.get("height"), (int, float)):
             continue
         windows.append(window)
     return windows
 
 
-def pick_best_window(
-    windows: list[dict[str, Any]], min_edge_points: float = 100
-) -> dict[str, Any] | None:
+def pick_best_window(windows: list[dict[str, Any]], min_edge_points: float = 100) -> dict[str, Any] | None:
     """Prefer an on-screen, current-space window with usable edges.
 
     The edge heuristic excludes helper surfaces such as Calculator's wide,
@@ -260,8 +245,7 @@ def pick_best_window(
         for window in windows
         if window.get("is_on_screen") is not False
         and window.get("on_current_space") is not False
-        and min(window["bounds"]["width"], window["bounds"]["height"])
-        >= min_edge_points
+        and min(window["bounds"]["width"], window["bounds"]["height"]) >= min_edge_points
     ]
     if visible:
         return max(visible, key=lambda window: window.get("z_index") or 0)
@@ -271,9 +255,18 @@ def pick_best_window(
     )
 
 
-async def prepare_app(
-    cli: DriverCLI, app: str, start_url: str | None
-) -> dict[str, Any]:
+def _find_running_app(payload: dict[str, Any], requested: str) -> dict[str, Any] | None:
+    requested = requested.casefold()
+    for app in payload.get("apps") or []:
+        if not isinstance(app, dict) or not isinstance(app.get("pid"), int) or app["pid"] <= 0:
+            continue
+        identities = (app.get("name"), app.get("bundle_id"))
+        if any(isinstance(value, str) and value.casefold() == requested for value in identities):
+            return app
+    return None
+
+
+async def prepare_app(cli: DriverCLI, app: str, start_url: str | None) -> dict[str, Any]:
     """Launch and front the requested app before the driver session starts.
 
     Runs before start_session on purpose: launch_app and bring_to_front carry
@@ -289,16 +282,34 @@ async def prepare_app(
     launch_args: dict[str, Any] = {}
     if start_url:
         launch_args["urls"] = [start_url]
-    if _BUNDLE_ID_PATTERN.match(app):
-        try:
-            payload = await cli.call("launch_app", {"bundle_id": app, **launch_args})
-        except DriverError:
+    launch_error: DriverError | None = None
+    try:
+        if _BUNDLE_ID_PATTERN.match(app):
+            try:
+                payload = await cli.call("launch_app", {"bundle_id": app, **launch_args})
+            except DriverRefusal:
+                raise
+            except DriverError:
+                payload = await cli.call("launch_app", {"name": app, **launch_args})
+        else:
             payload = await cli.call("launch_app", {"name": app, **launch_args})
-    else:
-        payload = await cli.call("launch_app", {"name": app, **launch_args})
+    except DriverRefusal:
+        raise
+    except DriverError as error:
+        launch_error = error
+        payload = {}
     pid = payload.get("pid")
     if not isinstance(pid, int):
-        raise DriverError(f"launch_app returned no pid for {app!r}")
+        # Persistent system apps such as Finder are present in list_apps but
+        # have no launch path, so launch_app reports APP_NOT_INSTALLED even
+        # while their process is healthy and can be foregrounded by pid.
+        running = _find_running_app(await cli.call("list_apps", {}), app)
+        if running is None:
+            if launch_error is not None:
+                raise launch_error
+            raise DriverError(f"launch_app returned no pid for {app!r}")
+        payload = running
+        pid = running["pid"]
     name = str(payload.get("name") or app)
     window = pick_best_window(_parse_windows(payload))
     try:
@@ -337,9 +348,7 @@ def bash_cwd_wrapper(command: str, sentinel: str) -> str:
     wrapper prints the final ``$PWD`` on a sentinel line and re-raises the
     command's own exit code as the shell's.
     """
-    return (
-        f"{command}\n__yutori_rc=$?\nprintf '\\n{sentinel}%s' \"$PWD\"\nexit $__yutori_rc\n"
-    )
+    return f"{command}\n__yutori_rc=$?\nprintf '\\n{sentinel}%s' \"$PWD\"\nexit $__yutori_rc\n"
 
 
 def split_bash_cwd(text: str, sentinel: str) -> tuple[str, str | None]:
@@ -349,11 +358,18 @@ def split_bash_cwd(text: str, sentinel: str) -> tuple[str, str | None]:
     return output, reported or None
 
 
-def _kill_shell_process_group(process: asyncio.subprocess.Process) -> None:
-    with suppress(ProcessLookupError, PermissionError):
-        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-    with suppress(ProcessLookupError):
-        process.kill()
+async def _stop_shell_proxy(process: asyncio.subprocess.Process) -> None:
+    """Ask the proxy to drain its private Bash session before it exits."""
+    if process.returncode is None:
+        with suppress(ProcessLookupError):
+            process.terminate()
+    try:
+        await asyncio.wait_for(asyncio.shield(process.wait()), timeout=3)
+    except (TimeoutError, asyncio.TimeoutError):
+        with suppress(ProcessLookupError):
+            process.kill()
+        await process.wait()
+        raise RuntimeError("Could not verify that the Bash process session stopped.") from None
 
 
 class DesktopTimings:
@@ -376,9 +392,8 @@ class CuaDriverDesktop:
     """Full-display, native-pixel macOS handler backed by cua-driver.
 
     GUI actions go through the driver at desktop scope. The optional shell
-    capabilities execute directly on the host through the system shell with
-    captured output — unlike the previous Node runner, which typed commands
-    into a visible Terminal window and never saw their output.
+    capabilities execute directly on the host through bash with captured
+    output.
     """
 
     def __init__(self, cli: DriverCLI, *, session: str | None = None):
@@ -395,20 +410,24 @@ class CuaDriverDesktop:
         self._background_tasks: dict[str, asyncio.subprocess.Process] = {}
 
     async def __aenter__(self) -> CuaDriverDesktop:
-        await self.cli.call(
-            "start_session", {"session": self.session, "capture_scope": "desktop"}
-        )
+        await self.cli.call("start_session", {"session": self.session, "capture_scope": "desktop"})
         return self
 
     async def __aexit__(self, exc_type, _exc, _traceback) -> None:
-        self._terminate_background_tasks()
+        cleanup_error: BaseException | None = None
+        try:
+            await self._terminate_background_tasks()
+        except BaseException as error:
+            cleanup_error = error
         try:
             await self.cli.call("end_session", {"session": self.session})
         except DriverError:
             # When a run error is already unwinding, secondary session-teardown
             # noise must not replace it; on a clean exit it still surfaces.
-            if exc_type is None:
+            if exc_type is None and cleanup_error is None:
                 raise
+        if cleanup_error is not None and exc_type is None:
+            raise cleanup_error
 
     def _routed(self, **arguments: Any) -> dict[str, Any]:
         return {
@@ -440,20 +459,36 @@ class CuaDriverDesktop:
     async def screenshot(self, text: str | None = None) -> str:
         del text
         start = time.monotonic()
-        payload, image = await self.cli.capture(
-            "get_desktop_state", {"session": self.session}
-        )
+        payload, image = await self.cli.capture("get_desktop_state", {"session": self.session})
         self._native_size = (payload["screenshot_width"], payload["screenshot_height"])
         encoded = base64.b64encode(image).decode()
         self.timings.capture_ms += int((time.monotonic() - start) * 1000)
         self.timings.captures += 1
         return encoded
 
-    async def click(self, x: int, y: int, button: str = "left") -> None:
-        await self._act("click", self._routed(x=x, y=y, count=1, button=button))
+    async def click(
+        self,
+        x: int,
+        y: int,
+        button: str = "left",
+        modifier: list[str] | None = None,
+    ) -> None:
+        arguments = self._routed(x=x, y=y, count=1, button=button)
+        if modifier:
+            arguments["modifier"] = [normalize_key(key) for key in modifier]
+        await self._act("click", arguments)
 
-    async def double_click(self, x: int, y: int) -> None:
-        await self._act("click", self._routed(x=x, y=y, count=2, button="left"))
+    async def double_click(self, x: int, y: int, modifier: list[str] | None = None) -> None:
+        arguments = self._routed(x=x, y=y, count=2, button="left")
+        if modifier:
+            arguments["modifier"] = [normalize_key(key) for key in modifier]
+        await self._act("click", arguments)
+
+    async def triple_click(self, x: int, y: int, modifier: list[str] | None = None) -> None:
+        arguments = self._routed(x=x, y=y, count=3, button="left")
+        if modifier:
+            arguments["modifier"] = [normalize_key(key) for key in modifier]
+        await self._act("click", arguments)
 
     async def scroll(self, x: int, y: int, scroll_x: int, scroll_y: int) -> None:
         if scroll_x == 0 and scroll_y == 0:
@@ -461,34 +496,42 @@ class CuaDriverDesktop:
         width, height = await self.get_dimensions()
         horizontal = abs(scroll_x) > abs(scroll_y)
         delta = scroll_x if horizontal else scroll_y
-        direction = (
-            ("right" if delta > 0 else "left")
-            if horizontal
-            else ("down" if delta > 0 else "up")
-        )
+        direction = ("right" if delta > 0 else "left") if horizontal else ("down" if delta > 0 else "up")
         dimension = width if horizontal else height
         # Recover the model's 1-50 amount from the loop's pixel conversion,
-        # then triple it: the previous runner sent amount * 3 lines, and the
-        # model's scroll feel is calibrated against that executor.
+        # then triple it: the trained macOS executor sends amount * 3 wheel
+        # notches. cua-driver caps each request at 50, so preserve the total
+        # across bounded requests and settle once for the model action.
         amount = max(1, min(50, round(abs(delta) / max(1, dimension * 0.1))))
-        await self._act(
-            "scroll",
-            self._routed(x=x, y=y, direction=direction, amount=amount * 3, by="line"),
-        )
+        remaining = amount * SCROLL_LINES_PER_MODEL_UNIT
+        dispatched = False
+        try:
+            while remaining:
+                chunk = min(remaining, DRIVER_SCROLL_MAX_AMOUNT)
+                await self.cli.call(
+                    "scroll",
+                    self._routed(x=x, y=y, direction=direction, amount=chunk, by="line"),
+                )
+                dispatched = True
+                remaining -= chunk
+        finally:
+            if dispatched:
+                await self._settle()
 
     async def type(self, text: str) -> None:
         for chunk in chunk_type_text(text):
             # delay_ms 0 because the CGEvent fallback otherwise waits 30ms/char.
-            await self.cli.call(
-                "type_text", self._routed(text=chunk, delay_ms=0)
-            )
+            await self.cli.call("type_text", self._routed(text=chunk, delay_ms=0))
         await self._settle()
 
     async def wait(self, ms: int = 1000) -> None:
         await asyncio.sleep(ms / 1000)
 
     async def move(self, x: int, y: int) -> None:
-        await self.cli.call("move_cursor", self._routed(x=x, y=y))
+        await self._act(
+            "move_cursor",
+            {"scope": "desktop", "session": self.session, "x": x, "y": y},
+        )
 
     async def keypress(self, keys: list[str] | str) -> None:
         sequence = [keys] if isinstance(keys, str) else list(keys)
@@ -504,9 +547,7 @@ class CuaDriverDesktop:
         start, end = path[0], path[-1]
         await self._act(
             "drag",
-            self._routed(
-                from_x=start["x"], from_y=start["y"], to_x=end["x"], to_y=end["y"]
-            ),
+            self._routed(from_x=start["x"], from_y=start["y"], to_x=end["x"], to_y=end["y"]),
         )
 
     async def get_current_url(self) -> str:
@@ -524,77 +565,67 @@ class CuaDriverDesktop:
 
     # --- Optional shell capabilities ---------------------------------------
 
-    async def run_shell_command(
-        self, command: str, cwd: str | None = None, timeout_seconds: int = 10
-    ) -> str:
+    async def run_shell_command(self, command: str, cwd: str | None = None, timeout_seconds: int = 10) -> str:
         """Execute one validated ``shell_command`` on the real host.
 
         The loop has already validated the arguments and clamped
-        ``timeout_seconds`` to [1, 30]. On timeout the whole process group is
-        killed and a TimeoutError raised, which the loop converts into a
+        ``timeout_seconds`` to [1, 30]. On timeout its command process tree is
+        killed and a TimeoutError is raised, which the loop converts into a
         recoverable ``[ERROR] shell_command failed: ...`` tool result.
         """
-        # start_new_session puts the shell in its own process group so a
-        # timeout can signal the entire tree — killing only the shell PID
-        # would leave pipeline children or background jobs running.
-        process = await asyncio.create_subprocess_shell(
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-I",
+            str(_SHELL_PROXY_PATH),
             command,
+            "foreground",
             cwd=cwd,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            start_new_session=True,
         )
         try:
-            stdout, _ = await asyncio.wait_for(
-                process.communicate(), timeout=timeout_seconds
-            )
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
         except (TimeoutError, asyncio.TimeoutError) as error:
-            _kill_shell_process_group(process)
-            await process.wait()
-            raise TimeoutError(
-                f"command was killed after exceeding its {timeout_seconds}-second timeout"
-            ) from error
+            await _stop_shell_proxy(process)
+            raise TimeoutError(f"command was killed after exceeding its {timeout_seconds}-second timeout") from error
         except BaseException:
-            # start_new_session detaches the shell from this process group, so
-            # cancellation no longer reaches the command on its own — kill the
-            # group before propagating, or the command outlives the run.
-            _kill_shell_process_group(process)
+            await _stop_shell_proxy(process)
             raise
         output = stdout.decode("utf-8", errors="replace") if stdout else ""
         return format_shell_result(output, int(process.returncode or 0))
 
-    async def run_bash_command(
-        self, command: str, timeout: float = 120.0, run_in_background: bool = False
-    ) -> str:
+    async def run_bash_command(self, command: str, timeout: float = 120.0, run_in_background: bool = False) -> str:
         """Execute one validated ``bash`` call on the real host.
 
         A different contract from ``shell_command``: the loop bounds ``timeout``
         to [0, 600], there is no per-call ``cwd`` because the working directory
-        persists across calls, and ``run_in_background`` detaches the command
-        and returns a handle. Unused by the pinned tool set, kept so moving to
-        a bash tool set is a one-constant change.
+        persists across calls, and ``run_in_background`` starts a task tracked
+        until run teardown.
         """
         if run_in_background:
             return await self._run_bash_in_background(command)
-        process = await asyncio.create_subprocess_shell(
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-I",
+            str(_SHELL_PROXY_PATH),
             bash_cwd_wrapper(command, _BASH_CWD_SENTINEL),
+            "foreground",
             cwd=self._bash_cwd,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            start_new_session=True,
         )
         try:
-            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            if timeout == 0:
+                stdout, _ = await process.communicate()
+            else:
+                stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
         except (TimeoutError, asyncio.TimeoutError) as error:
-            _kill_shell_process_group(process)
-            await process.wait()
-            raise TimeoutError(
-                f"command was killed after exceeding its {timeout:g}-second timeout"
-            ) from error
+            await _stop_shell_proxy(process)
+            raise TimeoutError(f"command was killed after exceeding its {timeout:g}-second timeout") from error
         except BaseException:
-            _kill_shell_process_group(process)
+            await _stop_shell_proxy(process)
             raise
         text = stdout.decode("utf-8", errors="replace") if stdout else ""
         output, reported_cwd = split_bash_cwd(text, _BASH_CWD_SENTINEL)
@@ -604,39 +635,53 @@ class CuaDriverDesktop:
 
     async def _run_bash_in_background(self, command: str) -> str:
         task_id = f"bash-{uuid.uuid4().hex[:8]}"
-        output_path = os.path.join(
-            os.environ.get("TMPDIR", "/tmp"), f"yutori-mcp-{task_id}.log"
-        )
+        output_path = os.path.join(os.environ.get("TMPDIR", "/tmp"), f"yutori-mcp-{task_id}.log")
         # Opened here rather than in the shell so a redirect failure surfaces
         # as a recoverable tool error instead of a silently empty log.
         log_file = open(output_path, "wb")
+        process: asyncio.subprocess.Process | None = None
         try:
-            process = await asyncio.create_subprocess_shell(
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-I",
+                str(_SHELL_PROXY_PATH),
                 command,
+                "background",
                 cwd=self._bash_cwd,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=asyncio.subprocess.STDOUT,
-                start_new_session=True,
             )
+        except BaseException:
+            if process is not None:
+                await _stop_shell_proxy(process)
+            raise
         finally:
             # The child holds its own dup of the descriptor.
             log_file.close()
+        assert process is not None
         self._background_tasks[task_id] = process
         return (
             f"Started background task {task_id} (pid {process.pid}).\n"
             f"Output file: {output_path}\n"
-            f"Cancel with: kill -- -{process.pid}"
+            "The task will be stopped automatically when this computer-use run ends."
         )
 
-    def _terminate_background_tasks(self) -> None:
+    async def _terminate_background_tasks(self) -> None:
         """Kill every still-running background task at teardown.
 
-        A detached command that survives the run would keep acting on the
+        A background command that survives the run would keep acting on the
         user's real machine after the tool reported done — the same failure
         the foreground timeout path already guards against.
         """
-        for process in self._background_tasks.values():
-            if process.returncode is None:
-                _kill_shell_process_group(process)
-        self._background_tasks.clear()
+        errors: list[BaseException] = []
+        try:
+            for process in reversed(self._background_tasks.values()):
+                try:
+                    await _stop_shell_proxy(process)
+                except BaseException as error:
+                    errors.append(error)
+        finally:
+            self._background_tasks.clear()
+        if errors:
+            raise errors[0]
