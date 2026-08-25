@@ -15,14 +15,47 @@ You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and 
 ### macOS computer-use preview
 
 This development-only preview is available only when the MCP server runs on macOS with
-`YUTORI_ENV=dev`. The runtime is Python-only and requires Python 3.10 or later. Setup installs
-CuaDriver, requests its macOS permissions, and prepares the optional native reasoning overlay:
+`YUTORI_ENV=dev` or `--env dev`. It exposes the `run_computer_use_task` tool for foreground
+desktop automation against the gated `n2-preview` model.
+
+The runtime is the Python CUA harness from the `yutori` SDK: `yutori-mcp` pins `yutori==0.9.2`
+and calls the SDK's `N2ComputerAgent` with `yutori.navigator.macos.MacOSComputer`. There is no
+TypeScript bundle, Node executable, or alternate harness. The pinned contract is:
+
+| Component | Value |
+|-----------|-------|
+| MCP package | `yutori-mcp==0.5.1` |
+| Model | `n2-preview` |
+| Tool set | `computer_use_tools-20260815` |
+| Desktop driver | `cua-driver==0.19.3` |
+| SDK runtime | `yutori[macos]==0.9.2` |
+
+Computer-use dependencies:
+
+| Dependency | Required for | Installed by |
+|------------|--------------|--------------|
+| macOS 15+ | Local desktop capture, input, and native overlay/recording path | You |
+| Python 3.10+ | `yutori-mcp` and the SDK-owned CUA harness | `uvx` can manage this |
+| `uv` / `uvx` | Running `yutori-mcp` without a manual virtualenv | You |
+| Dev API key with `n2-preview` access | Model calls from the local harness | `uvx yutori-mcp --env dev login` stores it |
+| `yutori==0.9.2` | `N2ComputerAgent` and `MacOSComputer` runtime | `yutori-mcp` dependency |
+| `cua-driver==0.19.3` and `CuaDriver.app` | Native screenshot capture and desktop actions | `uvx yutori-mcp computer-use setup` |
+| Screen Recording + Accessibility permissions | Letting CuaDriver see and operate the desktop | Requested by `computer-use setup` |
+| Xcode Command Line Tools | Optional reasoning overlay build | You; `doctor` reports if missing |
+
+First authenticate against the dev API, then install and verify the local Mac runtime:
 
 ```bash
+uvx yutori-mcp --env dev login
 uvx yutori-mcp computer-use setup
 uvx yutori-mcp computer-use doctor
 uvx yutori-mcp computer-use smoke
 ```
+
+`setup` downloads the pinned CuaDriver installer, checks its SHA-256, installs and starts
+`CuaDriver.app`, requests Screen Recording and Accessibility permissions, and prepares the
+optional native reasoning overlay. `doctor` verifies the pinned SDK wheel/provenance, the
+driver install, permissions, overlay cache, and dev endpoint access before a task can run.
 
 `computer-use run` executes one custom task from the terminal — the same run the MCP tool
 performs, with per-action progress printed as it happens:
@@ -34,6 +67,19 @@ uvx yutori-mcp computer-use run "In Calculator, compute 17 * 23 and report the r
 The `run_computer_use_task` tool controls the visible foreground desktop. Do not touch the
 Mac while it runs. Visible desktop content is sent to Yutori's dev model endpoint. Only one
 task can control a Mac at a time.
+
+To expose the MCP tool to a client, run the server against dev:
+
+```json
+{
+  "mcpServers": {
+    "yutori-dev": {
+      "command": "uvx",
+      "args": ["yutori-mcp", "--env", "dev"]
+    }
+  }
+}
+```
 
 **Workflow skills** (for clients that support slash commands):
 - [`/yutori-scout`](skills/01-scout/SKILL.md) — Set up continuous web monitoring
@@ -440,7 +486,7 @@ That writes an `environments.dev` entry alongside the existing top-level `api_ke
 machine can hold both without either shadowing the other. `YUTORI_API_KEY` still takes
 precedence over both when set.
 
-## Computer-use preview: runtime dependency
+## Computer-use preview: SDK harness and runtime dependency
 
 The SDK-owned `yutori.navigator.N2ComputerAgent` and `MacOSComputer` provide the complete
 runtime. The MCP package pins SDK 0.9.2 and verifies the installed files against the immutable
