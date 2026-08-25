@@ -28,6 +28,7 @@ from yutori_mcp.computer_use.driver import (
     _SHELL_PROXY_PATH,
     _find_running_app,
     _payload_ok,
+    _stop_shell_proxy,
     chunk_type_text,
     format_shell_result,
     normalize_key,
@@ -455,6 +456,47 @@ async def test_cancellation_returns_structured_result_and_stops_group():
     assert result["outcome"] == "failed"
     assert "cancelled" in result["final_text"]
     stopped.assert_awaited()
+
+
+async def test_expired_deadline_returns_a_structured_limit_on_python_310():
+    process = _Process(asyncio.StreamReader(), _stream(""))
+    create = AsyncMock(return_value=process)
+
+    async def stop(_process):
+        process.returncode = -signal.SIGTERM
+
+    with (
+        patch("asyncio.create_subprocess_exec", create),
+        patch("yutori_mcp.computer_use.supervisor._stop_process_group", side_effect=stop),
+    ):
+        result = await _supervise(
+            command=["/python", "-m", "yutori_mcp.computer_use.runner"],
+            request={"type": "run"},
+            api_key="secret",
+            deadline=time.monotonic() - 1,
+        )
+    assert result["outcome"] == "limit"
+    assert result["final_text"] == "The absolute deadline expired."
+
+
+async def test_wait_for_timeout_returns_a_structured_limit_on_python_310():
+    process = _Process(asyncio.StreamReader(), _stream(""))
+    create = AsyncMock(return_value=process)
+
+    async def stop(_process):
+        process.returncode = -signal.SIGTERM
+
+    with (
+        patch("asyncio.create_subprocess_exec", create),
+        patch("yutori_mcp.computer_use.supervisor._stop_process_group", side_effect=stop),
+    ):
+        result = await _supervise(
+            command=["/python", "-m", "yutori_mcp.computer_use.runner"],
+            request={"type": "run"},
+            api_key="secret",
+            deadline=time.monotonic() + 0.01,
+        )
+    assert result["outcome"] == "limit"
 
 
 @pytest.mark.parametrize("command", ["setup", "doctor", "smoke"])
@@ -1335,6 +1377,30 @@ async def test_prepare_app_falls_back_to_an_already_running_system_app():
     ]
 
 
+async def test_prepare_app_falls_back_when_launching_a_running_system_app_raises():
+    cli = _FakeCLI(
+        {
+            "launch_app": DriverError("APP_NOT_INSTALLED"),
+            "list_apps": {"apps": [{"name": "Finder", "pid": 42}]},
+            "bring_to_front": {},
+        }
+    )
+    with patch("yutori_mcp.computer_use.driver.asyncio.sleep", AsyncMock()):
+        target = await prepare_app(cli, "Finder", None)
+    assert target == {"name": "Finder", "pid": 42}
+
+
+async def test_prepare_app_preserves_launch_error_when_no_running_app_matches():
+    cli = _FakeCLI(
+        {
+            "launch_app": DriverError("launch failed"),
+            "list_apps": {"apps": []},
+        }
+    )
+    with pytest.raises(DriverError, match="launch failed"):
+        await prepare_app(cli, "Missing", None)
+
+
 async def test_desktop_screenshot_returns_base64_and_caches_native_size():
     cli = _FakeCLI()
     desktop = CuaDriverDesktop(cli, session="s1")
@@ -1604,6 +1670,23 @@ async def test_run_bash_command_uses_bash_not_bin_sh():
 async def test_run_bash_timeout_zero_disables_the_per_command_timer():
     desktop = CuaDriverDesktop(_FakeCLI(), session="s1")
     assert await desktop.run_bash_command("printf ok", timeout=0) == "ok"
+
+
+async def test_stop_shell_proxy_catches_asyncio_timeout_on_python_310():
+    process = SimpleNamespace(
+        returncode=None,
+        terminate=Mock(),
+        kill=Mock(),
+        wait=AsyncMock(return_value=0),
+    )
+    with (
+        patch.object(asyncio, "wait_for", AsyncMock(side_effect=asyncio.TimeoutError)),
+        pytest.raises(RuntimeError, match="Could not verify"),
+    ):
+        await _stop_shell_proxy(process)
+    process.terminate.assert_called_once_with()
+    process.kill.assert_called_once_with()
+    assert process.wait.await_count == 1
 
 
 async def test_sdk_bash_timeout_zero_executes_through_the_real_handler():

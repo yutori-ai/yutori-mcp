@@ -328,14 +328,15 @@ async def _supervise(
             )
         terminal.setdefault("actions", actions)
         return terminal
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
+        timeout_observed_at = time.monotonic()
         await _stop_process_group(process)
-        # Python 3.10's asyncio.wait_for can translate cancellation of its
-        # inner read into TimeoutError. The task's cancellation count preserves
-        # the caller's intent, so keep the cancellation outcome stable across
-        # the package's full Python support range.
+        # Python 3.10's wait_for can translate cancellation of its inner read
+        # into TimeoutError. Capture time before cleanup for that version;
+        # newer Tasks also expose the cancellation count directly.
         current_task = asyncio.current_task()
-        if current_task is not None and current_task.cancelling():
+        cancelling = getattr(current_task, "cancelling", None)
+        if timeout_observed_at < deadline or (cancelling is not None and cancelling()):
             return failure(
                 "Computer-use task was cancelled; the runner process group was terminated.",
                 actions=actions,

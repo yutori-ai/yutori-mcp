@@ -282,13 +282,18 @@ async def prepare_app(cli: DriverCLI, app: str, start_url: str | None) -> dict[s
     launch_args: dict[str, Any] = {}
     if start_url:
         launch_args["urls"] = [start_url]
-    if _BUNDLE_ID_PATTERN.match(app):
-        try:
-            payload = await cli.call("launch_app", {"bundle_id": app, **launch_args})
-        except DriverError:
+    launch_error: DriverError | None = None
+    try:
+        if _BUNDLE_ID_PATTERN.match(app):
+            try:
+                payload = await cli.call("launch_app", {"bundle_id": app, **launch_args})
+            except DriverError:
+                payload = await cli.call("launch_app", {"name": app, **launch_args})
+        else:
             payload = await cli.call("launch_app", {"name": app, **launch_args})
-    else:
-        payload = await cli.call("launch_app", {"name": app, **launch_args})
+    except DriverError as error:
+        launch_error = error
+        payload = {}
     pid = payload.get("pid")
     if not isinstance(pid, int):
         # Persistent system apps such as Finder are present in list_apps but
@@ -296,6 +301,8 @@ async def prepare_app(cli: DriverCLI, app: str, start_url: str | None) -> dict[s
         # while their process is healthy and can be foregrounded by pid.
         running = _find_running_app(await cli.call("list_apps", {}), app)
         if running is None:
+            if launch_error is not None:
+                raise launch_error
             raise DriverError(f"launch_app returned no pid for {app!r}")
         payload = running
         pid = running["pid"]
@@ -354,7 +361,7 @@ async def _stop_shell_proxy(process: asyncio.subprocess.Process) -> None:
             process.terminate()
     try:
         await asyncio.wait_for(asyncio.shield(process.wait()), timeout=3)
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         with suppress(ProcessLookupError):
             process.kill()
         await process.wait()
