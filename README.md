@@ -15,11 +15,7 @@ You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and 
 ### macOS computer-use preview
 
 This development-only preview is available only when the MCP server runs on macOS with
-`YUTORI_ENV=dev`. The default runner is the Python harness (needs a Python 3.11-3.13
-interpreter). The legacy Node runner remains available for head-to-head comparison, but only
-when explicitly asked for twice: install it with the `node-harness` extra
-(`yutori-mcp[node-harness]`; it also needs Node 22 via `brew install node@22`), then select it
-with `YUTORI_COMPUTER_USE_HARNESS=node` or per call with the tool's `harness` parameter. Run:
+`YUTORI_ENV=dev`. It runs the SDK-owned Python n2 loop. Run:
 
 ```bash
 uvx yutori-mcp computer-use setup
@@ -31,7 +27,7 @@ uvx yutori-mcp computer-use smoke
 performs, with per-action progress printed as it happens:
 
 ```bash
-uvx yutori-mcp computer-use run "In Calculator, compute 17 * 23 and report the result." --app Calculator --harness python
+uvx yutori-mcp computer-use run "In Calculator, compute 17 * 23 and report the result." --app Calculator
 ```
 
 The `run_computer_use_task` tool controls the visible foreground desktop. Do not touch the
@@ -443,32 +439,20 @@ That writes an `environments.dev` entry alongside the existing top-level `api_ke
 machine can hold both without either shadowing the other. `YUTORI_API_KEY` still takes
 precedence over both when set.
 
-## Computer-use preview: harness dependencies
+## Computer-use preview: SDK dependency
 
-The macOS computer-use tool's default runner is the Python harness, with the legacy Node
-runner available as an opt-in install extra for comparison (the flag and the losing harness
-are expected to be removed once the evaluation concludes):
-
-- `python` (default, base dependency): the SDK-owned n2 agent loop
-  (`yutori.navigator.N2ComputerAgent`), currently pinned by commit to the private
-  [`yutori-ai/yutori-sdk-python-private`](https://github.com/yutori-ai/yutori-sdk-python-private)
-  fork until the SDK ships a release carrying it — after which the pin becomes a plain
-  `yutori>=X` index requirement and the base install has no private git dependencies at all.
-  No Cua framework, no litellm.
-- `node` (opt-in, `node-harness` extra): the TypeScript runner from the private
-  [`yutori-ai/yutori-sdk-typescript`](https://github.com/yutori-ai/yutori-sdk-typescript)
-  repo (`yutori-computer-use-runtime`), pinned to a tag. A plain install carries no
-  TypeScript runtime and no Node requirement; installing `yutori-mcp[node-harness]` adds the
-  wheel, and the runtime verifies itself once installed — `verify_runner()` checks the
-  manifest version, the protocol version, and the SHA-256 of the bundled `runner.mjs`.
+The macOS computer-use tool uses the SDK-owned n2 agent loop
+(`yutori.navigator.N2ComputerAgent`), currently pinned by commit to the private
+[`yutori-ai/yutori-sdk-python-private`](https://github.com/yutori-ai/yutori-sdk-python-private)
+fork until the SDK ships a release carrying it. At that point the pin becomes a plain
+`yutori>=X` index requirement. There is no Cua framework, litellm, or Node runtime.
 
 Neither package is on any index — public or private — because the preview is unreleased, so
-installing needs SSH access to the repo(s) involved:
+installing needs SSH access to the SDK repository:
 
 ```sh
 ssh -T git@github.com          # must authenticate as a yutori-ai member
 uv sync --extra dev            # base install: resolves the yutori SDK fork over SSH
-uv sync --extra dev --extra node-harness   # additionally pulls the Node runtime wheel
 ```
 
 `uvx yutori-mcp` alone will not resolve them without that access.

@@ -19,9 +19,9 @@ def _phase(label: str, total_ms: Any, count: Any, unit: str) -> str:
 def format_perf(result: dict[str, Any]) -> list[str]:
     """Render the run's perf numbers, matching depth to what the wire carried.
 
-    The Python runner reports a full phase breakdown in the playground's
-    StepTimings vocabulary; the Node runner reports only elapsed time and
-    steps, so its summary stops at time per step.
+    The runner normally reports a full phase breakdown in the playground's
+    StepTimings vocabulary. Older payloads may carry only elapsed time and
+    steps, in which case the summary stops at time per step.
     """
     elapsed_ms = result.get("elapsed_ms")
     steps = result.get("steps")

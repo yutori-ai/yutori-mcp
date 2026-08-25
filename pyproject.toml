@@ -1,5 +1,5 @@
 # hatchling refuses PEP 508 direct references unless this is set, and the computer-use
-# harness is pinned to a private git commit rather than published to an index.
+# SDK is pinned to a private git commit rather than published to an index.
 [tool.hatch.metadata]
 allow-direct-references = true
 
@@ -40,7 +40,7 @@ dependencies = [
     # `yutori>=0.9` index requirement as soon as the SDK ships a release
     # carrying the loop — that removes the last private git dependency from
     # the base install.
-    "yutori @ git+ssh://git@github.com/yutori-ai/yutori-sdk-python-private.git@2a2828a75ba4084e42f3587d828b4ffa683b6374",
+    "yutori @ git+ssh://git@github.com/yutori-ai/yutori-sdk-python-private.git@f7b609510f40247ad6b9c4a55ae81fe1a95c8b50",
 ]
 
 [project.optional-dependencies]
@@ -48,17 +48,6 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
 ]
-# The legacy Node runner, kept installable for head-to-head comparison against the
-# default Python harness (select it with YUTORI_COMPUTER_USE_HARNESS=node or the
-# tool's harness parameter; it also needs Node 22 on the machine). An extra rather
-# than a base dependency so a plain install carries no TypeScript runtime. Pinned
-# to a tag, which is what makes the runtime's own verify_runner() hash check
-# meaningful — never point this at a branch. Expected to be removed once the
-# evaluation concludes.
-node-harness = [
-    "yutori-computer-use-runtime @ git+ssh://git@github.com/yutori-ai/yutori-sdk-typescript.git@v0.1.5 ; sys_platform == 'darwin'",
-]
-
 [project.urls]
 Homepage = "https://yutori.com"
 Documentation = "https://docs.yutori.com"

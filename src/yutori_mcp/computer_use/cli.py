@@ -11,13 +11,7 @@ from urllib.request import urlopen
 
 from ..credentials import resolve_api_key_for_environment
 
-from .constants import (
-    DRIVER_INSTALLER_SHA256,
-    DRIVER_VERSION,
-    ENV_VAR_HARNESS,
-    HARNESSES,
-    resolve_harness,
-)
+from .constants import DRIVER_INSTALLER_SHA256, DRIVER_VERSION
 from ..schemas import ComputerUseTaskInput
 
 from .preflight import (
@@ -33,21 +27,11 @@ from .supervisor import run_task
 
 
 def _doctor() -> int:
-    harness = resolve_harness()
-    print(
-        f"Harness: {harness} (switch with {ENV_VAR_HARNESS} or the tool's harness parameter)"
-    )
-    results = run_checks(harness)
+    results = run_checks()
     for result in results:
         print(f"{'PASS' if result.ok else 'BLOCKED'} {result.name}: {result.detail}")
         if result.remediation:
             print(f"  Fix: {result.remediation}")
-    for other in HARNESSES:
-        if other == harness:
-            continue
-        blocker = harness_blocker(other)
-        status = "available" if blocker is None else f"unavailable ({blocker.detail})"
-        print(f"INFO harness '{other}': {status}")
     return 0 if all(result.ok for result in results) else 1
 
 
@@ -139,7 +123,7 @@ async def _smoke_live() -> int:
         'tell application "Calculator" to activate',
         "delay 2",
         'tell application "System Events" to key code 53',
-        "delay 0.3",
+        "delay 1",
         'tell application "System Events" to keystroke "6*7="',
         "delay 1",
     )
@@ -194,7 +178,7 @@ async def _print_event(event: dict) -> None:
 
 async def _run_custom(args: argparse.Namespace) -> int:
     # Reuses the MCP tool's input schema so the CLI enforces the same bounds
-    # (minutes 1-60, steps 1-200, start_url requires app) with the same
+    # (minutes 1-60, model steps 1-200, start_url requires app) with the same
     # messages; the resulting ValidationError is a ValueError, so dispatch's
     # handler prints it as a message rather than a traceback.
     params = ComputerUseTaskInput(
@@ -203,9 +187,8 @@ async def _run_custom(args: argparse.Namespace) -> int:
         start_url=args.start_url,
         minutes=args.minutes,
         max_steps=args.max_steps,
-        harness=args.harness,
     )
-    blocker = first_blocker(params.harness)
+    blocker = first_blocker()
     if blocker is not None:
         print(f"{blocker.detail} Fix: {blocker.remediation}")
         return 1
@@ -236,12 +219,6 @@ def register_parser(
         "run", help="Run one custom task on the visible desktop (dev only)"
     )
     run_parser.add_argument("task", help="Task for the model to perform")
-    run_parser.add_argument(
-        "--harness",
-        choices=list(HARNESSES),
-        default=None,
-        help="Runner implementation (default: YUTORI_COMPUTER_USE_HARNESS or node)",
-    )
     run_parser.add_argument("--app", default=None, help="Application to target")
     run_parser.add_argument(
         "--start-url", dest="start_url", default=None, help="URL to open in the app"
@@ -268,8 +245,8 @@ def dispatch(command: str, args: argparse.Namespace | None = None) -> int:
             return asyncio.run(_run_custom(args))
         return asyncio.run(_smoke_live())
     except ValueError as error:
-        # An invalid YUTORI_COMPUTER_USE_HARNESS value or out-of-bounds run
-        # argument should read as the same clear message run_task reports,
-        # not a traceback. Pydantic's ValidationError is a ValueError too.
+        # An out-of-bounds run argument should read as the same clear message
+        # run_task reports, not a traceback. Pydantic's ValidationError is a
+        # ValueError too.
         print(error)
         return 1

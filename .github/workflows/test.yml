@@ -22,44 +22,25 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
 
-      # Both computer-use runners are PEP 508 git references to private repos, so uv has to be
-      # able to clone each just to read its metadata — even here on Linux, where the darwin
-      # markers mean neither is actually installed. Without this, resolution fails outright and
-      # no test runs at all, which is why this repo has never had a green build.
-      #
-      # Deploy keys are per-repo and both repos live on github.com, so each key gets its own
-      # SSH host alias and a git insteadOf rewrite routes each clone URL to its alias —
-      # otherwise SSH offers one key for both clones and the second repo rejects it.
-      #
-      # Written out by hand rather than pulling in a third-party ssh-agent action: that would be
-      # one more dependency holding keys that can read private repositories.
-      - name: Authorize the private runner dependencies
+      # The Python SDK is a private PEP 508 git reference, so uv needs a read-only
+      # deploy key to resolve it on every platform.
+      - name: Authorize the private SDK dependency
         env:
-          SDK_DEPLOY_KEY: ${{ secrets.SDK_DEPLOY_KEY }}
           PYSDK_DEPLOY_KEY: ${{ secrets.PYSDK_DEPLOY_KEY }}
         run: |
-          missing=""
-          [ -z "${SDK_DEPLOY_KEY:-}" ] && missing="SDK_DEPLOY_KEY (yutori-sdk-typescript)"
-          [ -z "${PYSDK_DEPLOY_KEY:-}" ] && missing="${missing:+$missing, }PYSDK_DEPLOY_KEY (yutori-sdk-python-private)"
-          if [ -n "$missing" ]; then
-            echo "::error title=Missing deploy key secret(s)::Add read-only deploy keys as repository secrets: $missing. uv cannot resolve the runner dependencies without them."
+          if [ -z "${PYSDK_DEPLOY_KEY:-}" ]; then
+            echo "::error title=Missing deploy key secret::Add a read-only yutori-sdk-python-private deploy key as PYSDK_DEPLOY_KEY."
             exit 1
           fi
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          printf '%s\n' "$SDK_DEPLOY_KEY" > ~/.ssh/sdk_deploy
           printf '%s\n' "$PYSDK_DEPLOY_KEY" > ~/.ssh/pysdk_deploy
-          chmod 600 ~/.ssh/sdk_deploy ~/.ssh/pysdk_deploy
+          chmod 600 ~/.ssh/pysdk_deploy
           ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
-          {
-            printf 'Host github-sdk\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/sdk_deploy\n  IdentitiesOnly yes\n'
-            printf 'Host github-pysdk\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/pysdk_deploy\n  IdentitiesOnly yes\n'
-          } > ~/.ssh/config
+          printf 'Host github-pysdk\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/pysdk_deploy\n  IdentitiesOnly yes\n' > ~/.ssh/config
           chmod 600 ~/.ssh/config
-          # known_hosts entries for the aliases so StrictHostKeyChecking still passes.
-          ssh-keyscan -t ed25519 github.com 2>/dev/null | sed 's/^github.com/github-sdk/' >> ~/.ssh/known_hosts
+          # known_hosts entry for the alias so StrictHostKeyChecking still passes.
           ssh-keyscan -t ed25519 github.com 2>/dev/null | sed 's/^github.com/github-pysdk/' >> ~/.ssh/known_hosts
-          git config --global url."ssh://git@github-sdk/yutori-ai/yutori-sdk-typescript".insteadOf "ssh://git@github.com/yutori-ai/yutori-sdk-typescript"
           git config --global url."ssh://git@github-pysdk/yutori-ai/yutori-sdk-python-private".insteadOf "ssh://git@github.com/yutori-ai/yutori-sdk-python-private"
 
       - name: Run tests

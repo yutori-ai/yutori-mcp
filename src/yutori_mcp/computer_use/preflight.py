@@ -17,18 +17,7 @@ from ..credentials import resolve_api_key_for_environment
 
 from .constants import (
     DRIVER_VERSION,
-    HARNESS_NODE,
-    HARNESS_PYTHON,
     TOOL_SET,
-    resolve_harness,
-)
-from .runtime import RuntimeValidationError, get_manifest
-
-NODE_PATHS = (
-    Path("/opt/homebrew/opt/node@22/bin/node"),
-    Path("/usr/local/opt/node@22/bin/node"),
-    Path("/usr/local/bin/node"),
-    Path("/usr/bin/node"),
 )
 DRIVER_APP = Path("/Applications/CuaDriver.app")
 DEV_ACCESS_REMEDIATION = (
@@ -113,42 +102,6 @@ def check_architecture() -> CheckResult:
     )
 
 
-def find_node() -> Path | None:
-    for path in NODE_PATHS:
-        if path.is_file():
-            try:
-                version = subprocess.run(
-                    [str(path), "--version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                    check=False,
-                ).stdout.strip()
-            except (OSError, subprocess.SubprocessError):
-                continue
-            if version.startswith("v22."):
-                return path
-    return None
-
-
-def check_node() -> CheckResult:
-    node = find_node()
-    return _result(
-        "Node 22",
-        node is not None,
-        str(node or "not found"),
-        "Install Node 22 with: brew install node@22",
-    )
-
-
-def check_runtime() -> CheckResult:
-    try:
-        manifest = get_manifest()
-        return CheckResult("runtime", True, f"protocol {manifest['protocol_version']}")
-    except RuntimeValidationError as error:
-        return CheckResult("runtime", False, str(error), error.remediation)
-
-
 def check_harness() -> CheckResult:
     """Whether the installed yutori SDK carries the n2 computer-use loop.
 
@@ -226,7 +179,7 @@ def driver_version() -> str | None:
 
 
 def check_driver_contract() -> CheckResult:
-    """Require the exact driver release whose modifier-click contract was verified."""
+    """Require the exact cua-driver release this modifier-click lane targets."""
     installed = driver_version()
     if installed is None:
         return _result(
@@ -235,13 +188,11 @@ def check_driver_contract() -> CheckResult:
             "driver did not report a version",
             "Run: yutori-mcp computer-use setup",
         )
-    matches = installed == DRIVER_VERSION
-    detail = installed if matches else f"{installed} (expected {DRIVER_VERSION})"
     return _result(
         "driver contract",
-        matches,
-        detail,
-        "Run: yutori-mcp computer-use setup",
+        installed == DRIVER_VERSION,
+        installed,
+        f"Install cua-driver {DRIVER_VERSION}: yutori-mcp computer-use setup",
     )
 
 
@@ -396,7 +347,10 @@ def check_dev_access() -> CheckResult:
                 "dev API", False, "credential rejected", DEV_ACCESS_REMEDIATION
             )
         return _result(
-            "dev API", True, f"reachable (HTTP {error.code})", DEV_ACCESS_REMEDIATION
+            "dev API",
+            False,
+            f"n2-preview with {TOOL_SET} was rejected (HTTP {error.code})",
+            DEV_ACCESS_REMEDIATION,
         )
     except (URLError, OSError, ValueError):
         return _result("dev API", False, "unreachable", DEV_ACCESS_REMEDIATION)
@@ -425,13 +379,7 @@ _PLATFORM_CHECKS: tuple[Callable[[], CheckResult], ...] = (
     check_architecture,
 )
 
-# The toolchain each runner implementation needs, keyed by harness. Checked
-# between the platform and environment groups so "your interpreter cannot run
-# the selected harness" is reported before any driver probe shells out.
-HARNESS_CHECKS: dict[str, tuple[Callable[[], CheckResult], ...]] = {
-    HARNESS_NODE: (check_node, check_runtime),
-    HARNESS_PYTHON: (check_harness,),
-}
+_TOOLCHAIN_CHECKS: tuple[Callable[[], CheckResult], ...] = (check_harness,)
 
 _ENVIRONMENT_CHECKS: tuple[Callable[[], CheckResult], ...] = (
     check_driver_app,
@@ -448,25 +396,25 @@ _ENVIRONMENT_CHECKS: tuple[Callable[[], CheckResult], ...] = (
 )
 
 
-def checks_for(harness: str | None = None) -> tuple[Callable[[], CheckResult], ...]:
-    return _PLATFORM_CHECKS + HARNESS_CHECKS[resolve_harness(harness)] + _ENVIRONMENT_CHECKS
+def checks_for() -> tuple[Callable[[], CheckResult], ...]:
+    return _PLATFORM_CHECKS + _TOOLCHAIN_CHECKS + _ENVIRONMENT_CHECKS
 
 
-def run_checks(harness: str | None = None) -> list[CheckResult]:
-    return [check() for check in checks_for(harness)]
+def run_checks() -> list[CheckResult]:
+    return [check() for check in checks_for()]
 
 
-def first_blocker(harness: str | None = None) -> CheckResult | None:
-    for check in checks_for(harness):
+def first_blocker() -> CheckResult | None:
+    for check in checks_for():
         result = check()
         if not result.ok:
             return result
     return None
 
 
-def harness_blocker(harness: str | None = None) -> CheckResult | None:
-    """The first failing toolchain check for one harness, environment aside."""
-    for check in HARNESS_CHECKS[resolve_harness(harness)]:
+def harness_blocker() -> CheckResult | None:
+    """The first failing SDK-loop check, before environment probes."""
+    for check in _TOOLCHAIN_CHECKS:
         result = check()
         if not result.ok:
             return result
