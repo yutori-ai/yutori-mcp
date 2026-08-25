@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "yutori-mcp"
 version = "0.5.1"
-description = "MCP server for Yutori - web monitoring, deep research, and browser automation"
+description = "MCP server and workflow skills for building agents with Yutori"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"

@@ -94,7 +94,7 @@ import yutori_mcp.computer_use.cli
 
 @pytest.mark.parametrize(
     "platform,environment,expected",
-    [("linux", "dev", False), ("darwin", "prod", False), ("darwin", "dev", True)],
+    [("linux", "prod", False), ("darwin", "prod", True), ("darwin", "unknown", False)],
 )
 def test_registration_gate(platform, environment, expected):
     with patch("yutori_mcp.server.sys.platform", platform), patch.dict("os.environ", {"YUTORI_ENV": environment}):
@@ -562,7 +562,7 @@ def _run_task_kwargs(tmp_path, **overrides):
         "minutes": 1,
         "max_steps": 10,
         "api_key": "yt-key",
-        "api_base_url": "https://api.dev.yutori.com/v1",
+        "api_base_url": "https://api.yutori.com/v1",
         "lock": DesktopLock(tmp_path / "desktop.lock"),
     }
     kwargs.update(overrides)
@@ -581,7 +581,7 @@ async def test_run_task_uses_only_python_runner_and_sdk_driver_discovery(tmp_pat
     assert result["outcome"] == "completed"
     assert supervise.await_args.kwargs["command"] == python_runner_command()
     request = supervise.await_args.kwargs["request"]
-    assert request["model"] == "n2-preview"
+    assert request["model"] == "n2"
     assert "driver_path" not in request and "harness" not in request
 
 
@@ -603,8 +603,8 @@ async def test_server_holds_desktop_lock_across_preflight_and_runner(monkeypatch
     monkeypatch.setattr(lock_module, "DesktopLock", lambda: lock)
     monkeypatch.setattr(preflight, "first_blocker", first_blocker)
     monkeypatch.setattr(supervisor, "run_task", run_with_lock)
-    monkeypatch.setattr("yutori_mcp.credentials.resolve_api_key_for_environment", lambda _: "dev-key")
-    monkeypatch.setattr(server, "resolve_base_url", lambda: "https://api.dev.yutori.com/v1")
+    monkeypatch.setattr("yutori_mcp.credentials.resolve_api_key_for_environment", lambda _: "api-key")
+    monkeypatch.setattr(server, "resolve_base_url", lambda: "https://api.yutori.com/v1")
 
     result, raw = await server._handle_computer_use(None, {"task": "open calculator"})
     assert result["outcome"] == "completed"
@@ -654,7 +654,7 @@ def test_driver_contract_rejects_version_drift(monkeypatch):
     assert preflight.check_driver_contract().ok
 
 
-def test_dev_access_probes_the_runtime_toolset(monkeypatch):
+def test_api_access_probes_the_runtime_toolset(monkeypatch):
     requests = []
 
     class Response:
@@ -669,22 +669,23 @@ def test_dev_access_probes_the_runtime_toolset(monkeypatch):
 
     monkeypatch.setattr(
         "yutori_mcp.credentials.resolve_api_key_for_environment",
-        lambda _environment: "dev-key",
+        lambda _environment: "api-key",
     )
     monkeypatch.setattr(preflight, "urlopen", lambda request, timeout: requests.append(request) or Response())
 
-    assert preflight.check_dev_access().ok
+    assert preflight.check_api_access().ok
     assert json.loads(requests[0].data)["tool_set"] == TOOL_SET
+    assert requests[0].full_url == "https://api.yutori.com/v1/chat/completions"
 
 
 @pytest.mark.parametrize("status", [429, 500])
-def test_dev_access_rejects_non_auth_http_failures(monkeypatch, status):
+def test_api_access_rejects_non_auth_http_failures(monkeypatch, status):
     def fail_probe(*_args: Any, **_kwargs: Any) -> None:
-        raise HTTPError("https://api.dev.yutori.com", status, "failed", {}, None)
+        raise HTTPError("https://api.yutori.com", status, "failed", {}, None)
 
-    monkeypatch.setattr("yutori_mcp.credentials.resolve_api_key_for_environment", lambda _: "dev-key")
+    monkeypatch.setattr("yutori_mcp.credentials.resolve_api_key_for_environment", lambda _: "api-key")
     monkeypatch.setattr(preflight, "urlopen", fail_probe)
-    result = preflight.check_dev_access()
+    result = preflight.check_api_access()
     assert not result.ok
     assert result.detail == f"probe failed (HTTP {status})"
 
@@ -914,7 +915,7 @@ def _valid_request(**overrides):
         "start_url": None,
         "deadline_ms": 1_000_000,
         "max_steps": 10,
-        "model": "n2-preview",
+        "model": "n2",
         "api_base_url": "https://api.dev.yutori.com/v1",
     }
     request.update(overrides)

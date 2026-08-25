@@ -1,0 +1,1 @@
+../../../skills/06-computer-use/SKILL.md

@@ -4,11 +4,10 @@ All tool outputs are formatted as human-readable text optimized for LLM consumpt
 
 All tool inputs enforce validation: webhook URLs must use HTTPS, and `output_fields` (where supported) must contain at least one entry. Unknown/extra fields are rejected.
 
-## `run_computer_use_task` (macOS dev preview)
+## `run_computer_use_task` (macOS computer use)
 
-Runs a foreground task on the visible Mac desktop. This tool is listed only on macOS when
-`YUTORI_ENV=dev`; it is absent on Linux and in production. Do not touch the Mac during a run.
-Visible desktop content is sent to Yutori's dev model endpoint.
+Runs a foreground task on the visible Mac desktop. This tool is listed only on macOS. Do not
+touch the Mac during a run. Visible desktop content is sent to Yutori.
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
@@ -18,13 +17,14 @@ Visible desktop content is sent to Yutori's dev model endpoint.
 | `minutes` | No | Absolute deadline, 1–15 minutes (default 3) |
 | `max_steps` | No | Maximum actions, 1–100 (default 60) |
 
-First-time setup: authenticate against dev with `uvx yutori-mcp --env dev login`, then run
+First-time setup: authenticate with `uvx yutori-mcp login`, then run
 `uvx yutori-mcp computer-use setup` and `uvx yutori-mcp computer-use doctor`. Use
-`uvx yutori-mcp computer-use smoke` for the Calculator smoke test. The tool uses the SDK-owned
-Python CUA harness (`yutori==0.9.2`), `n2-preview`, `computer_use_tools-20260815`, and
+`uvx yutori-mcp computer-use smoke` for the Calculator smoke test. To run from a terminal, use
+`uvx yutori-mcp computer-use run "<task>" --app <AppName>`. The tool uses the SDK-owned
+Python CUA harness (`yutori==0.9.2`), Navigator n2, `computer_use_tools-20260815`, and
 `cua-driver==0.19.3`; `doctor` verifies those pinned runtime artifacts before a task runs.
 
-Dependencies: macOS 15+, Python 3.10+, `uvx`, a dev API key with `n2-preview` access,
+Dependencies: macOS 15+, Python 3.10+, `uvx`, a Yutori API key with computer-use access,
 `CuaDriver.app`/`cua-driver==0.19.3`, Screen Recording and Accessibility permissions, and
 optionally Xcode Command Line Tools for the native reasoning overlay. `computer-use setup`
 installs the pinned driver and prompts for the macOS permissions; the task runner can continue
