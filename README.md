@@ -407,9 +407,9 @@ Or in an MCP client config:
 
 Setting `"env": {"YUTORI_ENV": "dev"}` in the server config works too. An
 unknown environment name fails at startup rather than silently falling back
-to production. Note that the `login`/`logout`/`status` auth subcommands
-always talk to production; use a `YUTORI_API_KEY` valid for dev when
-targeting it.
+to production. Plain `login`/`logout`/`status` commands manage production;
+pass `--env dev` to manage the separately stored dev credential described
+below. `YUTORI_API_KEY` overrides either stored credential when set.
 
 ### Debugging with MCP Inspector
 
