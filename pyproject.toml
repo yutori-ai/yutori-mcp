@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.3.1"
+version = "0.5.0"
 description = "MCP server for Yutori - web monitoring, deep research, and browser automation"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,8 +30,9 @@ dependencies = [
     # breaks the install as soon as 2.x resolves.
     "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
-    # 0.8.1 adds browsing/research task list methods on both sync and async clients
-    "yutori>=0.8.1",
+    # SDK 0.9.1 owns the complete Python/Swift macOS runtime. Doctor verifies
+    # the installed payload against the exact published wheel before use.
+    "yutori==0.9.1",
 ]
 
 [project.optional-dependencies]
@@ -46,7 +47,7 @@ Documentation = "https://docs.yutori.com"
 Repository = "https://github.com/yutori-ai/yutori-mcp"
 
 [project.scripts]
-yutori-mcp = "yutori_mcp.server:main"
+yutori-mcp = "yutori_mcp.entrypoint:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/yutori_mcp"]

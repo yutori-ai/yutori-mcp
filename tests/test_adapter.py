@@ -20,7 +20,10 @@ from yutori_mcp.server import _format_api_error
 @pytest.fixture()
 def adapter():
     with (
-        patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-test-key"),
+        patch(
+            "yutori_mcp.adapter.resolve_api_key_for_environment",
+            return_value="yt-test-key",
+        ),
         patch("yutori_mcp.adapter.AsyncYutoriClient"),
     ):
         return MCPClientAdapter()
@@ -118,14 +121,19 @@ class TestErrorFormattingContract:
 
 class TestAdapterInit:
     def test_raises_without_api_key(self):
-        with patch("yutori_mcp.adapter.resolve_api_key", return_value=None):
+        with patch(
+            "yutori_mcp.adapter.resolve_api_key_for_environment", return_value=None
+        ):
             with pytest.raises(ValueError, match="API key required"):
                 MCPClientAdapter()
 
     def test_creates_client_with_resolved_key(self, monkeypatch):
         monkeypatch.delenv(ENV_VAR_ENVIRONMENT, raising=False)
         with (
-            patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-key"),
+            patch(
+                "yutori_mcp.adapter.resolve_api_key_for_environment",
+                return_value="yt-key",
+            ),
             patch("yutori_mcp.adapter.AsyncYutoriClient") as mock_client_cls,
         ):
             MCPClientAdapter()
@@ -137,7 +145,10 @@ class TestAdapterInit:
     def test_env_var_selects_dev_base_url(self, monkeypatch):
         monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
         with (
-            patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-key"),
+            patch(
+                "yutori_mcp.adapter.resolve_api_key_for_environment",
+                return_value="yt-key",
+            ),
             patch("yutori_mcp.adapter.AsyncYutoriClient") as mock_client_cls,
         ):
             MCPClientAdapter()
@@ -148,7 +159,10 @@ class TestAdapterInit:
     def test_explicit_base_url_wins_over_env_var(self, monkeypatch):
         monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
         with (
-            patch("yutori_mcp.adapter.resolve_api_key", return_value="yt-key"),
+            patch(
+                "yutori_mcp.adapter.resolve_api_key_for_environment",
+                return_value="yt-key",
+            ),
             patch("yutori_mcp.adapter.AsyncYutoriClient") as mock_client_cls,
         ):
             MCPClientAdapter(base_url="http://localhost:8000/v1")
@@ -300,11 +314,17 @@ class TestBrowsingAndResearchForwarding:
     @pytest.mark.parametrize(
         "adapter_method,client_ns,status,cursor",
         [
-            pytest.param("list_browsing_tasks", "browsing", "succeeded", "cur-1", id="browsing"),
-            pytest.param("list_research_tasks", "research", "failed", "cur-2", id="research"),
+            pytest.param(
+                "list_browsing_tasks", "browsing", "succeeded", "cur-1", id="browsing"
+            ),
+            pytest.param(
+                "list_research_tasks", "research", "failed", "cur-2", id="research"
+            ),
         ],
     )
-    async def test_list_tasks_forwards_pagination_filters(self, adapter, adapter_method, client_ns, status, cursor):
+    async def test_list_tasks_forwards_pagination_filters(
+        self, adapter, adapter_method, client_ns, status, cursor
+    ):
         namespace = getattr(adapter._client, client_ns)
         namespace.list = AsyncMock(return_value={"tasks": []})
         await getattr(adapter, adapter_method)(limit=20, status=status, cursor=cursor)
@@ -319,7 +339,9 @@ class TestBrowsingAndResearchForwarding:
             pytest.param("list_research_tasks", "research", id="research"),
         ],
     )
-    async def test_list_tasks_strips_none_values(self, adapter, adapter_method, client_ns):
+    async def test_list_tasks_strips_none_values(
+        self, adapter, adapter_method, client_ns
+    ):
         namespace = getattr(adapter._client, client_ns)
         namespace.list = AsyncMock(return_value={"tasks": []})
         await getattr(adapter, adapter_method)(limit=None, status=None, cursor=None)

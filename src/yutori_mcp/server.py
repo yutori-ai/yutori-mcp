@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any, NoReturn, TypeVar
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ValidationError
@@ -35,6 +35,7 @@ from .schemas import (
     DEFAULT_LIST_LIMIT,
     BrowserChoice,
     BrowsingTaskInput,
+    ComputerUseTaskInput,
     CreateScoutInput,
     EditScoutInput,
     GetUpdatesInput,
@@ -153,8 +154,23 @@ async def _invoke(tool_name: str, args: dict[str, Any]) -> str:
     unexpected exceptions logged and re-raised.
     """
     handler = _TOOL_HANDLERS[tool_name]
-    client = get_adapter()
     try:
+        if tool_name == "run_computer_use_task":
+            from .computer_use.result import failure, format_result
+
+            try:
+                result, _ = await handler(None, args)  # type: ignore[arg-type]
+            except ValidationError:
+                raise
+            # MCP callers need the same actionable result shape even when a
+            # platform integration raises an error we cannot classify here.
+            except Exception as error:  # noqa: BLE001
+                logger.error(
+                    "Computer-use task failed before the runner returned a result"
+                )
+                result = failure(str(error))
+            return format_result(result)
+        client = get_adapter()
         result, context = await handler(client, args)
         return format_response(tool_name, result, **context)
     except YutoriAPIError as e:
@@ -183,6 +199,7 @@ async def _invoke(tool_name: str, args: dict[str, Any]) -> str:
 _READ_ONLY = ToolAnnotations(readOnlyHint=True)
 _IDEMPOTENT = ToolAnnotations(idempotentHint=True)
 _DESTRUCTIVE = ToolAnnotations(destructiveHint=True)
+_DESTRUCTIVE_OPEN_WORLD = ToolAnnotations(destructiveHint=True, openWorldHint=True)
 
 
 def _list_tasks_description(task_type: str) -> str:
@@ -381,6 +398,20 @@ async def run_research_task(
     return await _invoke("run_research_task", locals())
 
 
+async def run_computer_use_task(
+    task: str,
+    app: str | None = None,
+    start_url: str | None = None,
+    minutes: float = 3,
+    max_steps: int = 60,
+    ctx: Context | None = None,
+) -> str:
+    # `ctx` is FastMCP's injected request context (excluded from the client-facing
+    # input schema), used to stream per-action progress notifications while the
+    # runner drives the desktop. _handle_computer_use pops it before schema parsing.
+    return await _invoke("run_computer_use_task", locals())
+
+
 @mcp.tool(
     description=_list_tasks_description(TASK_TYPE_RESEARCH),
     annotations=_READ_ONLY,
@@ -544,6 +575,74 @@ async def _handle_edit_scout(
     return {"old": old_scout, "new": new_scout}, {}
 
 
+def _progress_reporter(
+    ctx: Context, max_steps: int
+) -> Callable[[dict[str, Any]], Awaitable[None]]:
+    """Turn runner events into MCP progress + log notifications.
+
+    Progress totals are deliberately omitted: an action's `index` is a monotonic
+    per-action counter and a batch step executes several actions, so max_steps is
+    not an upper bound for it — a fabricated total would render a bar that
+    overshoots. The human-readable message carries the step budget instead.
+    """
+
+    async def on_event(event: dict[str, Any]) -> None:
+        if event.get("type") == "ready":
+            message = f"Computer-use runner ready; driving the desktop (up to {max_steps} steps)."
+            await ctx.report_progress(progress=0, message=message)
+            await ctx.info(message)
+            return
+        index = event.get("index", 0)
+        message = f"action #{index}: {event.get('tool')} -> {event.get('status')}"
+        if event.get("refusal_code"):
+            message += f" ({event['refusal_code']})"
+        if event.get("duration_ms") is not None:
+            message += f" took {event['duration_ms']} ms"
+        if event.get("elapsed_ms") is not None:
+            message += f" [{event['elapsed_ms']} ms]"
+        if event.get("command"):
+            message += f" $ {event['command']}"
+        await ctx.report_progress(progress=index, message=message)
+        await ctx.info(message)
+
+    return on_event
+
+
+async def _handle_computer_use(
+    _: MCPClientAdapter, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from .credentials import resolve_api_key_for_environment
+
+    from .computer_use.lock import ComputerUseBusyError, DesktopLock
+    from .computer_use.preflight import first_blocker
+    from .computer_use.result import failure
+    from .computer_use.supervisor import run_task
+
+    arguments = dict(arguments)
+    ctx: Context | None = arguments.pop("ctx", None)
+    params = ComputerUseTaskInput(**arguments)
+    lock = DesktopLock()
+    try:
+        with lock:
+            blocker = first_blocker()
+            if blocker is not None:
+                return failure(f"{blocker.detail} Fix: {blocker.remediation}"), {}
+            return (
+                await run_task(
+                    **params.model_dump(),
+                    api_key=resolve_api_key_for_environment(
+                        os.environ.get(ENV_VAR_ENVIRONMENT) or DEFAULT_ENVIRONMENT
+                    ),
+                    api_base_url=resolve_base_url(),
+                    lock=lock,
+                    on_event=_progress_reporter(ctx, params.max_steps) if ctx else None,
+                ),
+                {},
+            )
+    except ComputerUseBusyError as error:
+        return failure(str(error)), {}
+
+
 # Tool-name -> handler registry, consulted by _invoke() above. Mirrors
 # the _TOOL_FORMATTERS registry in formatters.py so the parse/dispatch side
 # of the MCP tool lifecycle is structured the same way as the format side.
@@ -582,14 +681,58 @@ _TOOL_HANDLERS: dict[str, ToolHandler] = {
 }
 
 
-# Each auth subcommand below imports ``yutori.auth`` lazily so the default
-# ``yutori-mcp`` server-startup path does not pay the auth-flow import cost,
-# and always raises ``SystemExit``; the ``NoReturn`` annotation lets callers
-# rely on that contract instead of guarding the call with a ``return``.
+def _computer_use_enabled() -> bool:
+    if sys.platform != "darwin":
+        return False
+    try:
+        return resolve_base_url() == ENVIRONMENT_BASE_URLS["dev"]
+    except ValueError:
+        return False
 
 
-def _auth_login() -> NoReturn:
-    """Run the interactive login flow and exit with its success status."""
+def _register_computer_use_tool() -> None:
+    """Expose the macOS computer-use tool when the resolved environment is dev."""
+    if "run_computer_use_task" in _TOOL_HANDLERS:
+        return
+    if not _computer_use_enabled():
+        return
+    mcp.tool(
+        description=(
+            "Operate the foreground Mac desktop using Yutori's dev n2-preview model. "
+            "Do not touch the Mac during the run. Visible desktop content is sent to "
+            "Yutori's dev model endpoint."
+        ),
+        annotations=_DESTRUCTIVE_OPEN_WORLD,
+    )(run_computer_use_task)
+    _TOOL_HANDLERS["run_computer_use_task"] = _handle_computer_use
+
+
+# Each auth handler imports its dependencies lazily so normal server startup
+# does not pay for the interactive auth flow.
+
+
+def _auth_login(environment: str | None) -> NoReturn:
+    if environment and environment != DEFAULT_ENVIRONMENT:
+        from getpass import getpass
+
+        from .credentials import mask, save_environment_key
+
+        print(
+            f"Paste a {environment} API key from https://platform.{environment}.yutori.com "
+            "(input is hidden):"
+        )
+        try:
+            key = getpass("API key: ")
+        except (EOFError, KeyboardInterrupt):
+            print("\nCancelled.")
+            raise SystemExit(1) from None
+        if not key.strip():
+            print("No key entered; nothing was saved.")
+            raise SystemExit(1)
+        path = save_environment_key(environment, key)
+        print(f"Saved {environment} API key ({mask(key.strip())}) to {path}")
+        raise SystemExit(0)
+
     from yutori.auth import run_login_flow
 
     result = run_login_flow(key_source="yutori-mcp")
@@ -602,8 +745,18 @@ def _auth_login() -> NoReturn:
     raise SystemExit(0 if result.success else 1)
 
 
-def _auth_logout() -> NoReturn:
-    """Clear the saved API key and exit."""
+def _auth_logout(environment: str | None) -> NoReturn:
+    if environment and environment != DEFAULT_ENVIRONMENT:
+        from .credentials import clear_environment_key
+
+        removed = clear_environment_key(environment)
+        print(
+            f"Removed the {environment} API key."
+            if removed
+            else f"No {environment} API key was stored."
+        )
+        raise SystemExit(0)
+
     from yutori.auth import clear_config
 
     clear_config()
@@ -611,8 +764,26 @@ def _auth_logout() -> NoReturn:
     raise SystemExit(0)
 
 
-def _auth_status() -> NoReturn:
-    """Print the current authentication status and exit non-zero if unauthenticated."""
+def _auth_status(environment: str | None) -> NoReturn:
+    if environment and environment != DEFAULT_ENVIRONMENT:
+        from yutori.auth.credentials import get_config_path
+
+        from .credentials import mask, stored_environment_key
+
+        stored = stored_environment_key(environment)
+        override = os.environ.get("YUTORI_API_KEY")
+        if override:
+            print(f"Authenticated for {environment} via YUTORI_API_KEY ({mask(override)})")
+        elif stored:
+            print(f"Authenticated for {environment} ({mask(stored)}) from {get_config_path()}")
+        else:
+            print(
+                f"No {environment} credential. Run "
+                f"'uvx yutori-mcp --env {environment} login'."
+            )
+            raise SystemExit(1)
+        raise SystemExit(0)
+
     from yutori.auth import get_auth_status
 
     status = get_auth_status()
@@ -628,26 +799,17 @@ def _auth_status() -> NoReturn:
     raise SystemExit(0)
 
 
-# CLI auth subcommand name -> (argparse `help` text, handler). Iterated over to
-# register subparsers, and consulted by _handle_auth_command to dispatch.
-# Pairing the help text with the handler in one table means a subcommand
-# cannot be advertised on the CLI without an implementation (or vice versa),
-# mirroring the _TOOL_HANDLERS / _TOOL_FORMATTERS registries above.
-_AUTH_SUBCOMMANDS: dict[str, tuple[str, Callable[[], NoReturn]]] = {
+# Pairing CLI help with its handler keeps advertised and implemented commands in sync.
+_AUTH_SUBCOMMANDS: dict[str, tuple[str, Callable[[str | None], NoReturn]]] = {
     "login": ("Log in and save API key", _auth_login),
     "logout": ("Remove saved API key", _auth_logout),
     "status": ("Show authentication status", _auth_status),
 }
 
 
-def _handle_auth_command(command: str) -> NoReturn:
-    """Run an auth subcommand (login/logout/status) and exit.
-
-    ``command`` must be a ``_AUTH_SUBCOMMANDS`` key; ``main()`` only calls
-    this for names argparse accepted from that same table.
-    """
+def _handle_auth_command(command: str, environment: str | None = None) -> NoReturn:
     _, run_command = _AUTH_SUBCOMMANDS[command]
-    run_command()
+    run_command(environment)
 
 
 def main() -> None:
@@ -665,18 +827,23 @@ def main() -> None:
         help=(
             f"Yutori environment to target (default: {DEFAULT_ENVIRONMENT}). "
             f"Overrides the {ENV_VAR_ENVIRONMENT} environment variable. "
-            "Applies to the MCP server's API calls; the login/logout/status "
-            "auth subcommands always use production."
+            "Auth subcommands target this explicit environment when provided; "
+            "otherwise they use production."
         ),
     )
     subparsers = parser.add_subparsers(dest="command")
     for name, (help_text, _) in _AUTH_SUBCOMMANDS.items():
         subparsers.add_parser(name, help=help_text)
+    from .computer_use.cli import register_parser
+
+    register_parser(subparsers)
 
     args = parser.parse_args()
 
-    if args.command in _AUTH_SUBCOMMANDS:
-        _handle_auth_command(args.command)
+    if args.command == "computer-use":
+        from .computer_use.cli import dispatch
+
+        raise SystemExit(dispatch(args.computer_use_command, args))
 
     # The flag is forwarded via the env var (rather than threaded through to
     # get_adapter()'s lazily-constructed, process-lifetime MCPClientAdapter)
@@ -685,6 +852,17 @@ def main() -> None:
     # config's `env` block.
     if args.env:
         os.environ[ENV_VAR_ENVIRONMENT] = args.env
+
+    # Dispatched after --env is applied, not before: `login --env dev` has to know which
+    # environment it is storing a credential for, and the old ordering ran auth first.
+    #
+    # Only the explicit flag counts here, never the ambient YUTORI_ENV. The README tells people
+    # to export that variable, and letting it reach this line meant a plain `login` silently
+    # became a dev paste prompt instead of the production browser flow, while `logout` cleared a
+    # dev entry instead of the real credential. Auth is an explicit act; it must not change
+    # meaning because of something left set in a shell.
+    if args.command in _AUTH_SUBCOMMANDS:
+        _handle_auth_command(args.command, args.env)
     try:
         base_url = resolve_base_url()
     except ValueError as e:
@@ -694,6 +872,10 @@ def main() -> None:
     if base_url != ENVIRONMENT_BASE_URLS[DEFAULT_ENVIRONMENT]:
         # stdout carries the stdio MCP transport; stderr is safe for humans.
         print(f"yutori-mcp: targeting non-default API {base_url}", file=sys.stderr)
+
+    # Register only after --env has replaced any ambient value. Registering at import time
+    # would let ambient dev state leak the desktop tool into an explicit --env prod server.
+    _register_computer_use_tool()
 
     mcp.run(transport="stdio")
 

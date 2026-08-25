@@ -367,7 +367,10 @@ class BrowsingTaskInput(ToolInput):
     )
     require_auth: bool | None = Field(
         default=None,
-        description="If true, use an auth-optimized cloud browser provider for login flows. Only applies when browser is 'cloud' (default).",
+        description=(
+            "If true, use an auth-optimized cloud browser provider for login flows. "
+            "Only applies when browser is 'cloud' (default)."
+        ),
     )
     browser: BrowserChoice = Field(
         default=None,
@@ -385,6 +388,24 @@ class BrowsingTaskInput(ToolInput):
         "HTTPS URL to receive webhook notification when task completes. Must use https://."
     )
     webhook_format: WebhookFormat = _webhook_format_field()
+
+class ComputerUseTaskInput(ToolInput):
+    task: str = Field(..., description="Task to perform on the visible Mac desktop")
+    app: str | None = Field(default=None, description="Optional application to target")
+    start_url: str | None = Field(
+        default=None, description="Optional URL to open in the target app"
+    )
+    minutes: float = Field(
+        default=3, ge=1, le=15, description="Absolute run deadline in minutes (1-15)"
+    )
+    max_steps: int = Field(
+        default=60, ge=1, le=100, description="Maximum actions (1-100)"
+    )
+    @model_validator(mode="after")
+    def require_app_for_start_url(self) -> ComputerUseTaskInput:
+        if self.start_url is not None and self.app is None:
+            raise ValueError("start_url requires app")
+        return self
 
 
 class TaskIdInput(ToolInput):
@@ -419,7 +440,10 @@ class ResearchTaskInput(ToolInput):
     )
     user_location: str | None = Field(
         default=None,
-        description="Location for contextual awareness. Format: 'city, region, country'. Default: 'San Francisco, CA, US'",
+        description=(
+            "Location for contextual awareness. Format: 'city, region, country'. "
+            "Default: 'San Francisco, CA, US'"
+        ),
     )
     output_fields: list[str] | None = _output_fields_field(
         ["title", "summary", "source_url"],

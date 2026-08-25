@@ -1,0 +1,615 @@
+"""Isolated protocol-v1 child for the SDK-owned macOS computer-use runtime."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import re
+import signal
+import sys
+import time
+from collections.abc import Callable
+from dataclasses import asdict
+from importlib import metadata
+from typing import Any, TextIO
+
+from yutori.navigator import N2ComputerAgent
+from yutori.navigator.macos import (
+    MacOSComputer,
+    MacOSPresentationStatus,
+    MacOSTargetCrashedError,
+    CancellationLatch,
+    ShellPresentationEvent,
+    sanitize_command_preview,
+)
+
+from .app import prepare_app
+from .constants import (
+    DRIVER_VERSION,
+    PROTOCOL_VERSION,
+    SDK_ARTIFACT_SHA256,
+    SDK_PROVENANCE_SHA256,
+    SDK_VERSION,
+    TOOL_SET,
+)
+
+SYSTEM_CONTEXT = (
+    "You control the entire macOS screen. This is macOS, not Linux: do not use "
+    "Ubuntu or Linux UI conventions. Use macOS conventions: cmd, not ctrl, for "
+    "standard shortcuts. Prefer reliable keyboard shortcuts such as cmd+w to close the "
+    "current window, cmd+q to quit, and cmd+shift+s for Save As. If one visual attempt "
+    "to click a title-bar or menu close control misses, do not repeat the same "
+    "coordinates; use the keyboard shortcut. If a desktop widget opens accidentally, "
+    "press cmd+w once and continue. The coordinate origin is the top-left of the "
+    "capture. Take screenshots after visual changes. If a click produces no visible "
+    "change, the target may be busy rather than mis-aimed: retry the same click up to "
+    "three times, checking a fresh screenshot between attempts, and if it still does "
+    "not respond, reach the same result another way — a menu item, a keyboard "
+    "shortcut, or a different control — instead of clicking it again. Once you have "
+    "confirmed a step worked, leave that result in view: bring the file, window, or "
+    "view it changed to the front, reopening or refreshing it if the change was made "
+    "somewhere the screen does not show, so progress stays visible while the task is "
+    "still running. When you finish, open the final artifact (the document, file, "
+    "page, or app view holding the result) so it is visible on screen, then take a "
+    "screenshot to confirm it before you summarize. Shell commands run in bash as "
+    "the logged-in user; do not use sudo.\n\n"
+    "Do not open or change System Settings, application settings, accounts, "
+    "permissions, or defaults unless the user explicitly asked for that settings change."
+)
+STOP_SUMMARY_PROMPT = "Stop here. Briefly summarize what you accomplished and what you found."
+FINAL_TEXT_MARKERS = ("[DONE]", "[INFEASIBLE]")
+_SHELL_TOOL_NAMES = frozenset({"bash", "shell_command", "run_command"})
+_BACKGROUND_TASK_PATTERN = re.compile(r"\bStarted background task ([A-Za-z0-9-]+)\b")
+
+
+class RequestError(ValueError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def _require_string(request: dict[str, Any], field: str) -> str:
+    value = request.get(field)
+    if not isinstance(value, str) or not value:
+        raise RequestError("INVALID_REQUEST", f"{field} must be a non-empty string.")
+    return value
+
+
+def parse_request(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise RequestError("INVALID_REQUEST", "Request must be a JSON object.")
+    if payload.get("protocol_version") != PROTOCOL_VERSION:
+        raise RequestError("UNSUPPORTED_PROTOCOL_VERSION", f"Expected protocol_version {PROTOCOL_VERSION}.")
+    if payload.get("type") != "run":
+        raise RequestError("INVALID_REQUEST", "type must be 'run'.")
+    task = _require_string(payload, "task")
+    app = payload.get("app")
+    if app is not None and (not isinstance(app, str) or not app):
+        raise RequestError("INVALID_REQUEST", "app must be a non-empty string or null.")
+    start_url = payload.get("start_url")
+    if start_url is not None and (not isinstance(start_url, str) or not start_url):
+        raise RequestError("INVALID_REQUEST", "start_url must be a non-empty string or null.")
+    if start_url is not None and app is None:
+        raise RequestError("INVALID_REQUEST", "start_url requires app.")
+    deadline_ms = payload.get("deadline_ms")
+    if not isinstance(deadline_ms, int) or isinstance(deadline_ms, bool) or deadline_ms <= 0:
+        raise RequestError("INVALID_REQUEST", "deadline_ms must be a positive integer.")
+    max_steps = payload.get("max_steps")
+    if not isinstance(max_steps, int) or isinstance(max_steps, bool) or max_steps <= 0:
+        raise RequestError("INVALID_REQUEST", "max_steps must be a positive integer.")
+    return {
+        "task": task,
+        "app": app,
+        "start_url": start_url,
+        "deadline_ms": deadline_ms,
+        "max_steps": max_steps,
+        "model": _require_string(payload, "model"),
+        "api_base_url": _require_string(payload, "api_base_url"),
+    }
+
+
+class Emitter:
+    def __init__(self, stream: TextIO):
+        self._stream = stream
+
+    def emit(self, event: dict[str, Any]) -> None:
+        self._stream.write(json.dumps(event, separators=(",", ":")) + "\n")
+        self._stream.flush()
+
+
+def _package_version() -> str:
+    try:
+        return metadata.version("yutori-mcp")
+    except metadata.PackageNotFoundError:
+        return "0.0.0"
+
+
+def classify_result(outputs: list[dict[str, Any]] | None) -> str:
+    for frame in outputs or []:
+        output = frame.get("output")
+        text: str | None = None
+        if isinstance(output, str):
+            text = output
+        elif isinstance(output, dict):
+            result = output.get("result")
+            if isinstance(result, str):
+                text = result
+            elif isinstance(result, dict) and result.get("status") == "stopped":
+                return "unverifiable"
+        if text is not None and text.startswith("[ERROR]"):
+            lowered = text.lower()
+            if "refused" in lowered or "not confirmed" in lowered:
+                return "refused"
+            if "timed out" in lowered or "timeout" in lowered:
+                return "timeout_after_possible_dispatch"
+            return "unverifiable"
+    return "confirmed"
+
+
+def _status_for(raw_status: str) -> str:
+    if raw_status == "confirmed":
+        return "executed"
+    if raw_status == "refused":
+        return "refused"
+    return "uncertain"
+
+
+def _arguments(item: dict[str, Any]) -> dict[str, Any]:
+    value = item.get("arguments")
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return value if isinstance(value, dict) else {}
+
+
+def shell_command_preview(item: dict[str, Any]) -> str | None:
+    if str(item.get("name") or "").lower() not in _SHELL_TOOL_NAMES:
+        return None
+    command = _arguments(item).get("command")
+    return sanitize_command_preview(command) if isinstance(command, str) and command.strip() else None
+
+
+def _background_task_id(outputs: list[dict[str, Any]] | None) -> str | None:
+    for frame in outputs or []:
+        output = frame.get("output")
+        result = output.get("result") if isinstance(output, dict) else output
+        if isinstance(result, str) and (match := _BACKGROUND_TASK_PATTERN.search(result)):
+            return match.group(1)
+    return None
+
+
+class ActionReporter:
+    """Emit one privacy-safe action event for each attempted top-level tool call."""
+
+    def __init__(
+        self,
+        emitter: Emitter,
+        run_start: float,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._emitter = emitter
+        self._run_start = run_start
+        self._clock = clock
+        self._index = 0
+        self._call_start: float | None = None
+        self._pending_item: dict[str, Any] | None = None
+        self.tool_calls = 0
+
+    async def on_computer_call_start(self, item: dict[str, Any]) -> None:
+        self._call_start = self._clock()
+        self._pending_item = item
+
+    async def on_computer_call_end(self, item: dict[str, Any], result: list[dict[str, Any]]) -> None:
+        self._emit(item, classify_result(result), result)
+
+    def flush_interrupted(self) -> None:
+        if self._pending_item is not None:
+            self._emit(self._pending_item, "interrupted", [])
+
+    def _emit(self, item: dict[str, Any], raw_status: str, result: list[dict[str, Any]]) -> None:
+        duration_ms = None
+        if self._call_start is not None:
+            duration_ms = max(0, round((self._clock() - self._call_start) * 1000))
+        self._call_start = None
+        self._pending_item = None
+        arguments = _arguments(item)
+        run_in_background = bool(
+            str(item.get("name") or "").lower() == "bash" and arguments.get("run_in_background") is True
+        )
+        self._emitter.emit(
+            {
+                "type": "action",
+                "index": self._index,
+                "tool": str(item.get("name") or "unknown").lower(),
+                "status": _status_for(raw_status),
+                "raw_status": raw_status,
+                "delivery_mode": "foreground",
+                "route": "pixel",
+                "refusal_code": "driver_refused" if raw_status == "refused" else None,
+                "elapsed_ms": max(0, round((self._clock() - self._run_start) * 1000)),
+                "duration_ms": duration_ms,
+                "command": shell_command_preview(item),
+                "run_in_background": run_in_background,
+                "background_task_id": _background_task_id(result) if run_in_background else None,
+            }
+        )
+        self._index += 1
+        self.tool_calls += 1
+
+
+class ApiCounter:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def on_api_start(self, _kwargs: dict[str, Any]) -> None:
+        self.calls += 1
+
+
+class RunGuard:
+    """Bound model turns independently of in-flight SDK cancellation."""
+
+    def __init__(self, max_steps: int, deadline: float) -> None:
+        self.max_steps = max_steps
+        self.deadline = deadline
+        self.steps = 0
+        self.limit_reached = False
+        self.deadline_reached = False
+
+    async def on_run_continue(self, _kwargs: dict, _old_items: list, _new_items: list) -> bool:
+        if time.monotonic() >= self.deadline:
+            self.deadline_reached = True
+            return False
+        if self.steps >= self.max_steps:
+            self.limit_reached = True
+            return False
+        self.steps += 1
+        return True
+
+
+def _texts_from_items(items: list[dict[str, Any]]) -> list[str]:
+    return [
+        part["text"]
+        for item in items
+        if item.get("type") == "message"
+        for part in item.get("content") or []
+        if isinstance(part, dict) and isinstance(part.get("text"), str)
+    ]
+
+
+def _strip_final_markers(text: str | None) -> str | None:
+    if text is None:
+        return None
+    stripped = text.strip()
+    for marker in FINAL_TEXT_MARKERS:
+        if stripped.startswith(marker):
+            stripped = stripped[len(marker) :].strip()
+        if stripped.endswith(marker):
+            stripped = stripped[: -len(marker)].strip()
+    return stripped or None
+
+
+async def _collect_run(agent: Any, messages: Any) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    async for response in agent.run(messages):
+        items.extend(response.get("output") or [])
+    return items
+
+
+async def _summarize_limit_run(
+    request: dict[str, Any],
+    api_key: str,
+    computer: MacOSComputer,
+    items: list[dict[str, Any]],
+    deadline: float,
+) -> str | None:
+    async def deny(_request: dict[str, Any]) -> bool:
+        return False
+
+    messages = [
+        {"role": "user", "content": request["task"]},
+        *items,
+        {"role": "user", "content": STOP_SUMMARY_PROMPT},
+    ]
+    async with N2ComputerAgent(
+        computer=computer,
+        tool_set=TOOL_SET,
+        api_key=api_key,
+        base_url=request["api_base_url"],
+        model=request["model"],
+        callbacks=[RunGuard(1, deadline)],
+        action_confirmation_callback=deny,
+        presentation=computer.presentation,
+        supports_click_modifiers=True,
+        screenshot_delay=0,
+        execution_deadline=deadline,
+    ) as agent:
+        summary_items = await _collect_run(agent, messages)
+    texts = _texts_from_items(summary_items)
+    return _strip_final_markers(texts[-1] if texts else None)
+
+
+def _background_counts(events: tuple[ShellPresentationEvent, ...]) -> dict[str, int]:
+    counts = {state: 0 for state in ("started", "completed", "failed", "cancelled")}
+    for event in events:
+        if not event.run_in_background:
+            continue
+        if event.state == "running":
+            counts["started"] += 1
+        elif event.state == "timed_out":
+            counts["failed"] += 1
+        elif event.state in counts:
+            counts[event.state] += 1
+    return counts
+
+
+def _timings_payload(
+    total_ms: int,
+    agent: Any,
+    api_counter: ApiCounter,
+    reporter: ActionReporter,
+    computer: MacOSComputer,
+) -> dict[str, int]:
+    sdk = computer.timings
+    model_ms = round(getattr(agent, "timings", {}).get("model_ms", 0)) if agent is not None else 0
+    capture_ms = sdk.get("capture_ms", 0)
+    encode_ms = sdk.get("encode_ms", 0)
+    polling_ms = sdk.get("polling_ms", 0)
+    shell_ms = sdk.get("shell_ms", 0)
+    action_ms = sdk.get("action_ms", 0)
+    accounted = model_ms + action_ms + capture_ms + encode_ms + polling_ms + shell_ms
+    return {
+        "total_ms": total_ms,
+        "model_ms": model_ms,
+        "model_calls": api_counter.calls,
+        "action_ms": action_ms,
+        "tool_calls": reporter.tool_calls,
+        "screenshot_ms": capture_ms + encode_ms,
+        "screenshots": sdk.get("screenshots", 0),
+        "capture_ms": capture_ms,
+        "encode_ms": encode_ms,
+        "settle_ms": 0,
+        "polling_ms": polling_ms,
+        "shell_ms": shell_ms,
+        "other_ms": max(0, total_ms - accounted),
+    }
+
+
+def _presentation_payload(computer: MacOSComputer, status: MacOSPresentationStatus) -> dict[str, Any]:
+    codec = status.codec
+    if codec is None and computer.current_observation is not None:
+        codec = computer.current_observation.media_type.rsplit("/", 1)[-1]
+    telemetry = list(computer.presentation.telemetry) if computer.presentation is not None else []
+    return {
+        "reasoning_overlay_requested": True,
+        "reasoning_overlay_effective": status.available,
+        "presentation": asdict(status),
+        "presentation_telemetry": telemetry,
+        "codec": codec,
+        "observation_format": codec,
+        "observation_format_fallback": codec == "jpeg",
+        "target_recovery_attempts": computer.target_recovery_attempts,
+        "no_progress_triggers": computer.no_progress_triggers,
+        "shell_events": [asdict(event) for event in computer.shell_events],
+        "background_command_counts": _background_counts(computer.shell_events),
+    }
+
+
+def _cancelled_outcome(cause: str | None) -> tuple[str, str]:
+    if cause == "target_crash":
+        return "target_crashed", "The target app exited and could not be recovered."
+    if cause == "deadline":
+        return "limit", "The absolute deadline expired."
+    if cause == "transport_failure":
+        return "failed", "The CuaDriver transport failed."
+    return "aborted", "The computer-use run was stopped."
+
+
+async def run_request(
+    request: dict[str, Any],
+    emitter: Emitter,
+    api_key: str,
+    cancellation: CancellationLatch | None = None,
+) -> str:
+    run_start = time.monotonic()
+    remaining_seconds = request["deadline_ms"] / 1000 - time.time()
+    if remaining_seconds <= 0:
+        emitter.emit(
+            {
+                "type": "result",
+                "outcome": "limit",
+                "delivery_mode": "foreground",
+                "final_text": "The deadline expired before the run started.",
+                "elapsed_ms": 0,
+                "steps": 0,
+            }
+        )
+        return "limit"
+
+    deadline = run_start + remaining_seconds
+    guard = RunGuard(request["max_steps"], deadline)
+    reporter = ActionReporter(emitter, run_start)
+    api_counter = ApiCounter()
+    computer = MacOSComputer(
+        presentation=True,
+        allow_local_shell=True,
+        execution_deadline=deadline,
+        cancellation=cancellation or CancellationLatch(),
+        known_secrets=(api_key,),
+    )
+    agent: Any = None
+    outcome = "failed"
+    final_text: str | None = None
+    try:
+        await computer.__aenter__()
+        if request["app"]:
+            # Consume the pre-launch frame captured during session startup so
+            # the first model observation is guaranteed to show the target.
+            await computer.screenshot()
+            target = await prepare_app(computer, request["app"], request["start_url"])
+            computer.target_pid = target["pid"]
+
+            async def recover_target() -> int | None:
+                recovered = await prepare_app(computer, request["app"], request["start_url"])
+                return recovered["pid"]
+
+            computer.recover_target = recover_target
+
+        async with N2ComputerAgent(
+            computer=computer,
+            tool_set=TOOL_SET,
+            api_key=api_key,
+            base_url=request["api_base_url"],
+            model=request["model"],
+            callbacks=[guard, reporter, api_counter],
+            instructions=SYSTEM_CONTEXT,
+            presentation=computer.presentation,
+            screenshot_delay=0,
+            execution_deadline=deadline,
+            supports_click_modifiers=True,
+        ) as agent:
+            items = await _collect_run(agent, request["task"])
+        texts = _texts_from_items(items)
+        final_text = _strip_final_markers(texts[-1] if texts else None)
+        if guard.limit_reached or guard.deadline_reached:
+            outcome = "limit"
+            if guard.limit_reached:
+                try:
+                    final_text = await _summarize_limit_run(request, api_key, computer, items, deadline) or final_text
+                except Exception as error:  # noqa: BLE001 - final summary is best effort
+                    print(f"limit summary failed: {error}", file=sys.stderr)
+        else:
+            outcome = "completed"
+    except asyncio.CancelledError as error:
+        cause = computer.cancellation.cause or (str(error) if str(error) else None)
+        outcome, final_text = _cancelled_outcome(cause)
+    except MacOSTargetCrashedError:
+        outcome, final_text = _cancelled_outcome("target_crash")
+    except Exception as error:  # noqa: BLE001 - the protocol carries a redacted failure
+        outcome = "failed"
+        final_text = str(error).replace(api_key, "[REDACTED]") or type(error).__name__
+    finally:
+        status = computer.presentation_status
+        try:
+            await computer.aclose()
+        except Exception as error:  # noqa: BLE001 - preserve the primary outcome
+            if outcome == "completed":
+                outcome = "failed"
+                final_text = str(error).replace(api_key, "[REDACTED]") or type(error).__name__
+
+    reporter.flush_interrupted()
+    elapsed_ms = max(0, round((time.monotonic() - run_start) * 1000))
+    emitter.emit(
+        {
+            "type": "result",
+            "outcome": outcome,
+            "delivery_mode": "foreground",
+            "final_text": final_text,
+            "elapsed_ms": elapsed_ms,
+            "steps": guard.steps,
+            "timings": _timings_payload(elapsed_ms, agent, api_counter, reporter, computer),
+            **_presentation_payload(computer, status),
+        }
+    )
+    return outcome
+
+
+def _claim_protocol_stream() -> TextIO:
+    protocol_fd = os.dup(1)
+    os.dup2(2, 1)
+    sys.stdout = sys.stderr
+    return os.fdopen(protocol_fd, "w", buffering=1)
+
+
+def _read_request_line() -> str:
+    lines = [line for line in sys.stdin.read().splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise RequestError("INVALID_REQUEST", "Expected exactly one JSONL request line.")
+    return lines[0]
+
+
+def _take_api_key() -> str | None:
+    """Move the API key out of the environment before model-owned shells exist."""
+    return os.environ.pop("YUTORI_API_KEY", None)
+
+
+async def _run_until_terminated(request: dict[str, Any], emitter: Emitter, api_key: str) -> str:
+    """Turn supervisor SIGTERM into SDK cancellation so teardown can reap shells."""
+    cancellation = CancellationLatch()
+    task = asyncio.create_task(run_request(request, emitter, api_key, cancellation))
+    loop = asyncio.get_running_loop()
+    terminating = False
+
+    def terminate() -> None:
+        nonlocal terminating
+        if terminating:
+            return
+        terminating = True
+        cancellation.request("supervisor")
+        task.cancel("supervisor")
+
+    loop.add_signal_handler(signal.SIGTERM, terminate)
+    try:
+        return await task
+    finally:
+        loop.remove_signal_handler(signal.SIGTERM)
+
+
+def main() -> int:
+    api_key = _take_api_key()
+    emitter = Emitter(_claim_protocol_stream())
+    emitter.emit(
+        {
+            "type": "ready",
+            "protocol_version": PROTOCOL_VERSION,
+            "package_version": _package_version(),
+            "sdk_version": SDK_VERSION,
+            "sdk_artifact_sha256": SDK_ARTIFACT_SHA256,
+            "sdk_provenance_sha256": SDK_PROVENANCE_SHA256,
+            "driver_version_pinned": DRIVER_VERSION,
+            "observation_format": "webp",
+            "observation_format_fallback": True,
+            "observation_fallback_format": "jpeg",
+            "reasoning_overlay_requested": True,
+        }
+    )
+    try:
+        try:
+            payload = json.loads(_read_request_line())
+        except json.JSONDecodeError:
+            raise RequestError("INVALID_JSON", "Request was not valid JSON.") from None
+        request = parse_request(payload)
+    except RequestError as error:
+        emitter.emit({"type": "error", "code": error.code, "message": str(error)})
+        return 1
+    if not api_key:
+        emitter.emit(
+            {
+                "type": "error",
+                "code": "MISSING_API_KEY",
+                "message": "YUTORI_API_KEY is not set in the runner environment.",
+            }
+        )
+        return 1
+    try:
+        outcome = asyncio.run(_run_until_terminated(request, emitter, api_key))
+    except Exception as error:  # noqa: BLE001 - last-resort protocol boundary
+        message = str(error).replace(api_key, "[REDACTED]") or type(error).__name__
+        emitter.emit(
+            {
+                "type": "result",
+                "outcome": "failed",
+                "delivery_mode": "foreground",
+                "final_text": message,
+                "steps": 0,
+            }
+        )
+        return 1
+    return 0 if outcome in {"completed", "limit", "aborted"} else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

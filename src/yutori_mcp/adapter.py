@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from yutori import AsyncYutoriClient
-from yutori.auth.credentials import resolve_api_key
+from .credentials import resolve_api_key_for_environment
 from yutori.config import DEFAULT_BASE_URL
 from yutori.exceptions import APIConnectionError, APIError, AuthenticationError
 
@@ -30,6 +30,11 @@ ENVIRONMENT_BASE_URLS: dict[str, str] = {
 }
 DEFAULT_ENVIRONMENT = "prod"
 ENV_VAR_ENVIRONMENT = "YUTORI_ENV"
+
+
+def current_environment() -> str:
+    """The environment name this process is targeting."""
+    return os.environ.get(ENV_VAR_ENVIRONMENT) or DEFAULT_ENVIRONMENT
 
 
 def resolve_base_url(environment: str | None = None) -> str:
@@ -74,7 +79,10 @@ class MCPClientAdapter:
     """
 
     def __init__(self, base_url: str | None = None) -> None:
-        api_key = resolve_api_key()
+        # Resolved per environment, exactly as the computer-use path does. With credentials
+        # now split by environment, reading the SDK's single key here meant every browsing,
+        # research and scout call sent a production key at the dev API.
+        api_key = resolve_api_key_for_environment(current_environment())
         if not api_key:
             raise ValueError(ERROR_NO_API_KEY)
         self._client = AsyncYutoriClient(

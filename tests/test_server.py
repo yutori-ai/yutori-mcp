@@ -196,8 +196,8 @@ class TestMainAuthDispatch:
     def test_subcommand_runs_its_table_handler(self, name):
         calls = []
 
-        def fake_handler():
-            calls.append(name)
+        def fake_handler(environment: str | None):
+            calls.append((name, environment))
             raise SystemExit(0)
 
         help_text, _ = _AUTH_SUBCOMMANDS[name]
@@ -207,7 +207,7 @@ class TestMainAuthDispatch:
             patch.dict("yutori_mcp.server._AUTH_SUBCOMMANDS", table, clear=True),
         ):
             _assert_main_exits(0)
-        assert calls == [name]
+        assert calls == [(name, None)]
 
 
 class TestMainLoginAuthUrl:

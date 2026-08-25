@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Reused as the gate in publish_to_pypi.yml so releases run the same matrix.
+  # Kept callable so another workflow can reuse this exact matrix as a gate.
   workflow_call:
 
 permissions:
@@ -24,3 +24,19 @@ jobs:
 
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} --extra dev pytest -q
+
+      - name: Verify the published SDK wheel
+        if: matrix.python-version == '3.12'
+        env:
+          YUTORI_MCP_VERIFY_PUBLISHED_ARTIFACT: "1"
+        run: >-
+          uv run --python ${{ matrix.python-version }} --extra dev pytest -q
+          tests/test_computer_use.py::test_published_sdk_wheel_matches_artifact_hash
+
+      - name: Verify a pip-installed runtime
+        if: matrix.python-version == '3.12'
+        run: |
+          python -m venv "$RUNNER_TEMP/pip-install"
+          "$RUNNER_TEMP/pip-install/bin/pip" install .
+          "$RUNNER_TEMP/pip-install/bin/python" -c \
+            'from yutori_mcp.computer_use.preflight import check_runtime; result = check_runtime(); assert result.ok, result.detail'
