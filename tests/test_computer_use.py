@@ -657,7 +657,7 @@ async def test_run_task_uses_only_python_runner_and_sdk_driver_discovery(tmp_pat
     assert result["outcome"] == "completed"
     assert supervise.await_args.kwargs["command"] == python_runner_command()
     request = supervise.await_args.kwargs["request"]
-    assert request["model"] == "n2-preview"
+    assert request["model"] == "n2"
     assert "driver_path" not in request and "harness" not in request
 
 
@@ -763,7 +763,9 @@ def test_api_access_probes_the_selected_environment(monkeypatch, environment, ex
     assert result.name == f"{environment} API"
     assert resolved_environments == [environment]
     assert requests[0].full_url == expected_url
-    assert json.loads(requests[0].data)["tool_set"] == TOOL_SET
+    payload = json.loads(requests[0].data)
+    assert payload["model"] == "n2"
+    assert payload["tool_set"] == TOOL_SET
 
 
 @pytest.mark.parametrize("status", [429, 500])
@@ -1049,7 +1051,7 @@ def _valid_request(**overrides):
         "start_url": None,
         "deadline_ms": 1_000_000,
         "max_steps": 10,
-        "model": "n2-preview",
+        "model": "n2",
         "api_base_url": "https://api.dev.yutori.com/v1",
     }
     request.update(overrides)

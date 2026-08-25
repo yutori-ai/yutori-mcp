@@ -699,7 +699,7 @@ def _register_computer_use_tool() -> None:
         return
     mcp.tool(
         description=(
-            "Operate the foreground Mac desktop using Yutori's n2-preview model. "
+            "Operate the foreground Mac desktop using Yutori's n2 model. "
             "Do not touch the Mac during the run. Visible desktop content is sent to "
             "the configured Yutori API environment."
         ),

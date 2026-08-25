@@ -19,6 +19,7 @@ from urllib.request import Request, url2pathname, urlopen
 from .constants import (
     DRIVER_VERSION,
     MCP_VERSION,
+    MODEL,
     SDK_ARTIFACT_SHA256,
     SDK_INSTALLATION_SHA256,
     SDK_PROVENANCE_SHA256,
@@ -446,14 +447,14 @@ def _login_command(environment: str) -> str:
 def _access_remediation(environment: str) -> str:
     return (
         f"Refresh the {environment} credential with: {_login_command(environment)}. "
-        "If it is already current, ask Yutori for n2-preview access."
+        "If it is already current, ask Yutori for n2 access."
     )
 
 
 def check_api_access() -> CheckResult:
     """Probe the endpoint a run uses, and read the BODY, not just the status.
 
-    Two traps, both hit for real. /v1/models 403s for keys that drive n2-preview fine, so this
+    Two traps, both hit for real. /v1/models 403s for keys that drive n2 fine, so this
     asks chat/completions instead. And the API answers a billing failure with HTTP 200 carrying
     {"error": {"type": "billing_error"}} — a key with no prepaid balance looked healthy here while
     every task failed at zero steps with an empty stderr. Status codes alone cannot see that.
@@ -470,7 +471,7 @@ def check_api_access() -> CheckResult:
             f"{resolve_base_url(environment).rstrip('/')}/chat/completions",
             data=json.dumps(
                 {
-                    "model": "n2-preview",
+                    "model": MODEL,
                     "tool_set": TOOL_SET,
                     "messages": [{"role": "user", "content": "ping"}],
                 }
@@ -501,7 +502,7 @@ def check_api_access() -> CheckResult:
         return _result(result_name, False, message, remediation)
     if not payload.get("choices"):
         return _result(result_name, False, "no completion returned", remediation)
-    return _result(result_name, True, "n2-preview returned a completion", remediation)
+    return _result(result_name, True, f"{MODEL} returned a completion", remediation)
 
 
 _PLATFORM_CHECKS: tuple[Callable[[], CheckResult], ...] = (
