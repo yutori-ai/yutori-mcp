@@ -67,6 +67,10 @@ def _kernel_session_pids(session_id: int) -> list[int] | None:
 
 
 def _session_pids(session_id: int) -> list[int] | None:
+    if sys.platform == "darwin":
+        members = _kernel_session_pids(session_id)
+        if members is not None:
+            return members
     members = _ps_session_pids(session_id)
     if members is not None:
         return members

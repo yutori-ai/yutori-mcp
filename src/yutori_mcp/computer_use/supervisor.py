@@ -162,9 +162,14 @@ def _owned_runner_session_pids(
     leader_identity = _process_identity(session_id)
     if session_identity is not None and leader_identity is not None and leader_identity != session_identity:
         return []
-    pids = _runner_session_pids(session_id)
-    if pids is None:
+    if sys.platform == "darwin":
         pids = _kernel_runner_session_pids(session_id)
+        if pids is None:
+            pids = _runner_session_pids(session_id)
+    else:
+        pids = _runner_session_pids(session_id)
+        if pids is None:
+            pids = _kernel_runner_session_pids(session_id)
     leader_identity = _process_identity(session_id)
     if session_identity is not None and leader_identity is not None and leader_identity != session_identity:
         return []

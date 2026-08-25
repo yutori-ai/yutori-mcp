@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from yutori_mcp.computer_use import preflight
 from yutori_mcp.computer_use import runner as runner_module
+from yutori_mcp.computer_use import shell_proxy
 from yutori_mcp.computer_use import supervisor
 from yutori_mcp.computer_use.driver import (
     CuaDriverDesktop,
@@ -261,6 +262,24 @@ def test_runner_session_enumeration_failure_is_not_an_empty_session():
         side_effect=subprocess.TimeoutExpired("ps", 5),
     ):
         assert supervisor._runner_session_pids(123) is None
+
+
+def test_darwin_session_enumeration_prefers_the_kernel_path():
+    with (
+        patch.object(shell_proxy.sys, "platform", "darwin"),
+        patch.object(shell_proxy, "_kernel_session_pids", return_value=[123]) as shell_kernel,
+        patch.object(shell_proxy, "_ps_session_pids") as shell_ps,
+        patch.object(supervisor.sys, "platform", "darwin"),
+        patch.object(supervisor, "_process_identity", return_value=None),
+        patch.object(supervisor, "_kernel_runner_session_pids", return_value=[456]) as runner_kernel,
+        patch.object(supervisor, "_runner_session_pids") as runner_ps,
+    ):
+        assert shell_proxy._session_pids(123) == [123]
+        assert supervisor._owned_runner_session_pids(456) == [456]
+    shell_kernel.assert_called_once_with(123)
+    shell_ps.assert_not_called()
+    runner_kernel.assert_called_once_with(456)
+    runner_ps.assert_not_called()
 
 
 def test_confirmed_empty_runner_session_does_not_signal_a_stale_group():
