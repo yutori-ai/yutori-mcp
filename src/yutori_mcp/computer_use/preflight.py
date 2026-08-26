@@ -589,3 +589,8 @@ def first_blocker() -> CheckResult | None:
         if not result.ok and result.blocking:
             return result
     return None
+
+
+def blocker_message(blocker: CheckResult) -> str:
+    """Render a blocking check's detail and remediation as the one-line message callers print."""
+    return f"{blocker.detail} Fix: {blocker.remediation}"

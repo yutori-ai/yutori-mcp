@@ -615,7 +615,7 @@ async def _handle_computer_use(
     from .credentials import resolve_api_key_for_environment
 
     from .computer_use.lock import ComputerUseBusyError, DesktopLock
-    from .computer_use.preflight import first_blocker
+    from .computer_use.preflight import blocker_message, first_blocker
     from .computer_use.result import failure
     from .computer_use.supervisor import run_task
 
@@ -627,7 +627,7 @@ async def _handle_computer_use(
         with lock:
             blocker = first_blocker()
             if blocker is not None:
-                return failure(f"{blocker.detail} Fix: {blocker.remediation}"), {}
+                return failure(blocker_message(blocker)), {}
             return (
                 await run_task(
                     **params.model_dump(),
