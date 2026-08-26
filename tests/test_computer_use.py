@@ -160,6 +160,30 @@ def test_main_clears_ambient_environment_for_computer_use_without_explicit_env(m
     assert observed == {"environment": None}
 
 
+@pytest.mark.parametrize(
+    ("arguments", "ambient", "expected"),
+    [(["--env", "dev"], "prod", "dev"), ([], "dev", None)],
+)
+def test_protected_entrypoint_applies_computer_use_environment(monkeypatch, arguments, ambient, expected):
+    import yutori_mcp.computer_use.cli as computer_use_cli
+    from yutori_mcp import entrypoint
+
+    observed: dict[str, str | None] = {}
+
+    def record_dispatch(_command: str, _args: object) -> int:
+        observed["environment"] = os.environ.get("YUTORI_ENV")
+        return 0
+
+    monkeypatch.setenv("YUTORI_ENV", ambient)
+    monkeypatch.setattr(sys, "argv", ["yutori-mcp", *arguments, "computer-use", "doctor"])
+    monkeypatch.setattr(computer_use_cli, "dispatch", record_dispatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        entrypoint._computer_use_main()
+    assert exc_info.value.code == 0
+    assert observed == {"environment": expected}
+
+
 def test_lock_rejects_second_owner_and_releases(tmp_path):
     path = tmp_path / "desktop.lock"
     with DesktopLock(path), pytest.raises(ComputerUseBusyError), DesktopLock(path):

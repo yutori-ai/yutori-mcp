@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from . import __version__
@@ -15,6 +16,10 @@ def _computer_use_main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
     register_parser(subparsers)
     args = parser.parse_args()
+    if args.env:
+        os.environ["YUTORI_ENV"] = args.env
+    else:
+        os.environ.pop("YUTORI_ENV", None)
     raise SystemExit(dispatch(args.computer_use_command, args))
 
 
