@@ -71,6 +71,6 @@ uvx yutori-mcp computer-use run "$ARGUMENTS" --app Safari --start-url https://ex
 - Tell the user not to touch the Mac while the task runs.
 - Use `app` for single-app tasks so the runner starts from the intended context.
 - Use `start_url` only with `app`.
-- Keep `minutes` between 1 and 15 and `max_steps` positive.
+- Keep `minutes` between 1 and 60 and `max_steps` positive.
 - For longer runs, compact or summarize older screenshots and tool results so the conversation stays within `max_context_len`.
 - Report the final result and any setup blocker from the tool or CLI output.

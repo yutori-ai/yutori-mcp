@@ -54,10 +54,14 @@ from yutori_mcp.computer_use.supervisor import (
 from yutori_mcp.schemas import ComputerUseTaskInput
 
 
-@pytest.mark.parametrize("minutes", [0.9, 15.1])
+@pytest.mark.parametrize("minutes", [0.9, 60.1])
 def test_schema_rejects_minutes(minutes):
     with pytest.raises(ValidationError):
         ComputerUseTaskInput(task="x", minutes=minutes)
+
+
+def test_schema_allows_one_hour_deadline():
+    assert ComputerUseTaskInput(task="x", minutes=60).minutes == 60
 
 
 @pytest.mark.parametrize("max_steps", [0, -1])

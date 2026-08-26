@@ -389,6 +389,9 @@ class BrowsingTaskInput(ToolInput):
     )
     webhook_format: WebhookFormat = _webhook_format_field()
 
+COMPUTER_USE_MAX_MINUTES = 60
+
+
 class ComputerUseTaskInput(ToolInput):
     task: str = Field(..., description="Task to perform on the visible Mac desktop")
     app: str | None = Field(default=None, description="Optional application to target")
@@ -396,7 +399,10 @@ class ComputerUseTaskInput(ToolInput):
         default=None, description="Optional URL to open in the target app"
     )
     minutes: float = Field(
-        default=3, ge=1, le=15, description="Absolute run deadline in minutes (1-15)"
+        default=3,
+        ge=1,
+        le=COMPUTER_USE_MAX_MINUTES,
+        description=f"Absolute run deadline in minutes (1-{COMPUTER_USE_MAX_MINUTES})",
     )
     max_steps: int = Field(
         default=60, ge=1, description="Maximum actions before stopping the run"
