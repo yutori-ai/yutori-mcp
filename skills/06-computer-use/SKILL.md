@@ -37,7 +37,7 @@ Prefer the MCP tool when it is available:
 ```json
 {
   "task": "$ARGUMENTS",
-  "minutes": 3,
+  "minutes": 15,
   "max_steps": 60
 }
 ```
@@ -57,7 +57,7 @@ Use optional fields when helpful:
 If the MCP tool is unavailable, ask the user to run the CLI task runner:
 
 ```bash
-uvx yutori-mcp computer-use run "$ARGUMENTS" --minutes 3 --max-steps 60
+uvx yutori-mcp computer-use run "$ARGUMENTS" --minutes 15 --max-steps 60
 ```
 
 For an app-specific task:
