@@ -12,6 +12,7 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, url2pathname, urlopen
@@ -211,19 +212,28 @@ def check_runtime() -> CheckResult:
     return _result("Python runtime", provenance_digest == SDK_PROVENANCE_SHA256, detail, remediation)
 
 
-def check_compiler() -> CheckResult:
+def _run_safely(
+    command: list[str], *, timeout: float, text: bool = True
+) -> subprocess.CompletedProcess[Any] | None:
+    """Run ``command``, or None if the process could not even be launched/timed out.
+
+    Every check below treats a missing binary, a spawn failure, or a timeout identically —
+    "this probe is unavailable" — while still wanting the exit code and captured output when the
+    process *did* run (including a nonzero exit, which is real signal, not a launch failure).
+    """
     try:
-        result = subprocess.run(
-            ["xcrun", "--sdk", "macosx", "--find", "swiftc"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
+        return subprocess.run(command, capture_output=True, text=text, timeout=timeout, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def check_compiler() -> CheckResult:
+    result = _run_safely(["xcrun", "--sdk", "macosx", "--find", "swiftc"], timeout=10)
+    if result is None:
+        compiler, ok = "not found", False
+    else:
         compiler = result.stdout.strip()
         ok = result.returncode == 0 and bool(compiler)
-    except (OSError, subprocess.SubprocessError):
-        compiler, ok = "not found", False
     return _result(
         "Swift compiler",
         ok,
@@ -294,17 +304,10 @@ def driver_version() -> str | None:
     driver = find_cua_driver()
     if driver is None:
         return None
-    try:
-        output = subprocess.run(
-            [str(driver), "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
+    result = _run_safely([str(driver), "--version"], timeout=10)
+    if result is None:
         return None
-    match = re.search(r"\d+\.\d+\.\d+", output)
+    match = re.search(r"\d+\.\d+\.\d+", result.stdout)
     return match.group(0) if match else None
 
 
@@ -359,15 +362,8 @@ def check_permissions() -> CheckResult:
 
 def _console_lock_state() -> bool | None:
     """Read the machine's lock state without depending on this process's GUI session."""
-    try:
-        result = subprocess.run(
-            ["/usr/sbin/ioreg", "-n", "Root", "-d", "1"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+    result = _run_safely(["/usr/sbin/ioreg", "-n", "Root", "-d", "1"], timeout=5)
+    if result is None:
         return None
     match = re.search(r'"IOConsoleLocked"\s*=\s*(Yes|No)', result.stdout)
     return match.group(1) == "Yes" if match else None
@@ -382,16 +378,8 @@ def check_gui_session() -> CheckResult:
     owner and IORegistry lock state are properties of the machine, so they remain truthful over
     SSH without asking the caller's process whether it has a GUI session.
     """
-    try:
-        owner = subprocess.run(
-            ["/usr/bin/stat", "-f", "%Su", "/dev/console"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        ).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        owner = ""
+    result = _run_safely(["/usr/bin/stat", "-f", "%Su", "/dev/console"], timeout=5)
+    owner = result.stdout.strip() if result is not None else ""
     # root or _windowserver owns the console at the login window, i.e. nobody is logged in.
     logged_in = bool(owner) and owner not in {"root", "_windowserver"}
     locked = _console_lock_state() if logged_in else None
@@ -436,20 +424,12 @@ def check_capture() -> CheckResult:
         # Under $TMPDIR, whose /var -> /private/var symlink the driver rejects as an unresolved
         # ancestor, so hand it a fully resolved path.
         target = Path(directory).resolve() / "capture.png"
-        try:
-            subprocess.run(
-                [
-                    str(driver),
-                    "call",
-                    "get_desktop_state",
-                    json.dumps({"screenshot_out_file": str(target)}),
-                    "--raw",
-                ],
-                capture_output=True,
-                timeout=30,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
+        result = _run_safely(
+            [str(driver), "call", "get_desktop_state", json.dumps({"screenshot_out_file": str(target)}), "--raw"],
+            timeout=30,
+            text=False,
+        )
+        if result is None:
             return _result(
                 "desktop capture",
                 False,
