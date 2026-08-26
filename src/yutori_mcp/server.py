@@ -847,10 +847,9 @@ def main() -> None:
     if args.command == "computer-use":
         # Public computer-use commands default to production even if a shell has
         # stale YUTORI_ENV state. Internal testing can still pass --env explicitly.
-        if not args.env:
-            os.environ.pop(ENV_VAR_ENVIRONMENT, None)
-        from .computer_use.cli import dispatch
+        from .computer_use.cli import apply_computer_use_environment, dispatch
 
+        apply_computer_use_environment(args.env)
         raise SystemExit(dispatch(args.computer_use_command, args))
 
     # Dispatched after --env is applied, not before: `login --env <name>` has to know which

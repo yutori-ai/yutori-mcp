@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import os
 import subprocess
 import tempfile
 import uuid
@@ -218,6 +219,21 @@ async def _run_custom(args: argparse.Namespace) -> int:
     )
     print(format_result(result))
     return 0 if result.get("outcome") == "completed" else 1
+
+
+def apply_computer_use_environment(env: str | None) -> None:
+    """Set or clear YUTORI_ENV so resolve_base_url() sees --env exactly as passed.
+
+    Public computer-use commands default to production even if a shell has stale
+    YUTORI_ENV state, so the absence of an explicit --env clears any ambient value
+    rather than leaving it in place.
+    """
+    from ..adapter import ENV_VAR_ENVIRONMENT
+
+    if env:
+        os.environ[ENV_VAR_ENVIRONMENT] = env
+    else:
+        os.environ.pop(ENV_VAR_ENVIRONMENT, None)
 
 
 def register_parser(
