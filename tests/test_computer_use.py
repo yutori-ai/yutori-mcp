@@ -1375,6 +1375,14 @@ async def test_run_request_wires_sdk_runtime_and_reports_effective_state(monkeyp
     assert agent.kwargs["tool_set"] == TOOL_SET
     assert agent.kwargs["presentation"] is computer.presentation
     assert agent.kwargs["supports_click_modifiers"] is True
+    assert "Shell commands run headlessly" in agent.kwargs["instructions"]
+    assert "Do not use osascript" in agent.kwargs["instructions"]
+    assert "Never inspect a GUI application's databases" in agent.kwargs["instructions"]
+    assert "use at most three shell calls for research" in agent.kwargs["instructions"]
+    assert "never inspect browser profile databases" in agent.kwargs["instructions"]
+    assert "stop immediately instead of trying alternate URLs" in agent.kwargs["instructions"]
+    assert "Never ask them to give you a password" in agent.kwargs["instructions"]
+    assert "Do not install software or packages" in agent.kwargs["instructions"]
     assert computer.closed
     result = json.loads(stream.lines[-1])
     assert result["final_text"] == "Done"
