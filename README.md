@@ -67,6 +67,9 @@ To run through an MCP client, use the `run_computer_use_task` tool with a task, 
 target app, optional start URL, time limit, and step limit. Only one task can control a Mac
 at a time.
 
+For longer runs, prefer compacting or summarizing older screenshots and tool results so the
+conversation stays within `max_context_len`; do not rely on an artificial 100-step cap.
+
 To expose the MCP tool to a client, run the default server:
 
 ```json
