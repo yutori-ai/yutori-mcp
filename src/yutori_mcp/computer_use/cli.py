@@ -146,6 +146,10 @@ async def _smoke_live() -> int:
 
             try:
                 copied = await _mechanical_calculator_check()
+            # Every driver and computer failure lands here: CuaDriverError and
+            # MacOSComputerError, and so every subclass prepare_app and the transport raise,
+            # derive from RuntimeError. What is left outside this tuple is a bug in this file,
+            # which should surface as a traceback rather than a setup-blocker message.
             except (OSError, RuntimeError, TypeError, ValueError) as error:
                 print(f"Mechanical Calculator check failed through CuaDriver. Detail: {error}")
                 return 1
