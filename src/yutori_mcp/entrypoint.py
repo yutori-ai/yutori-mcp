@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 
 from . import __version__
 
 
 def _computer_use_main() -> None:
-    from .computer_use.cli import dispatch, register_parser
+    from .computer_use.cli import apply_computer_use_environment, dispatch, register_parser
 
     parser = argparse.ArgumentParser(prog="yutori-mcp")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -16,10 +15,7 @@ def _computer_use_main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
     register_parser(subparsers)
     args = parser.parse_args()
-    if args.env:
-        os.environ["YUTORI_ENV"] = args.env
-    else:
-        os.environ.pop("YUTORI_ENV", None)
+    apply_computer_use_environment(args.env)
     raise SystemExit(dispatch(args.computer_use_command, args))
 
 
