@@ -91,6 +91,15 @@ def _setup() -> int:
     return _doctor()
 
 
+def _blocked() -> bool:
+    """Print and return True if a blocking preflight check fails; False if ready to run."""
+    blocker = first_blocker()
+    if blocker is None:
+        return False
+    print(blocker_message(blocker))
+    return True
+
+
 def _structured(result: dict[str, Any]) -> dict[str, Any]:
     value = result.get("structuredContent") or result.get("structured_content") or {}
     return value if isinstance(value, dict) else {}
@@ -144,9 +153,7 @@ async def _smoke_live() -> int:
 
     try:
         with DesktopLock() as lock:
-            blocker = first_blocker()
-            if blocker is not None:
-                print(blocker_message(blocker))
+            if _blocked():
                 return 1
 
             try:
@@ -205,9 +212,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
         minutes=args.minutes,
         max_steps=args.max_steps,
     )
-    blocker = first_blocker()
-    if blocker is not None:
-        print(blocker_message(blocker))
+    if _blocked():
         return 1
     print("The model takes over this Mac's desktop now; do not touch it during the run.")
     api_key, api_base_url = resolve_run_credentials()
