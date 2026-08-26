@@ -8,7 +8,6 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any
 from urllib.request import urlopen
 
 from ..schemas import (
@@ -100,16 +99,11 @@ def _blocked() -> bool:
     return True
 
 
-def _structured(result: dict[str, Any]) -> dict[str, Any]:
-    value = result.get("structuredContent") or result.get("structured_content") or {}
-    return value if isinstance(value, dict) else {}
-
-
 async def _mechanical_calculator_check() -> str:
     from yutori.navigator.macos import MacOSComputer
     from yutori.navigator.macos.transport import CuaDriverTransport
 
-    from .app import prepare_app
+    from .app import prepare_app, structured_content
 
     driver = find_cua_driver()
     if driver is None:
@@ -141,7 +135,7 @@ async def _mechanical_calculator_check() -> str:
                 {"session": computer.session, "include_text": True},
                 read_only=True,
             )
-            copied = str(_structured(result).get("text") or "").strip()
+            copied = str(structured_content(result).get("text") or "").strip()
             if copied == "42":
                 break
             await computer.wait(500)

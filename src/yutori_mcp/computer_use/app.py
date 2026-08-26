@@ -18,6 +18,17 @@ _APP_BUNDLE_IDS = {"finder": "com.apple.finder"}
 _FRONTING_SETTLE_MS = 800
 
 
+def structured_content(result: dict[str, Any]) -> dict[str, Any]:
+    """The structured payload of a ``_call_tool`` result, tolerating either key casing.
+
+    The driver protocol has used both ``structuredContent`` (MCP-style) and
+    ``structured_content`` across releases; every caller wants "whichever one is present,
+    or an empty dict" rather than caring which.
+    """
+    value = result.get("structuredContent") or result.get("structured_content") or {}
+    return value if isinstance(value, dict) else {}
+
+
 def _windows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     windows: list[dict[str, Any]] = []
     for window in payload.get("windows") or []:
@@ -67,8 +78,7 @@ async def _running_app(computer: MacOSComputer, requested: str) -> dict[str, Any
     # The pinned SDK has no public list_apps convenience method. Its generic hook
     # retains deadline/Stop cancellation while keeping the transport SDK-owned.
     result = await computer._call_tool("list_apps", {}, read_only=True)
-    payload = result.get("structuredContent") or result.get("structured_content") or {}
-    return _find_running_app(payload if isinstance(payload, dict) else {}, requested)
+    return _find_running_app(structured_content(result), requested)
 
 
 async def prepare_app(computer: MacOSComputer, app: str, start_url: str | None) -> dict[str, Any]:
