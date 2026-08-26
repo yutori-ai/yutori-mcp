@@ -586,6 +586,7 @@ def _progress_reporter(
     not an upper bound for it — a fabricated total would render a bar that
     overshoots. The human-readable message carries the step budget instead.
     """
+    from .computer_use.result import format_action_line
 
     async def on_event(event: dict[str, Any]) -> None:
         if event.get("type") == "ready":
@@ -594,11 +595,7 @@ def _progress_reporter(
             await ctx.info(message)
             return
         index = event.get("index", 0)
-        message = f"action #{index}: {event.get('tool')} -> {event.get('status')}"
-        if event.get("refusal_code"):
-            message += f" ({event['refusal_code']})"
-        if event.get("duration_ms") is not None:
-            message += f" took {event['duration_ms']} ms"
+        message = format_action_line(event, index_default=0)
         if event.get("elapsed_ms") is not None:
             message += f" [{event['elapsed_ms']} ms]"
         if event.get("command"):

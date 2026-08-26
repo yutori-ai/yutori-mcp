@@ -22,7 +22,7 @@ from .preflight import (
     first_blocker,
     run_checks,
 )
-from .result import format_result
+from .result import format_action_line, format_result
 from .supervisor import run_task
 
 
@@ -178,11 +178,7 @@ async def _print_event(event: dict) -> None:
     if event.get("type") == "ready":
         print("runner ready; driving the desktop")
         return
-    line = f"action #{event.get('index')}: {event.get('tool')} -> {event.get('status')}"
-    if event.get("refusal_code"):
-        line += f" ({event['refusal_code']})"
-    if event.get("duration_ms") is not None:
-        line += f" took {event['duration_ms']} ms"
+    line = format_action_line(event)
     if event.get("elapsed_ms") is not None:
         line += f" [at {event['elapsed_ms']} ms]"
     if event.get("command"):

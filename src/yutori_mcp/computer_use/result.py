@@ -60,6 +60,22 @@ def format_perf(result: dict[str, Any]) -> list[str]:
     return lines
 
 
+def format_action_line(event: dict[str, Any], *, index_default: Any = None) -> str:
+    """The "action #N: tool -> status" prefix shared by the CLI and MCP progress renderers.
+
+    Only the part that is byte-identical between the two callers lives here; each caller
+    appends its own elapsed-time and command formatting, which intentionally differ (a
+    multi-line indented command preview for a terminal vs. a single-line MCP log message).
+    """
+    index = event.get("index", index_default)
+    line = f"action #{index}: {event.get('tool')} -> {event.get('status')}"
+    if event.get("refusal_code"):
+        line += f" ({event['refusal_code']})"
+    if event.get("duration_ms") is not None:
+        line += f" took {event['duration_ms']} ms"
+    return line
+
+
 def format_result(result: dict[str, Any]) -> str:
     lines = [
         f"Outcome: {result.get('outcome', 'failed')}",
