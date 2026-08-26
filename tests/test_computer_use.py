@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib.metadata
+import io
 import json
 import os
 import signal
@@ -754,6 +755,30 @@ def test_api_access_rejects_non_auth_http_failures(monkeypatch, status):
     assert result.detail == f"probe failed (HTTP {status})"
 
 
+def test_api_access_reports_invalid_model_instead_of_login(monkeypatch):
+    body = json.dumps(
+        {
+            "error": {
+                "message": "Invalid model. Available models: n1.5-latest",
+                "code": "invalid_model",
+            }
+        }
+    ).encode()
+
+    def fail_probe(*_args: Any, **_kwargs: Any) -> None:
+        raise HTTPError("https://api.yutori.com", 400, "failed", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(
+        "yutori_mcp.credentials.resolve_api_key_for_environment", lambda _: "api-key"
+    )
+    monkeypatch.setattr(preflight, "urlopen", fail_probe)
+    result = preflight.check_api_access()
+    assert not result.ok
+    assert result.detail == "Invalid model. Available models: n1.5-latest"
+    assert "requests 'n2'" in result.remediation
+    assert "login" not in result.remediation
+
+
 def test_runtime_check_verifies_version_installation_and_provenance(monkeypatch, tmp_path):
     payload = b"provenance"
     package_file = Path("yutori/runtime.py")
@@ -822,6 +847,34 @@ def test_overlay_compiler_and_capture_failures_are_warnings(monkeypatch):
     with patch("yutori.navigator.macos.check_macos_overlay", side_effect=RuntimeError("missing")):
         overlay = preflight.check_overlay()
     assert not overlay.ok and not overlay.blocking
+
+
+@pytest.mark.parametrize(
+    "lock_value,ok,detail",
+    [
+        ("No", True, "console user testuser"),
+        ("Yes", False, "console user testuser; screen locked"),
+        (None, False, "console user testuser; lock state unavailable"),
+    ],
+)
+def test_gui_session_checks_machine_lock_state(monkeypatch, lock_value, ok, detail):
+    def run(argv, **_kwargs):
+        if argv[0] == "/usr/bin/stat":
+            return subprocess.CompletedProcess(argv, 0, stdout="testuser\n")
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=(
+                f'"IOConsoleLocked" = {lock_value}\n'
+                if lock_value is not None
+                else '"OtherProperty" = Yes\n'
+            ),
+        )
+
+    monkeypatch.setattr(preflight.subprocess, "run", run)
+    result = preflight.check_gui_session()
+    assert result.ok is ok
+    assert result.detail == detail
 
 
 def test_first_blocker_skips_warnings(monkeypatch):
@@ -1090,6 +1143,25 @@ async def test_prepare_app_does_not_retry_uncertain_fronting():
     assert target == {"name": "Calculator", "pid": 42}
     computer.bring_to_front.assert_awaited_once_with(42, None)
     computer.wait.assert_awaited_once_with(800)
+
+
+async def test_smoke_reports_preflight_detail_and_fix(monkeypatch, tmp_path, capsys):
+    from yutori_mcp.computer_use import cli
+
+    blocker = preflight.CheckResult(
+        "Yutori API",
+        False,
+        "Invalid model",
+        "Use a supported model.",
+    )
+    monkeypatch.setattr(cli, "DesktopLock", lambda: DesktopLock(tmp_path / "desktop.lock"))
+    monkeypatch.setattr(cli, "first_blocker", lambda: blocker)
+    mechanical = AsyncMock()
+    monkeypatch.setattr(cli, "_mechanical_calculator_check", mechanical)
+
+    assert await cli._smoke_live() == 1
+    assert capsys.readouterr().out == "Invalid model Fix: Use a supported model.\n"
+    mechanical.assert_not_awaited()
 
 
 def _valid_request(**overrides):
