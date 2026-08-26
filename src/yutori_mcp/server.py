@@ -22,6 +22,7 @@ from .adapter import (
     ENVIRONMENT_BASE_URLS,
     MCPClientAdapter,
     YutoriAPIError,
+    current_environment,
     resolve_base_url,
 )
 from .formatters import (
@@ -630,9 +631,7 @@ async def _handle_computer_use(
             return (
                 await run_task(
                     **params.model_dump(),
-                    api_key=resolve_api_key_for_environment(
-                        os.environ.get(ENV_VAR_ENVIRONMENT) or DEFAULT_ENVIRONMENT
-                    ),
+                    api_key=resolve_api_key_for_environment(current_environment()),
                     api_base_url=resolve_base_url(),
                     lock=lock,
                     on_event=_progress_reporter(ctx, params.max_steps) if ctx else None,
