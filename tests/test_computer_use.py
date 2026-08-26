@@ -920,6 +920,7 @@ async def test_mechanical_calculator_check_uses_cua_driver(monkeypatch, tmp_path
         "show_stop_button": False,
     }
     prepare.assert_awaited_once_with(computers[0], "Calculator", None)
+    assert ("wait", 300) in computers[0].calls
     assert ("type", "6*7=") in computers[0].calls
     assert computers[0].calls.count(("keypress", ["CMD", "C"])) == 2
 

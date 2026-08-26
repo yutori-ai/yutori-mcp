@@ -110,6 +110,7 @@ async def _mechanical_calculator_check() -> str:
             {"session": computer.session, "text": sentinel},
         )
         await computer.keypress("ESC")
+        await computer.wait(300)
         await computer.type("6*7=")
         await computer.wait(500)
         # Exact clipboard equality rejects a stale result; retries avoid racing Calculator's display update.
