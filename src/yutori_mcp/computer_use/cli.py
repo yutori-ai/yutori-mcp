@@ -72,7 +72,10 @@ def _setup() -> int:
         print(check_driver_binary().remediation)
         return 1
     subprocess.run([str(driver), "permissions", "grant"], check=True)
-    from yutori.navigator.macos import MacOSOverlayPreparationError, prepare_macos_overlay
+    from yutori.navigator.macos import (
+        MacOSOverlayPreparationError,
+        prepare_macos_overlay,
+    )
 
     try:
         prepared = prepare_macos_overlay()
@@ -138,12 +141,12 @@ async def _smoke_live() -> int:
         with DesktopLock() as lock:
             blocker = first_blocker()
             if blocker is not None:
-                print(blocker.remediation)
+                print(f"{blocker.detail} Fix: {blocker.remediation}")
                 return 1
 
             try:
                 copied = await _mechanical_calculator_check()
-            except Exception as error:
+            except (OSError, RuntimeError, TypeError, ValueError) as error:
                 print(f"Mechanical Calculator check failed through CuaDriver. Detail: {error}")
                 return 1
             if copied != "42":

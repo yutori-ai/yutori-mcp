@@ -17,9 +17,9 @@ from urllib.parse import urlparse
 from urllib.request import Request, url2pathname, urlopen
 
 from .constants import (
-    MODEL,
     DRIVER_VERSION,
     MCP_VERSION,
+    MODEL,
     SDK_ARTIFACT_SHA256,
     SDK_INSTALLATION_SHA256,
     SDK_PROVENANCE_SHA256,
@@ -357,13 +357,30 @@ def check_permissions() -> CheckResult:
     )
 
 
+def _console_lock_state() -> bool | None:
+    """Read the machine's lock state without depending on this process's GUI session."""
+    try:
+        result = subprocess.run(
+            ["/usr/sbin/ioreg", "-n", "Root", "-d", "1"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.search(r'"IOConsoleLocked"\s*=\s*(Yes|No)', result.stdout)
+    return match.group(1) == "Yes" if match else None
+
+
 def check_gui_session() -> CheckResult:
-    """Ask the machine who owns the console, not this process about itself.
+    """Ask the machine who owns the console and whether that console is unlocked.
 
     The previous probe ran Quartz in-process and read CGSessionCopyCurrentDictionary. Over SSH
     that process has no window session, so it reported "inactive or locked" on a Mac that was
     logged in and driving apps fine — blocking every remote and headless setup. The console
-    owner is a property of the machine and answers the question that actually matters.
+    owner and IORegistry lock state are properties of the machine, so they remain truthful over
+    SSH without asking the caller's process whether it has a GUI session.
     """
     try:
         owner = subprocess.run(
@@ -376,12 +393,26 @@ def check_gui_session() -> CheckResult:
     except (OSError, subprocess.SubprocessError):
         owner = ""
     # root or _windowserver owns the console at the login window, i.e. nobody is logged in.
-    ok = bool(owner) and owner not in {"root", "_windowserver"}
+    logged_in = bool(owner) and owner not in {"root", "_windowserver"}
+    locked = _console_lock_state() if logged_in else None
+    ok = logged_in and locked is False
+    if not logged_in:
+        detail = "no user logged in at the console"
+        remediation = "Log in to the Mac and unlock the desktop."
+    elif locked is True:
+        detail = f"console user {owner}; screen locked"
+        remediation = "Unlock the Mac desktop."
+    elif locked is None:
+        detail = f"console user {owner}; lock state unavailable"
+        remediation = "Verify /usr/sbin/ioreg can report IOConsoleLocked, then retry."
+    else:
+        detail = f"console user {owner}"
+        remediation = ""
     return _result(
         "GUI session",
         ok,
-        f"console user {owner}" if ok else "no user logged in at the console",
-        "Log in to the Mac and unlock the desktop.",
+        detail,
+        remediation,
     )
 
 
@@ -484,6 +515,20 @@ def check_api_access() -> CheckResult:
     except HTTPError as error:
         if error.code in {401, 403}:
             return _result("Yutori API", False, "credential rejected", remediation)
+        try:
+            body = error.read()
+            error_payload = json.loads(body.decode()) if isinstance(body, bytes) else {}
+        except (AttributeError, OSError, ValueError):
+            error_payload = {}
+        api_error = error_payload.get("error") if isinstance(error_payload, dict) else None
+        if isinstance(api_error, dict):
+            message = str(api_error.get("message") or f"probe failed (HTTP {error.code})")
+            if api_error.get("code") == "invalid_model":
+                remediation = (
+                    f"This build requests {MODEL!r}; use an environment where that model is enabled "
+                    "or select a build configured for an available computer-use model."
+                )
+            return _result("Yutori API", False, message, remediation)
         return _result("Yutori API", False, f"probe failed (HTTP {error.code})", remediation)
     except (URLError, OSError, ValueError):
         return _result("Yutori API", False, "unreachable", remediation)
