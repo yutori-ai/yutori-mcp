@@ -1232,6 +1232,15 @@ def test_classify_result_maps_outputs_to_statuses(output, raw_status, status):
     assert runner_module._status_for(raw_status) == status
 
 
+def test_redacted_error_text_scrubs_the_secret():
+    error = RuntimeError("driver rejected key yt-secret-123")
+    assert runner_module._redacted_error_text(error, "yt-secret-123") == "driver rejected key [REDACTED]"
+
+
+def test_redacted_error_text_falls_back_to_type_name_when_message_is_empty():
+    assert runner_module._redacted_error_text(RuntimeError(), "yt-secret-123") == "RuntimeError"
+
+
 class _CollectStream:
     def __init__(self):
         self.lines: list[str] = []

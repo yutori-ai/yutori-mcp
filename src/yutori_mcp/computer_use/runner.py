@@ -304,6 +304,15 @@ def _strip_final_markers(text: str | None) -> str | None:
     return stripped or None
 
 
+def _redacted_error_text(error: BaseException, secret: str) -> str:
+    """Render an exception as protocol-safe text with the API key scrubbed out.
+
+    Falls back to the exception's type name when str(error) is empty (e.g. a bare
+    `RuntimeError()`), so the caller always reports something readable.
+    """
+    return str(error).replace(secret, "[REDACTED]") or type(error).__name__
+
+
 async def _collect_run(agent: Any, messages: Any) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     async for response in agent.run(messages):
@@ -502,7 +511,7 @@ async def run_request(
         outcome, final_text = _cancelled_outcome("target_crash")
     except Exception as error:  # noqa: BLE001 - the protocol carries a redacted failure
         outcome = "failed"
-        final_text = str(error).replace(api_key, "[REDACTED]") or type(error).__name__
+        final_text = _redacted_error_text(error, api_key)
     finally:
         status = computer.presentation_status
         try:
@@ -510,7 +519,7 @@ async def run_request(
         except Exception as error:  # noqa: BLE001 - preserve the primary outcome
             if outcome == "completed":
                 outcome = "failed"
-                final_text = str(error).replace(api_key, "[REDACTED]") or type(error).__name__
+                final_text = _redacted_error_text(error, api_key)
 
     reporter.flush_interrupted()
     elapsed_ms = max(0, round((time.monotonic() - run_start) * 1000))
@@ -609,7 +618,7 @@ def main() -> int:
     try:
         outcome = asyncio.run(_run_until_terminated(request, emitter, api_key))
     except Exception as error:  # noqa: BLE001 - last-resort protocol boundary
-        message = str(error).replace(api_key, "[REDACTED]") or type(error).__name__
+        message = _redacted_error_text(error, api_key)
         emitter.emit(
             {
                 "type": "result",
