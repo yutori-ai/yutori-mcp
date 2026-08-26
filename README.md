@@ -1,6 +1,6 @@
 # Yutori MCP
 
-MCP tools and workflow skills for building agents that monitor, research, browse, and operate computers with [Yutori](https://yutori.com/api).
+MCP tools and workflow skills for building agents that monitor, research, and browse the web as well as operate computers with [Yutori](https://yutori.com/api).
 
 You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and other MCP hosts.
 
