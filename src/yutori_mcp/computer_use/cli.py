@@ -189,7 +189,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
     from ..credentials import resolve_api_key_for_environment
 
     # Reuses the MCP tool's input schema so the CLI enforces the same bounds
-    # (minutes 1-15, steps 1-100, start_url requires app) with the same
+    # (minutes 1-15, positive steps, start_url requires app) with the same
     # messages; the resulting ValidationError is a ValueError, so dispatch's
     # handler prints it as a message rather than a traceback.
     params = ComputerUseTaskInput(
@@ -227,7 +227,7 @@ def register_parser(
     run_parser.add_argument("--app", default=None, help="Application to target")
     run_parser.add_argument("--start-url", dest="start_url", default=None, help="URL to open in the app")
     run_parser.add_argument("--minutes", type=float, default=3, help="Absolute deadline in minutes (1-15)")
-    run_parser.add_argument("--max-steps", dest="max_steps", type=int, default=60, help="Maximum actions (1-100)")
+    run_parser.add_argument("--max-steps", dest="max_steps", type=int, default=60, help="Maximum actions")
 
 
 def dispatch(command: str, args: argparse.Namespace | None = None) -> int:

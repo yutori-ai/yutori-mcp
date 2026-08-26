@@ -399,7 +399,7 @@ class ComputerUseTaskInput(ToolInput):
         default=3, ge=1, le=15, description="Absolute run deadline in minutes (1-15)"
     )
     max_steps: int = Field(
-        default=60, ge=1, le=100, description="Maximum actions (1-100)"
+        default=60, ge=1, description="Maximum actions before stopping the run"
     )
     @model_validator(mode="after")
     def require_app_for_start_url(self) -> ComputerUseTaskInput:

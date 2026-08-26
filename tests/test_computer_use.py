@@ -59,10 +59,14 @@ def test_schema_rejects_minutes(minutes):
         ComputerUseTaskInput(task="x", minutes=minutes)
 
 
-@pytest.mark.parametrize("max_steps", [0, 101])
-def test_schema_rejects_max_steps(max_steps):
+@pytest.mark.parametrize("max_steps", [0, -1])
+def test_schema_rejects_nonpositive_max_steps(max_steps):
     with pytest.raises(ValidationError):
         ComputerUseTaskInput(task="x", max_steps=max_steps)
+
+
+def test_schema_allows_large_max_steps():
+    assert ComputerUseTaskInput(task="x", max_steps=250).max_steps == 250
 
 
 def test_schema_requires_app_for_url_and_has_no_harness_override():
