@@ -355,7 +355,8 @@ uvx yutori-mcp computer-use smoke
 uvx yutori-mcp computer-use run "In Calculator, compute 17 * 23 and report the result." --app Calculator
 ```
 
-Same run as the `run_computer_use_task` MCP tool, with per-action progress printed as it happens.
+`smoke` runs a fixed Calculator check. `run` takes any task, prints each action as the agent
+takes it, and is the same run the `run_computer_use_task` tool performs.
 </details>
 
 A task uses your real cursor and keyboard, so leave the Mac alone until it finishes. Only one
