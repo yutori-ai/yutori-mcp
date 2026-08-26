@@ -88,6 +88,20 @@ def _require_string(request: dict[str, Any], field: str) -> str:
     return value
 
 
+def _require_optional_string(request: dict[str, Any], field: str) -> str | None:
+    value = request.get(field)
+    if value is not None and (not isinstance(value, str) or not value):
+        raise RequestError("INVALID_REQUEST", f"{field} must be a non-empty string or null.")
+    return value
+
+
+def _require_positive_int(request: dict[str, Any], field: str) -> int:
+    value = request.get(field)
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise RequestError("INVALID_REQUEST", f"{field} must be a positive integer.")
+    return value
+
+
 def parse_request(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RequestError("INVALID_REQUEST", "Request must be a JSON object.")
@@ -96,20 +110,12 @@ def parse_request(payload: Any) -> dict[str, Any]:
     if payload.get("type") != "run":
         raise RequestError("INVALID_REQUEST", "type must be 'run'.")
     task = _require_string(payload, "task")
-    app = payload.get("app")
-    if app is not None and (not isinstance(app, str) or not app):
-        raise RequestError("INVALID_REQUEST", "app must be a non-empty string or null.")
-    start_url = payload.get("start_url")
-    if start_url is not None and (not isinstance(start_url, str) or not start_url):
-        raise RequestError("INVALID_REQUEST", "start_url must be a non-empty string or null.")
+    app = _require_optional_string(payload, "app")
+    start_url = _require_optional_string(payload, "start_url")
     if start_url is not None and app is None:
         raise RequestError("INVALID_REQUEST", "start_url requires app.")
-    deadline_ms = payload.get("deadline_ms")
-    if not isinstance(deadline_ms, int) or isinstance(deadline_ms, bool) or deadline_ms <= 0:
-        raise RequestError("INVALID_REQUEST", "deadline_ms must be a positive integer.")
-    max_steps = payload.get("max_steps")
-    if not isinstance(max_steps, int) or isinstance(max_steps, bool) or max_steps <= 0:
-        raise RequestError("INVALID_REQUEST", "max_steps must be a positive integer.")
+    deadline_ms = _require_positive_int(payload, "deadline_ms")
+    max_steps = _require_positive_int(payload, "max_steps")
     return {
         "task": task,
         "app": app,
