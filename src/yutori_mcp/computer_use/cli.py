@@ -135,8 +135,7 @@ async def _mechanical_calculator_check() -> str:
 
 
 async def _smoke_live() -> int:
-    from ..adapter import current_environment, resolve_base_url
-    from ..credentials import resolve_api_key_for_environment
+    from ..adapter import resolve_run_credentials
 
     try:
         with DesktopLock() as lock:
@@ -157,14 +156,15 @@ async def _smoke_live() -> int:
             if copied != "42":
                 print("Mechanical Calculator check failed through CuaDriver: clipboard result did not match '42'.")
                 return 1
+            api_key, api_base_url = resolve_run_credentials()
             result = await run_task(
                 task="In Calculator, clear the display, compute 9 * 9, and report the result.",
                 app="Calculator",
                 start_url=None,
                 minutes=2,
                 max_steps=10,
-                api_key=resolve_api_key_for_environment(current_environment()),
-                api_base_url=resolve_base_url(),
+                api_key=api_key,
+                api_base_url=api_base_url,
                 lock=lock,
             )
     except ComputerUseBusyError as error:
@@ -187,8 +187,7 @@ async def _print_event(event: dict) -> None:
 
 
 async def _run_custom(args: argparse.Namespace) -> int:
-    from ..adapter import current_environment, resolve_base_url
-    from ..credentials import resolve_api_key_for_environment
+    from ..adapter import resolve_run_credentials
 
     # Reuses the MCP tool's input schema so the CLI enforces the same bounds
     # (minutes 1-15, positive steps, start_url requires app) with the same
@@ -206,10 +205,11 @@ async def _run_custom(args: argparse.Namespace) -> int:
         print(blocker_message(blocker))
         return 1
     print("The model takes over this Mac's desktop now; do not touch it during the run.")
+    api_key, api_base_url = resolve_run_credentials()
     result = await run_task(
         **params.model_dump(),
-        api_key=resolve_api_key_for_environment(current_environment()),
-        api_base_url=resolve_base_url(),
+        api_key=api_key,
+        api_base_url=api_base_url,
         on_event=_print_event,
     )
     print(format_result(result))

@@ -55,6 +55,17 @@ def resolve_base_url(environment: str | None = None) -> str:
         ) from None
 
 
+def resolve_run_credentials(environment: str | None = None) -> tuple[str | None, str]:
+    """The (api_key, base_url) pair a computer-use run should authenticate with.
+
+    Resolves both from the same environment so a run never mixes a key from one
+    environment with another's API — the same pairing MCPClientAdapter.__init__ does
+    for the scout/browsing/research tools.
+    """
+    name = environment or current_environment()
+    return resolve_api_key_for_environment(name), resolve_base_url(name)
+
+
 class YutoriAPIError(Exception):
     """Raised when the Yutori API returns an error (MCP-facing wrapper)."""
 
