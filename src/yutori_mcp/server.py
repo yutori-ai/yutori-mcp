@@ -32,6 +32,7 @@ from .formatters import (
 )
 from .schema_utils import output_fields_to_output_schema
 from .schemas import (
+    COMPUTER_USE_DEFAULT_MINUTES,
     DEFAULT_LIST_LIMIT,
     BrowserChoice,
     BrowsingTaskInput,
@@ -402,7 +403,7 @@ async def run_computer_use_task(
     task: str,
     app: str | None = None,
     start_url: str | None = None,
-    minutes: float = 3,
+    minutes: float = COMPUTER_USE_DEFAULT_MINUTES,
     max_steps: int = 60,
     ctx: Context | None = None,
 ) -> str:

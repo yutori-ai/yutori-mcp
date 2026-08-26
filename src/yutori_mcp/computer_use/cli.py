@@ -10,7 +10,11 @@ from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
-from ..schemas import COMPUTER_USE_MAX_MINUTES, ComputerUseTaskInput
+from ..schemas import (
+    COMPUTER_USE_DEFAULT_MINUTES,
+    COMPUTER_USE_MAX_MINUTES,
+    ComputerUseTaskInput,
+)
 from .constants import DRIVER_INSTALLER_SHA256, DRIVER_VERSION
 from .lock import ComputerUseBusyError, DesktopLock
 from .preflight import (
@@ -231,7 +235,7 @@ def register_parser(
     run_parser.add_argument(
         "--minutes",
         type=float,
-        default=3,
+        default=COMPUTER_USE_DEFAULT_MINUTES,
         help=f"Absolute deadline in minutes (1-{COMPUTER_USE_MAX_MINUTES})",
     )
     run_parser.add_argument("--max-steps", dest="max_steps", type=int, default=60, help="Maximum actions")

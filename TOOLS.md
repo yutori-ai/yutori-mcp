@@ -54,7 +54,7 @@ Actions:
 | `task` | Yes | Natural language instruction for the desktop agent |
 | `app` | No | Application to target; omit for cross-app tasks |
 | `start_url` | No | URL to open before the task starts; requires `app` |
-| `minutes` | No | Wall-clock deadline in minutes (1-60). Default: 3 |
+| `minutes` | No | Wall-clock deadline in minutes (1-60). Default: 15 |
 | `max_steps` | No | Max desktop actions, 1 or more. Default: 60 |
 
 `max_steps` has no upper bound. On long runs, compact or summarize older screenshots and tool

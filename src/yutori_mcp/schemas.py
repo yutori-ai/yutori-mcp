@@ -389,6 +389,7 @@ class BrowsingTaskInput(ToolInput):
     )
     webhook_format: WebhookFormat = _webhook_format_field()
 
+COMPUTER_USE_DEFAULT_MINUTES = 15
 COMPUTER_USE_MAX_MINUTES = 60
 
 
@@ -399,7 +400,7 @@ class ComputerUseTaskInput(ToolInput):
         default=None, description="Optional URL to open in the target app"
     )
     minutes: float = Field(
-        default=3,
+        default=COMPUTER_USE_DEFAULT_MINUTES,
         ge=1,
         le=COMPUTER_USE_MAX_MINUTES,
         description=f"Absolute run deadline in minutes (1-{COMPUTER_USE_MAX_MINUTES})",
