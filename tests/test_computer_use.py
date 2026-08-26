@@ -64,9 +64,9 @@ def test_schema_allows_one_hour_deadline():
     assert ComputerUseTaskInput(task="x", minutes=60).minutes == 60
 
 
-def test_schema_defaults_to_fifteen_minutes():
-    assert COMPUTER_USE_DEFAULT_MINUTES == 15
-    assert ComputerUseTaskInput(task="x").minutes == 15
+def test_schema_defaults_to_thirty_minutes():
+    assert COMPUTER_USE_DEFAULT_MINUTES == 30
+    assert ComputerUseTaskInput(task="x").minutes == 30
 
 
 @pytest.mark.parametrize("max_steps", [0, -1])
