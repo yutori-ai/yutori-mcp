@@ -105,12 +105,13 @@ async def _osascript(*lines: str) -> _ScriptResult:
 
 
 async def _smoke_live() -> int:
+    from ..adapter import current_environment, resolve_base_url
+    from ..credentials import resolve_api_key_for_environment
+
     blocker = first_blocker()
     if blocker is not None:
         print(blocker.remediation)
         return 1
-    from ..credentials import resolve_api_key_for_environment
-
     # The result is read back through Calculator's own copy-result (cmd+c) and
     # the clipboard, not the accessibility tree: macOS 26 rewrote Calculator and
     # "static text 1 of window 1" no longer exists there, so the AX read failed
@@ -160,8 +161,8 @@ async def _smoke_live() -> int:
         start_url=None,
         minutes=1,
         max_steps=10,
-        api_key=resolve_api_key_for_environment("dev"),
-        api_base_url="https://api.dev.yutori.com/v1",
+        api_key=resolve_api_key_for_environment(current_environment()),
+        api_base_url=resolve_base_url(),
     )
     print(format_result(result))
     return 0 if result.get("outcome") == "completed" else 1
@@ -184,6 +185,9 @@ async def _print_event(event: dict) -> None:
 
 
 async def _run_custom(args: argparse.Namespace) -> int:
+    from ..adapter import current_environment, resolve_base_url
+    from ..credentials import resolve_api_key_for_environment
+
     # Reuses the MCP tool's input schema so the CLI enforces the same bounds
     # (minutes 1-15, steps 1-100, start_url requires app) with the same
     # messages; the resulting ValidationError is a ValueError, so dispatch's
@@ -199,13 +203,11 @@ async def _run_custom(args: argparse.Namespace) -> int:
     if blocker is not None:
         print(f"{blocker.detail} Fix: {blocker.remediation}")
         return 1
-    from ..credentials import resolve_api_key_for_environment
-
     print("The model takes over this Mac's desktop now; do not touch it during the run.")
     result = await run_task(
         **params.model_dump(),
-        api_key=resolve_api_key_for_environment("dev"),
-        api_base_url="https://api.dev.yutori.com/v1",
+        api_key=resolve_api_key_for_environment(current_environment()),
+        api_base_url=resolve_base_url(),
         on_event=_print_event,
     )
     print(format_result(result))
@@ -215,12 +217,12 @@ async def _run_custom(args: argparse.Namespace) -> int:
 def register_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    parser = subparsers.add_parser("computer-use", help="Set up and diagnose the macOS computer-use preview")
+    parser = subparsers.add_parser("computer-use", help="Set up, diagnose, and run macOS computer use")
     commands = parser.add_subparsers(dest="computer_use_command", required=True)
     commands.add_parser("setup", help="Install and configure the pinned CuaDriver")
     commands.add_parser("doctor", help="Run all computer-use readiness checks")
     commands.add_parser("smoke", help="Run Calculator mechanical and live checks")
-    run_parser = commands.add_parser("run", help="Run one custom task on the visible desktop (dev only)")
+    run_parser = commands.add_parser("run", help="Run one custom task on the visible desktop")
     run_parser.add_argument("task", help="Task for the model to perform")
     run_parser.add_argument("--app", default=None, help="Application to target")
     run_parser.add_argument("--start-url", dest="start_url", default=None, help="URL to open in the app")

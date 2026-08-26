@@ -76,6 +76,7 @@ package_skill "02-research"         "yutori-research"
 package_skill "03-browse"           "yutori-browse"
 package_skill "04-competitor-watch" "yutori-competitor-watch"
 package_skill "05-api-monitor"      "yutori-api-monitor"
+package_skill "06-computer-use"     "yutori-computer-use"
 
 echo ""
 echo "Done. Output: $OUT_DIR/"

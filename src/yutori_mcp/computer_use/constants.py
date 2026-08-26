@@ -6,7 +6,7 @@ from .. import __version__
 
 PROTOCOL_VERSION = 1
 MCP_VERSION = __version__
-MODEL = "n2-preview"
+MODEL = "n2"
 TOOL_SET = "computer_use_tools-20260815"
 SDK_VERSION = "0.9.2"
 # The PyPI wheel digest and a digest derived from its stable RECORD entries.

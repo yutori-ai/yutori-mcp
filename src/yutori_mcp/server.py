@@ -685,22 +685,22 @@ def _computer_use_enabled() -> bool:
     if sys.platform != "darwin":
         return False
     try:
-        return resolve_base_url() == ENVIRONMENT_BASE_URLS["dev"]
+        resolve_base_url()
+        return True
     except ValueError:
         return False
 
 
 def _register_computer_use_tool() -> None:
-    """Expose the macOS computer-use tool when the resolved environment is dev."""
+    """Expose the macOS computer-use tool on supported hosts."""
     if "run_computer_use_task" in _TOOL_HANDLERS:
         return
     if not _computer_use_enabled():
         return
     mcp.tool(
         description=(
-            "Operate the foreground Mac desktop using Yutori's dev n2-preview model. "
-            "Do not touch the Mac during the run. Visible desktop content is sent to "
-            "Yutori's dev model endpoint."
+            "Operate the foreground Mac desktop using Yutori computer use. "
+            "Do not touch the Mac during the run. Visible desktop content is sent to Yutori."
         ),
         annotations=_DESTRUCTIVE_OPEN_WORLD,
     )(run_computer_use_task)
@@ -840,11 +840,6 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.command == "computer-use":
-        from .computer_use.cli import dispatch
-
-        raise SystemExit(dispatch(args.computer_use_command, args))
-
     # The flag is forwarded via the env var (rather than threaded through to
     # get_adapter()'s lazily-constructed, process-lifetime MCPClientAdapter)
     # so adapter.resolve_base_url() stays the single resolution point
@@ -853,13 +848,22 @@ def main() -> None:
     if args.env:
         os.environ[ENV_VAR_ENVIRONMENT] = args.env
 
-    # Dispatched after --env is applied, not before: `login --env dev` has to know which
+    if args.command == "computer-use":
+        # Public computer-use commands default to production even if a shell has
+        # stale YUTORI_ENV state. Internal testing can still pass --env explicitly.
+        if not args.env:
+            os.environ.pop(ENV_VAR_ENVIRONMENT, None)
+        from .computer_use.cli import dispatch
+
+        raise SystemExit(dispatch(args.computer_use_command, args))
+
+    # Dispatched after --env is applied, not before: `login --env <name>` has to know which
     # environment it is storing a credential for, and the old ordering ran auth first.
     #
     # Only the explicit flag counts here, never the ambient YUTORI_ENV. The README tells people
-    # to export that variable, and letting it reach this line meant a plain `login` silently
-    # became a dev paste prompt instead of the production browser flow, while `logout` cleared a
-    # dev entry instead of the real credential. Auth is an explicit act; it must not change
+    # to export that variable, and letting it reach this line meant a plain `login` could silently
+    # become a non-default paste prompt instead of the production browser flow, while `logout` cleared
+    # a non-default entry instead of the real credential. Auth is an explicit act; it must not change
     # meaning because of something left set in a shell.
     if args.command in _AUTH_SUBCOMMANDS:
         _handle_auth_command(args.command, args.env)

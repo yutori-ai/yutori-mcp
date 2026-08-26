@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, url2pathname, urlopen
 
 from .constants import (
+    MODEL,
     DRIVER_VERSION,
     MCP_VERSION,
     SDK_ARTIFACT_SHA256,
@@ -27,14 +28,6 @@ from .constants import (
 )
 
 DRIVER_APP = Path("/Applications/CuaDriver.app")
-DEV_ACCESS_REMEDIATION = (
-    "Store a dev key with: yutori-mcp --env dev login "
-    "(a production key is rejected by the dev stack). If it is already a dev key, ask "
-    "Yutori for n2-preview access."
-)
-# Named rather than inlined at both call sites: the previous text blamed missing access for
-# what is almost always a production key offered to dev, sending people to the wrong fix.
-DEV_ENVIRONMENT = "dev"
 DRIVER_PATHS = (
     # ~/.local/bin first: it is where the installer actually puts the CLI, and omitting it made
     # find_cua_driver() return None on a mini that had a working driver at
@@ -59,6 +52,18 @@ TOOL_SEARCH_DIRECTORIES = (
 _EDITABLE_SDK_OVERRIDE = "YUTORI_MCP_ALLOW_EDITABLE_SDK"
 _INSTALLER_GENERATED_FILES = {"INSTALLER", "RECORD", "REQUESTED", "direct_url.json"}
 _SDK_PROVENANCE_PATH = Path("yutori/navigator/macos/assets/provenance.json")
+
+
+def _login_remediation(environment: str) -> str:
+    from ..adapter import DEFAULT_ENVIRONMENT
+
+    if environment == DEFAULT_ENVIRONMENT:
+        return "Run: uvx yutori-mcp login"
+    return f"Run: uvx yutori-mcp --env {environment} login"
+
+
+def _api_access_remediation(environment: str) -> str:
+    return f"{_login_remediation(environment)}. If already logged in, confirm this key has computer-use access."
 
 
 def find_cua_driver() -> Path | None:
@@ -432,36 +437,39 @@ def check_capture() -> CheckResult:
 
 
 def check_api_key() -> CheckResult:
+    from ..adapter import current_environment
     from ..credentials import resolve_api_key_for_environment
 
-    key = resolve_api_key_for_environment(DEV_ENVIRONMENT)
+    environment = current_environment()
+    key = resolve_api_key_for_environment(environment)
     return _result(
         "API key",
         bool(key),
         "resolved" if key else "missing",
-        # Not plain `login`: that saves a production key, which is the misdiagnosis this
-        # change exists to remove.
-        f"Run: uvx yutori-mcp --env {DEV_ENVIRONMENT} login",
+        _login_remediation(environment),
     )
 
 
-def check_dev_access() -> CheckResult:
+def check_api_access() -> CheckResult:
     """Probe the endpoint a run uses, and read the BODY, not just the status.
 
-    Two traps, both hit for real. /v1/models 403s for keys that drive n2-preview fine, so this
-    asks chat/completions instead. And the API answers a billing failure with HTTP 200 carrying
+    Two traps, both hit for real. /v1/models can 403 for keys that drive computer use fine, so
+    this asks chat/completions instead. And the API answers a billing failure with HTTP 200 carrying
     {"error": {"type": "billing_error"}} — a key with no prepaid balance looked healthy here while
     every task failed at zero steps with an empty stderr. Status codes alone cannot see that.
     """
+    from ..adapter import current_environment, resolve_base_url
     from ..credentials import resolve_api_key_for_environment
 
+    environment = current_environment()
+    remediation = _api_access_remediation(environment)
     try:
-        key = resolve_api_key_for_environment(DEV_ENVIRONMENT)
+        key = resolve_api_key_for_environment(environment)
         request = Request(
-            "https://api.dev.yutori.com/v1/chat/completions",
+            f"{resolve_base_url(environment).rstrip('/')}/chat/completions",
             data=json.dumps(
                 {
-                    "model": "n2-preview",
+                    "model": MODEL,
                     "tool_set": TOOL_SET,
                     "messages": [{"role": "user", "content": "ping"}],
                 }
@@ -475,10 +483,10 @@ def check_dev_access() -> CheckResult:
             payload = json.loads(response.read().decode() or "{}")
     except HTTPError as error:
         if error.code in {401, 403}:
-            return _result("dev API", False, "credential rejected", DEV_ACCESS_REMEDIATION)
-        return _result("dev API", False, f"probe failed (HTTP {error.code})", DEV_ACCESS_REMEDIATION)
+            return _result("Yutori API", False, "credential rejected", remediation)
+        return _result("Yutori API", False, f"probe failed (HTTP {error.code})", remediation)
     except (URLError, OSError, ValueError):
-        return _result("dev API", False, "unreachable", DEV_ACCESS_REMEDIATION)
+        return _result("Yutori API", False, "unreachable", remediation)
 
     error = payload.get("error")
     if isinstance(error, dict):
@@ -487,12 +495,12 @@ def check_dev_access() -> CheckResult:
         remediation = (
             "Add prepaid balance to this key's account, then retry."
             if "billing" in kind or "funds" in kind
-            else DEV_ACCESS_REMEDIATION
+            else remediation
         )
-        return _result("dev API", False, message, remediation)
+        return _result("Yutori API", False, message, remediation)
     if not payload.get("choices"):
-        return _result("dev API", False, "no completion returned", DEV_ACCESS_REMEDIATION)
-    return _result("dev API", True, "n2-preview returned a completion", DEV_ACCESS_REMEDIATION)
+        return _result("Yutori API", False, "no completion returned", remediation)
+    return _result("Yutori API", True, "computer-use model returned a completion", remediation)
 
 
 _PLATFORM_CHECKS: tuple[Callable[[], CheckResult], ...] = (
@@ -514,7 +522,7 @@ _ENVIRONMENT_CHECKS: tuple[Callable[[], CheckResult], ...] = (
     check_compiler,
     check_overlay,
     check_api_key,
-    check_dev_access,
+    check_api_access,
 )
 
 
