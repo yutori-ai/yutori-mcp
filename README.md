@@ -347,9 +347,6 @@ uvx yutori-mcp computer-use setup    # installs CuaDriver.app, requests Screen R
 `setup` finishes by running the readiness checks and reports anything still missing. Re-run
 those checks any time with `uvx yutori-mcp computer-use doctor`.
 
-One task controls the Mac at a time, using the real cursor and keyboard — don't touch the
-machine while a task runs.
-
 <details>
 <summary>Run a task from the terminal</summary>
 
@@ -360,6 +357,9 @@ uvx yutori-mcp computer-use run "In Calculator, compute 17 * 23 and report the r
 
 Same run as the `run_computer_use_task` MCP tool, with per-action progress printed as it happens.
 </details>
+
+A task uses your real cursor and keyboard, so leave the Mac alone until it finishes. Only one
+task runs at a time.
 
 ## Tools
 
