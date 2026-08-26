@@ -389,7 +389,7 @@ class BrowsingTaskInput(ToolInput):
     )
     webhook_format: WebhookFormat = _webhook_format_field()
 
-COMPUTER_USE_DEFAULT_MINUTES = 15
+COMPUTER_USE_DEFAULT_MINUTES = 30
 COMPUTER_USE_MAX_MINUTES = 60
 
 
