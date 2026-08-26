@@ -7,10 +7,12 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Any
 from urllib.request import urlopen
 
 from ..schemas import ComputerUseTaskInput
 from .constants import DRIVER_INSTALLER_SHA256, DRIVER_VERSION
+from .lock import ComputerUseBusyError, DesktopLock
 from .preflight import (
     check_driver_binary,
     check_runtime,
@@ -80,90 +82,86 @@ def _setup() -> int:
     return _doctor()
 
 
-class _ScriptResult:
-    def __init__(self, returncode: int, stdout: str, stderr: str):
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
+def _structured(result: dict[str, Any]) -> dict[str, Any]:
+    value = result.get("structuredContent") or result.get("structured_content") or {}
+    return value if isinstance(value, dict) else {}
 
 
-async def _osascript(*lines: str) -> _ScriptResult:
-    argv: list[str] = ["osascript"]
-    for line in lines:
-        argv.extend(["-e", line])
-    process = await asyncio.create_subprocess_exec(
-        *argv,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await process.communicate()
-    return _ScriptResult(
-        process.returncode or 0,
-        stdout.decode(errors="replace"),
-        stderr.decode(errors="replace"),
-    )
+async def _mechanical_calculator_check() -> str:
+    from yutori.navigator.macos import MacOSComputer
+    from yutori.navigator.macos.transport import CuaDriverTransport
+
+    from .app import prepare_app
+
+    driver = find_cua_driver()
+    if driver is None:
+        raise RuntimeError(check_driver_binary().remediation)
+    transport = CuaDriverTransport(binary=driver)
+    sentinel = f"yutori-smoke-{uuid.uuid4().hex[:12]}"
+    async with MacOSComputer(
+        transport=transport,
+        owns_transport=True,
+        presentation=False,
+        show_stop_button=False,
+    ) as computer:
+        await prepare_app(computer, "Calculator", None)
+        await computer._call_tool(
+            "clipboard_write",
+            {"session": computer.session, "text": sentinel},
+        )
+        await computer.keypress("ESC")
+        await computer.wait(300)
+        await computer.type("6*7=")
+        await computer.wait(500)
+        # Exact clipboard equality rejects a stale result; retries avoid racing Calculator's display update.
+        copied = ""
+        for _attempt in range(3):
+            await computer.keypress(["CMD", "C"])
+            await computer.wait(700)
+            result = await computer._call_tool(
+                "clipboard_read",
+                {"session": computer.session, "include_text": True},
+                read_only=True,
+            )
+            copied = str(_structured(result).get("text") or "").strip()
+            if copied == "42":
+                break
+            await computer.wait(500)
+    return copied
 
 
 async def _smoke_live() -> int:
     from ..adapter import current_environment, resolve_base_url
     from ..credentials import resolve_api_key_for_environment
 
-    blocker = first_blocker()
-    if blocker is not None:
-        print(blocker.remediation)
-        return 1
-    # The result is read back through Calculator's own copy-result (cmd+c) and
-    # the clipboard, not the accessibility tree: macOS 26 rewrote Calculator and
-    # "static text 1 of window 1" no longer exists there, so the AX read failed
-    # on a machine whose Accessibility grant was fine. Keystrokes still need the
-    # *terminal's* Accessibility permission, which is what this check verifies.
-    #
-    # Two measured failure modes shape this sequence. The clipboard is seeded
-    # with a unique sentinel and the read must equal exactly "42", because a
-    # previous smoke leaves "42" behind — without the seed, a cmd+c that
-    # silently did nothing still passed. And the copy is retried as its own
-    # polled step, because cmd+c can race the "=" keypress and copy the prior
-    # display value (state restoration reopens Calculator mid-calculation).
-    # Escape first clears that restored state.
-    sentinel = f"yutori-smoke-{uuid.uuid4().hex[:12]}"
-    setup = await _osascript(
-        f'set the clipboard to "{sentinel}"',
-        'tell application "Calculator" to activate',
-        "delay 2",
-        'tell application "System Events" to key code 53',
-        "delay 0.3",
-        'tell application "System Events" to keystroke "6*7="',
-        "delay 1",
-    )
-    copied = ""
-    if setup.returncode == 0:
-        for _attempt in range(3):
-            copy = await _osascript(
-                'tell application "System Events" to keystroke "c" using command down',
-                "delay 0.7",
-                "the clipboard",
+    try:
+        with DesktopLock() as lock:
+            blocker = first_blocker()
+            if blocker is not None:
+                print(blocker.remediation)
+                return 1
+
+            try:
+                copied = await _mechanical_calculator_check()
+            except Exception as error:
+                print(f"Mechanical Calculator check failed through CuaDriver. Detail: {error}")
+                return 1
+            if copied != "42":
+                print("Mechanical Calculator check failed through CuaDriver: clipboard result did not match '42'.")
+                return 1
+            result = await run_task(
+                task="In Calculator, clear the display, compute 9 * 9, and report the result.",
+                app="Calculator",
+                start_url=None,
+                minutes=2,
+                max_steps=10,
+                api_key=resolve_api_key_for_environment(current_environment()),
+                api_base_url=resolve_base_url(),
+                lock=lock,
             )
-            copied = copy.stdout.strip() if copy.returncode == 0 else ""
-            if copied == "42":
-                break
-            await asyncio.sleep(0.5)
-    if copied != "42":
-        detail = setup.stderr.strip() or f"clipboard read {copied!r}"
-        print(
-            "Mechanical Calculator check failed; verify the terminal's Accessibility "
-            "permission (System Settings > Privacy & Security > Accessibility)."
-            + (f" Detail: {detail}" if detail else "")
-        )
+    except ComputerUseBusyError as error:
+        print(error)
         return 1
-    result = await run_task(
-        task="In Calculator, clear the display, compute 9 * 9, and report the result.",
-        app="Calculator",
-        start_url=None,
-        minutes=1,
-        max_steps=10,
-        api_key=resolve_api_key_for_environment(current_environment()),
-        api_base_url=resolve_base_url(),
-    )
     print(format_result(result))
     return 0 if result.get("outcome") == "completed" else 1
 

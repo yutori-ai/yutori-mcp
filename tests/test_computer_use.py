@@ -14,7 +14,7 @@ from urllib.error import HTTPError
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -352,6 +352,7 @@ async def test_supervisor_rejects_runner_provenance_drift():
         _stream(json.dumps(_ready_event(sdk_version="0.8.1"))),
         _stream(""),
     )
+
     async def stop(_process):
         process.returncode = -signal.SIGTERM
 
@@ -402,9 +403,7 @@ async def test_supervisor_rejects_malformed_events(event):
 async def test_supervisor_rejects_invalid_utf8_in_an_otherwise_valid_event():
     stream = asyncio.StreamReader()
     stream.feed_data(json.dumps(_ready_event()).encode() + b"\n")
-    stream.feed_data(
-        b'{"type":"result","outcome":"completed","delivery_mode":"foreground","final_text":"\xff"}\n'
-    )
+    stream.feed_data(b'{"type":"result","outcome":"completed","delivery_mode":"foreground","final_text":"\xff"}\n')
     stream.feed_eof()
     process = _Process(stream, _stream(""))
     process.returncode = 0
@@ -659,10 +658,7 @@ async def test_server_holds_desktop_lock_across_preflight_and_runner(monkeypatch
 def test_runtime_constants_select_latest_python_surface():
     assert TOOL_SET == "computer_use_tools-20260815"
     assert SDK_VERSION == "0.9.2"
-    assert all(
-        len(digest) == 64
-        for digest in (SDK_ARTIFACT_SHA256, SDK_INSTALLATION_SHA256, SDK_PROVENANCE_SHA256)
-    )
+    assert all(len(digest) == 64 for digest in (SDK_ARTIFACT_SHA256, SDK_INSTALLATION_SHA256, SDK_PROVENANCE_SHA256))
     assert '"yutori==0.9.2"' in Path(__file__).parents[1].joinpath("pyproject.toml").read_text()
 
 
@@ -871,6 +867,119 @@ def test_setup_treats_overlay_file_errors_as_warnings(monkeypatch, tmp_path, cap
     assert "WARNING reasoning overlay unavailable" in capsys.readouterr().out
 
 
+async def test_mechanical_calculator_check_uses_cua_driver(monkeypatch, tmp_path):
+    from yutori_mcp.computer_use import app, cli
+
+    driver = tmp_path / "cua-driver"
+    driver.write_text("")
+    transports = []
+    computers = []
+
+    class FakeTransport:
+        def __init__(self, binary):
+            self.binary = binary
+            transports.append(self)
+
+    class FakeComputer:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.session = "smoke-session"
+            self.calls = []
+            self.copied = iter(("41", "42"))
+            computers.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def _call_tool(self, name, arguments, *, read_only=False):
+            self.calls.append((name, arguments, read_only))
+            if name == "clipboard_read":
+                return {"structuredContent": {"text": next(self.copied)}}
+            return {"structuredContent": {}}
+
+        async def keypress(self, keys):
+            self.calls.append(("keypress", keys))
+
+        async def type(self, text):
+            self.calls.append(("type", text))
+
+        async def wait(self, milliseconds):
+            self.calls.append(("wait", milliseconds))
+
+    prepare = AsyncMock()
+    monkeypatch.setattr(cli, "find_cua_driver", lambda: driver)
+    monkeypatch.setattr("yutori.navigator.macos.MacOSComputer", FakeComputer)
+    monkeypatch.setattr("yutori.navigator.macos.transport.CuaDriverTransport", FakeTransport)
+    monkeypatch.setattr(app, "prepare_app", prepare)
+
+    assert await cli._mechanical_calculator_check() == "42"
+    assert transports[0].binary == driver
+    assert computers[0].kwargs == {
+        "transport": transports[0],
+        "owns_transport": True,
+        "presentation": False,
+        "show_stop_button": False,
+    }
+    prepare.assert_awaited_once_with(computers[0], "Calculator", None)
+    assert ("wait", 300) in computers[0].calls
+    assert ("type", "6*7=") in computers[0].calls
+    assert computers[0].calls.count(("keypress", ["CMD", "C"])) == 2
+
+
+async def test_smoke_reserves_desktop_before_mechanical_check(monkeypatch, tmp_path, capsys):
+    from yutori_mcp.computer_use import cli
+
+    lock_path = tmp_path / "desktop.lock"
+    mechanical_check = AsyncMock()
+    preflight = Mock()
+    monkeypatch.setattr(cli, "DesktopLock", lambda: DesktopLock(lock_path))
+    monkeypatch.setattr(cli, "first_blocker", preflight)
+    monkeypatch.setattr(cli, "_mechanical_calculator_check", mechanical_check)
+
+    with DesktopLock(lock_path):
+        assert await cli._smoke_live() == 1
+
+    preflight.assert_not_called()
+    mechanical_check.assert_not_awaited()
+    assert "Another computer-use task controls this Mac" in capsys.readouterr().out
+
+
+async def test_smoke_does_not_print_mismatched_clipboard_contents(monkeypatch, tmp_path, capsys):
+    from yutori_mcp.computer_use import cli
+
+    secret = "clipboard-secret-value"
+    monkeypatch.setattr(cli, "DesktopLock", lambda: DesktopLock(tmp_path / "desktop.lock"))
+    monkeypatch.setattr(cli, "first_blocker", lambda: None)
+    monkeypatch.setattr(cli, "_mechanical_calculator_check", AsyncMock(return_value=secret))
+
+    assert await cli._smoke_live() == 1
+
+    output = capsys.readouterr().out
+    assert "did not match '42'" in output
+    assert secret not in output
+
+
+async def test_smoke_allows_two_minutes_for_live_check(monkeypatch, tmp_path):
+    from yutori_mcp import credentials
+    from yutori_mcp.computer_use import cli
+
+    run = AsyncMock(return_value={"outcome": "completed"})
+    monkeypatch.setattr(cli, "DesktopLock", lambda: DesktopLock(tmp_path / "desktop.lock"))
+    monkeypatch.setattr(cli, "first_blocker", lambda: None)
+    monkeypatch.setattr(cli, "_mechanical_calculator_check", AsyncMock(return_value="42"))
+    monkeypatch.setattr(cli, "run_task", run)
+    monkeypatch.setattr(cli, "format_result", lambda _result: "complete")
+    monkeypatch.setattr(credentials, "resolve_api_key_for_environment", lambda _environment: "dev-key")
+
+    assert await cli._smoke_live() == 0
+
+    assert run.await_args.kwargs["minutes"] == 2
+    assert run.await_args.kwargs["lock"]._depth == 0
+
+
 def test_pick_best_window_excludes_helper_strips():
     strips = [{"window_id": index, "bounds": {"width": 600, "height": 20}, "z_index": 9} for index in range(4)]
     main = {"window_id": 99, "bounds": {"width": 400, "height": 500}, "z_index": 1}
@@ -903,6 +1012,19 @@ async def test_prepare_app_retries_bundle_as_name_and_fronts_best_window():
     computer.wait.assert_awaited_once_with(800)
 
 
+async def test_prepare_app_launches_finder_by_bundle_id():
+    computer = SimpleNamespace(
+        launch_app=AsyncMock(return_value={"pid": 42, "name": "Finder"}),
+        bring_to_front=AsyncMock(),
+        wait=AsyncMock(),
+    )
+
+    target = await prepare_app(computer, "Finder", None)
+
+    assert target == {"name": "Finder", "pid": 42}
+    computer.launch_app.assert_awaited_once_with(bundle_id="com.apple.finder", urls=None)
+
+
 async def test_prepare_app_preserves_explicit_launch_refusal():
     computer = SimpleNamespace(launch_app=AsyncMock(side_effect=CuaDriverToolError("POLICY_DENIED")))
     with pytest.raises(CuaDriverToolError, match="POLICY_DENIED"):
@@ -911,9 +1033,7 @@ async def test_prepare_app_preserves_explicit_launch_refusal():
 
 
 async def test_prepare_app_never_retries_uncertain_launch():
-    computer = SimpleNamespace(
-        launch_app=AsyncMock(side_effect=CuaDriverUncertainActionError("acknowledgement lost"))
-    )
+    computer = SimpleNamespace(launch_app=AsyncMock(side_effect=CuaDriverUncertainActionError("acknowledgement lost")))
     with pytest.raises(CuaDriverUncertainActionError, match="acknowledgement lost"):
         await prepare_app(computer, "com.apple.calculator", None)
     computer.launch_app.assert_awaited_once()
@@ -924,9 +1044,7 @@ async def test_prepare_app_fronts_running_persistent_app_after_launch_failure():
         launch_app=AsyncMock(side_effect=CuaDriverToolError("APP_NOT_INSTALLED")),
         _call_tool=AsyncMock(
             return_value={
-                "structuredContent": {
-                    "apps": [{"pid": 42, "name": "Finder", "bundle_id": "com.apple.finder"}]
-                }
+                "structuredContent": {"apps": [{"pid": 42, "name": "Finder", "bundle_id": "com.apple.finder"}]}
             }
         ),
         bring_to_front=AsyncMock(),

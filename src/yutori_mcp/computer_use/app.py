@@ -14,6 +14,7 @@ from yutori.navigator.macos.transport import (
 )
 
 _BUNDLE_ID_PATTERN = re.compile(r"^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
+_APP_BUNDLE_IDS = {"finder": "com.apple.finder"}
 _FRONTING_SETTLE_MS = 800
 
 
@@ -73,11 +74,12 @@ async def _running_app(computer: MacOSComputer, requested: str) -> dict[str, Any
 async def prepare_app(computer: MacOSComputer, app: str, start_url: str | None) -> dict[str, Any]:
     """Launch and best-effort front one allowed target application."""
     urls = [start_url] if start_url else None
+    bundle_id = app if _BUNDLE_ID_PATTERN.match(app) else _APP_BUNDLE_IDS.get(app.casefold())
     launch_error: CuaDriverToolError | None = None
     try:
-        if _BUNDLE_ID_PATTERN.match(app):
+        if bundle_id is not None:
             try:
-                payload = await computer.launch_app(bundle_id=app, urls=urls)
+                payload = await computer.launch_app(bundle_id=bundle_id, urls=urls)
             except CuaDriverToolError as error:
                 if not _is_missing_app(error):
                     raise
