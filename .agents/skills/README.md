@@ -7,10 +7,10 @@ Each `yutori-*/` directory contains agent metadata (e.g. `agents/openai.yaml`) a
 
 | This directory              | Canonical source              |
 |----------------------------|-------------------------------|
-| `yutori-scout/SKILL.md`     | `skills/01-scout/SKILL.md`     |
-| `yutori-research/SKILL.md`  | `skills/02-research/SKILL.md`  |
-| `yutori-browse/SKILL.md`    | `skills/03-browse/SKILL.md`   |
 | `yutori-computer-use/SKILL.md` | `skills/06-computer-use/SKILL.md` |
+| `yutori-browse/SKILL.md`    | `skills/03-browse/SKILL.md`   |
+| `yutori-research/SKILL.md`  | `skills/02-research/SKILL.md`  |
+| `yutori-scout/SKILL.md`     | `skills/01-scout/SKILL.md`     |
 | `yutori-competitor-watch/SKILL.md` | `skills/04-competitor-watch/SKILL.md` |
 | `yutori-api-monitor/SKILL.md` | `skills/05-api-monitor/SKILL.md`   |
 
