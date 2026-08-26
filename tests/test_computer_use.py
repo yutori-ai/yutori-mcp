@@ -675,8 +675,10 @@ async def test_server_holds_desktop_lock_across_preflight_and_runner(monkeypatch
     monkeypatch.setattr(lock_module, "DesktopLock", lambda: lock)
     monkeypatch.setattr(preflight, "first_blocker", first_blocker)
     monkeypatch.setattr(supervisor, "run_task", run_with_lock)
-    monkeypatch.setattr("yutori_mcp.credentials.resolve_api_key_for_environment", lambda _: "api-key")
-    monkeypatch.setattr(server, "resolve_base_url", lambda: "https://api.yutori.com/v1")
+    monkeypatch.setattr(
+        "yutori_mcp.adapter.resolve_run_credentials",
+        lambda: ("api-key", "https://api.yutori.com/v1"),
+    )
 
     result, raw = await server._handle_computer_use(None, {"task": "open calculator"})
     assert result["outcome"] == "completed"
@@ -1044,7 +1046,6 @@ async def test_smoke_does_not_print_mismatched_clipboard_contents(monkeypatch, t
 
 
 async def test_smoke_allows_two_minutes_for_live_check(monkeypatch, tmp_path):
-    from yutori_mcp import credentials
     from yutori_mcp.computer_use import cli
 
     run = AsyncMock(return_value={"outcome": "completed"})
@@ -1053,7 +1054,10 @@ async def test_smoke_allows_two_minutes_for_live_check(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_mechanical_calculator_check", AsyncMock(return_value="42"))
     monkeypatch.setattr(cli, "run_task", run)
     monkeypatch.setattr(cli, "format_result", lambda _result: "complete")
-    monkeypatch.setattr(credentials, "resolve_api_key_for_environment", lambda _environment: "dev-key")
+    monkeypatch.setattr(
+        "yutori_mcp.adapter.resolve_run_credentials",
+        lambda: ("dev-key", "https://api.yutori.com/v1"),
+    )
 
     assert await cli._smoke_live() == 0
 

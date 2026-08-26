@@ -22,7 +22,6 @@ from .adapter import (
     ENVIRONMENT_BASE_URLS,
     MCPClientAdapter,
     YutoriAPIError,
-    current_environment,
     resolve_base_url,
 )
 from .formatters import (
@@ -609,8 +608,7 @@ def _progress_reporter(
 async def _handle_computer_use(
     _: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    from .credentials import resolve_api_key_for_environment
-
+    from .adapter import resolve_run_credentials
     from .computer_use.lock import ComputerUseBusyError, DesktopLock
     from .computer_use.preflight import blocker_message, first_blocker
     from .computer_use.result import failure
@@ -625,11 +623,12 @@ async def _handle_computer_use(
             blocker = first_blocker()
             if blocker is not None:
                 return failure(blocker_message(blocker)), {}
+            api_key, api_base_url = resolve_run_credentials()
             return (
                 await run_task(
                     **params.model_dump(),
-                    api_key=resolve_api_key_for_environment(current_environment()),
-                    api_base_url=resolve_base_url(),
+                    api_key=api_key,
+                    api_base_url=api_base_url,
                     lock=lock,
                     on_event=_progress_reporter(ctx, params.max_steps) if ctx else None,
                 ),

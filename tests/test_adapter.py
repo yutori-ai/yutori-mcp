@@ -13,6 +13,7 @@ from yutori_mcp.adapter import (
     YutoriAPIError,
     _strip_none,
     resolve_base_url,
+    resolve_run_credentials,
 )
 from yutori_mcp.server import _format_api_error
 
@@ -208,6 +209,27 @@ class TestResolveBaseUrl:
         monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "staging")
         with pytest.raises(ValueError, match="Unknown Yutori environment 'staging'"):
             resolve_base_url()
+
+
+# ---------------------------------------------------------------------------
+# resolve_run_credentials
+# ---------------------------------------------------------------------------
+
+
+class TestResolveRunCredentials:
+    """The (api_key, base_url) pairing computer-use's CLI and MCP tool share."""
+
+    def test_pairs_key_and_url_for_the_current_environment(self, monkeypatch):
+        monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
+        with patch("yutori_mcp.adapter.resolve_api_key_for_environment", return_value="yt-dev-key") as resolve_key:
+            assert resolve_run_credentials() == ("yt-dev-key", ENVIRONMENT_BASE_URLS["dev"])
+        resolve_key.assert_called_once_with("dev")
+
+    def test_explicit_environment_overrides_the_ambient_one(self, monkeypatch):
+        monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
+        with patch("yutori_mcp.adapter.resolve_api_key_for_environment", return_value="yt-prod-key") as resolve_key:
+            assert resolve_run_credentials("prod") == ("yt-prod-key", ENVIRONMENT_BASE_URLS["prod"])
+        resolve_key.assert_called_once_with("prod")
 
 
 # ---------------------------------------------------------------------------
