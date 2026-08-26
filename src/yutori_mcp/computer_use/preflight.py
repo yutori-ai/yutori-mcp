@@ -330,17 +330,10 @@ def check_driver_contract() -> CheckResult:
 
 
 def check_daemon_identity() -> CheckResult:
-    try:
-        result = subprocess.run(
-            ["pgrep", "-f", "/Applications/CuaDriver.app/Contents/MacOS/"],
-            capture_output=True,
-            check=False,
-        )
-    except OSError:
-        result = subprocess.CompletedProcess([], 1)
+    result = _run_safely(["pgrep", "-f", "/Applications/CuaDriver.app/Contents/MacOS/"], timeout=10)
     return _result(
         "daemon identity",
-        result.returncode == 0,
+        result is not None and result.returncode == 0,
         "app-bundle daemon",
         "Start it with: open -n -g -a CuaDriver --args serve",
     )
