@@ -337,7 +337,7 @@ pip install yutori-mcp
 
 ### macOS computer use
 
-Optional, macOS 15+ only. Computer use drives the visible desktop, so it needs a local driver
+Optional, macOS 15+ only. Computer use operates the visible desktop, so it needs a local driver
 and system permissions on top of the install above:
 
 ```bash
@@ -355,12 +355,15 @@ uvx yutori-mcp computer-use smoke
 uvx yutori-mcp computer-use run "In Calculator, compute 17 * 23 and report the result." --app Calculator
 ```
 
-`smoke` runs a fixed Calculator check. `run` takes any task, prints each action as the agent
-takes it, and is the same run the `run_computer_use_task` tool performs.
+`smoke` is the end-to-end check: it types into Calculator to confirm the permissions took
+effect, then has the agent compute 9 * 9 in Calculator. `run` does whatever task you
+give it, printing each action as the agent takes it.
 </details>
 
-A task uses your real cursor and keyboard, so leave the Mac alone until it finishes. Only one
-task runs at a time.
+A task moves your real cursor and types on your real keyboard, so leave the Mac alone until it
+finishes. This version of the harness drives the foreground desktop and holds a machine-wide
+lock while it does: one task at a time, no background runs, no multiplexing. For parallel runs,
+see [n2 on Daytona](https://docs.yutori.com/reference/n2-daytona).
 
 ## Tools
 
