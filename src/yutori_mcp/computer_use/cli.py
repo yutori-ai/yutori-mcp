@@ -14,6 +14,7 @@ from ..schemas import ComputerUseTaskInput
 from .constants import DRIVER_INSTALLER_SHA256, DRIVER_VERSION
 from .lock import ComputerUseBusyError, DesktopLock
 from .preflight import (
+    blocker_message,
     check_driver_binary,
     check_runtime,
     child_search_path,
@@ -141,7 +142,7 @@ async def _smoke_live() -> int:
         with DesktopLock() as lock:
             blocker = first_blocker()
             if blocker is not None:
-                print(f"{blocker.detail} Fix: {blocker.remediation}")
+                print(blocker_message(blocker))
                 return 1
 
             try:
@@ -206,7 +207,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
     )
     blocker = first_blocker()
     if blocker is not None:
-        print(f"{blocker.detail} Fix: {blocker.remediation}")
+        print(blocker_message(blocker))
         return 1
     print("The model takes over this Mac's desktop now; do not touch it during the run.")
     result = await run_task(
