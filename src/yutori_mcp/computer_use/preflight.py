@@ -441,11 +441,10 @@ def check_capture() -> CheckResult:
 
 
 def check_api_key() -> CheckResult:
-    from ..adapter import current_environment
-    from ..credentials import resolve_api_key_for_environment
+    from ..adapter import current_environment, resolve_run_credentials
 
     environment = current_environment()
-    key = resolve_api_key_for_environment(environment)
+    key, _ = resolve_run_credentials(environment)
     return _result(
         "API key",
         bool(key),
@@ -462,15 +461,14 @@ def check_api_access() -> CheckResult:
     {"error": {"type": "billing_error"}} — a key with no prepaid balance looked healthy here while
     every task failed at zero steps with an empty stderr. Status codes alone cannot see that.
     """
-    from ..adapter import current_environment, resolve_base_url
-    from ..credentials import resolve_api_key_for_environment
+    from ..adapter import current_environment, resolve_run_credentials
 
     environment = current_environment()
     remediation = _api_access_remediation(environment)
     try:
-        key = resolve_api_key_for_environment(environment)
+        key, base_url = resolve_run_credentials(environment)
         request = Request(
-            f"{resolve_base_url(environment).rstrip('/')}/chat/completions",
+            f"{base_url.rstrip('/')}/chat/completions",
             data=json.dumps(
                 {
                     "model": MODEL,

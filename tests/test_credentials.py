@@ -170,7 +170,10 @@ def test_the_missing_key_remediation_points_at_default_login(monkeypatch):
     from yutori_mcp.computer_use import preflight
 
     monkeypatch.delenv("YUTORI_ENV", raising=False)
-    with patch("yutori_mcp.credentials.resolve_api_key_for_environment", return_value=None):
+    with patch(
+        "yutori_mcp.adapter.resolve_run_credentials",
+        return_value=(None, "https://api.yutori.com/v1"),
+    ):
         result = preflight.check_api_key()
     assert not result.ok
     assert result.remediation == "Run: uvx yutori-mcp login"

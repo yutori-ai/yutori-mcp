@@ -744,8 +744,8 @@ def test_api_access_probes_the_runtime_toolset(monkeypatch):
             return b'{"choices":[{}]}'
 
     monkeypatch.setattr(
-        "yutori_mcp.credentials.resolve_api_key_for_environment",
-        lambda _environment: "api-key",
+        "yutori_mcp.adapter.resolve_run_credentials",
+        lambda _environment: ("api-key", "https://api.yutori.com/v1"),
     )
     monkeypatch.setattr(preflight, "urlopen", lambda request, timeout: requests.append(request) or Response())
 
@@ -759,7 +759,9 @@ def test_api_access_rejects_non_auth_http_failures(monkeypatch, status):
     def fail_probe(*_args: Any, **_kwargs: Any) -> None:
         raise HTTPError("https://api.yutori.com", status, "failed", {}, None)
 
-    monkeypatch.setattr("yutori_mcp.credentials.resolve_api_key_for_environment", lambda _: "api-key")
+    monkeypatch.setattr(
+        "yutori_mcp.adapter.resolve_run_credentials", lambda _: ("api-key", "https://api.yutori.com/v1")
+    )
     monkeypatch.setattr(preflight, "urlopen", fail_probe)
     result = preflight.check_api_access()
     assert not result.ok
@@ -780,7 +782,7 @@ def test_api_access_reports_invalid_model_instead_of_login(monkeypatch):
         raise HTTPError("https://api.yutori.com", 400, "failed", {}, io.BytesIO(body))
 
     monkeypatch.setattr(
-        "yutori_mcp.credentials.resolve_api_key_for_environment", lambda _: "api-key"
+        "yutori_mcp.adapter.resolve_run_credentials", lambda _: ("api-key", "https://api.yutori.com/v1")
     )
     monkeypatch.setattr(preflight, "urlopen", fail_probe)
     result = preflight.check_api_access()
