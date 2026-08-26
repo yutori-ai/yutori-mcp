@@ -1,93 +1,22 @@
 # Yutori MCP
 
-MCP tools and workflow skills for building agents that monitor, research, and browse the web as well as operate computers with [Yutori](https://yutori.com/api).
+MCP tools and workflow skills for building agents that operate computers as well as browse, research, and monitor the web with [Yutori](https://yutori.com/api).
 
 You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and other MCP hosts.
 
 ## Features
 
 **Capabilities:**
-- **Scouting** — Monitor the web continuously for anything you care about at a desired frequency
-- **Research** — Run one-time deep web research tasks
+- **Computer use** — Operate apps on your Mac (macOS 15+)
 - **Browsing** — Automate websites with an AI navigator
-- **Computer use** — On macOS 15+, run tasks on the visible foreground desktop
-
-### macOS Computer Use
-
-On macOS, Yutori MCP exposes `run_computer_use_task` for foreground desktop automation.
-The tool controls the visible desktop, so do not touch the Mac while a task is running.
-
-The runtime is the Python CUA harness from the `yutori` SDK: `yutori-mcp` pins `yutori==0.9.2`
-and calls the SDK's `N2ComputerAgent` with `yutori.navigator.macos.MacOSComputer`. There is no
-TypeScript bundle, Node executable, or alternate harness. The pinned contract is:
-
-| Component | Value |
-|-----------|-------|
-| MCP package | `yutori-mcp==0.5.1` |
-| Model | Navigator n2 |
-| Tool set | `computer_use_tools-20260815` |
-| Desktop driver | `cua-driver==0.19.3` |
-| SDK runtime | `yutori[macos]==0.9.2` |
-
-Computer-use dependencies:
-
-| Dependency | Required for | Installed by |
-|------------|--------------|--------------|
-| macOS 15+ | Local desktop capture, input, and native overlay/recording path | You |
-| Python 3.10+ | `yutori-mcp` and the SDK-owned CUA harness | `uvx` can manage this |
-| `uv` / `uvx` | Running `yutori-mcp` without a manual virtualenv | You |
-| Yutori API key with computer-use access | Model calls from the local harness | `uvx yutori-mcp login` stores it |
-| `yutori==0.9.2` | `N2ComputerAgent` and `MacOSComputer` runtime | `yutori-mcp` dependency |
-| `cua-driver==0.19.3` and `CuaDriver.app` | Native screenshot capture and desktop actions | `uvx yutori-mcp computer-use setup` |
-| Screen Recording + Accessibility permissions | Letting CuaDriver see and operate the desktop | Requested by `computer-use setup` |
-| Xcode Command Line Tools | Optional reasoning overlay build | You; `doctor` reports if missing |
-
-Authenticate, install the local Mac runtime, and verify it:
-
-```bash
-uvx yutori-mcp login
-uvx yutori-mcp computer-use setup
-uvx yutori-mcp computer-use doctor
-uvx yutori-mcp computer-use smoke
-```
-
-`setup` downloads the pinned CuaDriver installer, checks its SHA-256, installs and starts
-`CuaDriver.app`, requests Screen Recording and Accessibility permissions, and prepares the
-optional native reasoning overlay. `doctor` verifies the pinned SDK wheel/provenance, the
-driver install, permissions, overlay cache, and Yutori API access before a task can run.
-
-`computer-use run` executes one custom task from the terminal — the same run the MCP tool
-performs, with per-action progress printed as it happens:
-
-```bash
-uvx yutori-mcp computer-use run "In Calculator, compute 17 * 23 and report the result." --app Calculator
-```
-
-To run through an MCP client, use the `run_computer_use_task` tool with a task, optional
-target app, optional start URL, time limit, and step limit. Only one task can control a Mac
-at a time.
-
-For longer runs, prefer compacting or summarizing older screenshots and tool results so the
-conversation stays within `max_context_len`; do not rely on an artificial 100-step cap.
-
-To expose the MCP tool to a client, run the default server:
-
-```json
-{
-  "mcpServers": {
-    "yutori": {
-      "command": "uvx",
-      "args": ["yutori-mcp"]
-    }
-  }
-}
-```
+- **Research** — Run one-time deep web research tasks
+- **Scouting** — Monitor the web continuously for anything you care about at a desired frequency
 
 **Workflow skills** (for clients that support slash commands):
-- [`/yutori-scout`](skills/01-scout/SKILL.md) — Set up continuous web monitoring
-- [`/yutori-research`](skills/02-research/SKILL.md) — Deep web research (async, 5–10 min)
-- [`/yutori-browse`](skills/03-browse/SKILL.md) — Browser automation
 - [`/yutori-computer-use`](skills/06-computer-use/SKILL.md) — Local Mac desktop automation
+- [`/yutori-browse`](skills/03-browse/SKILL.md) — Browser automation
+- [`/yutori-research`](skills/02-research/SKILL.md) — Deep web research (async, 5–10 min)
+- [`/yutori-scout`](skills/01-scout/SKILL.md) — Set up continuous web monitoring
 - [`/yutori-competitor-watch`](skills/04-competitor-watch/SKILL.md) — Competitor monitoring template
 - [`/yutori-api-monitor`](skills/05-api-monitor/SKILL.md) — API/changelog monitoring template
 
@@ -192,10 +121,10 @@ Use https://yutori.com/api/llms.txt and set up Yutori for me.
 
    | Skill | Description |
    |-------|-------------|
-   | `/yutori-scout` | Set up continuous web monitoring with comprehensive queries |
-   | `/yutori-research` | Deep web research workflow (async, 5-10 min) |
-   | `/yutori-browse` | Browser automation tasks |
    | `/yutori-computer-use` | Local Mac desktop automation |
+   | `/yutori-browse` | Browser automation tasks |
+   | `/yutori-research` | Deep web research workflow (async, 5-10 min) |
+   | `/yutori-scout` | Set up continuous web monitoring with comprehensive queries |
    | `/yutori-competitor-watch` | Quick competitor monitoring template |
    | `/yutori-api-monitor` | API/changelog monitoring template |
 
@@ -328,10 +257,10 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
    Install skills using `$skill-installer` inside Codex:
 
    ```
-   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-scout
-   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-research
-   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-browse
    $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-computer-use
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-browse
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-research
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-scout
    $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-competitor-watch
    $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-api-monitor
    ```
@@ -349,10 +278,10 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
 
    | Skill | Command | Description |
    |-------|---------|-------------|
-   | Scout | `$yutori-scout` | Set up continuous web monitoring |
-   | Research | `$yutori-research` | Deep web research (async, 5-10 min) |
-   | Browse | `$yutori-browse` | Browser automation with AI navigator |
    | Computer Use | `$yutori-computer-use` | Local Mac desktop automation |
+   | Browse | `$yutori-browse` | Browser automation with AI navigator |
+   | Research | `$yutori-research` | Deep web research (async, 5-10 min) |
+   | Scout | `$yutori-scout` | Set up continuous web monitoring |
    | Competitor Watch | `$yutori-competitor-watch` | Quick competitor monitoring template |
    | API Monitor | `$yutori-api-monitor` | API/changelog monitoring template |
 
@@ -406,9 +335,38 @@ pip install yutori-mcp
 ```
 </details>
 
+### macOS computer use
+
+Optional, macOS 15+ only. Computer use operates the visible desktop, so it needs a local driver
+and system permissions on top of the install above:
+
+```bash
+uvx yutori-mcp computer-use setup    # installs CuaDriver.app, requests Screen Recording + Accessibility
+```
+
+`setup` finishes by running the readiness checks and reports anything still missing. Re-run
+those checks any time with `uvx yutori-mcp computer-use doctor`.
+
+<details>
+<summary>Run a task from the terminal</summary>
+
+```bash
+uvx yutori-mcp computer-use smoke
+uvx yutori-mcp computer-use run "In Calculator, compute 17 * 23 and report the result." --app Calculator
+```
+
+`smoke` is an end-to-end check: it types into Calculator to confirm the permissions took
+effect, then has the agent compute 9 * 9 in Calculator. `run` does whatever task you
+give it, printing each action as the agent takes it.
+</details>
+
+The harness in this repository is minimal: it drives the foreground desktop one task at a time,
+no background runs, no multiplexing. For scalable sandbox runs, see
+[n2 on Daytona](https://docs.yutori.com/reference/n2-daytona).
+
 ## Tools
 
-See [TOOLS.md](TOOLS.md) for the full tool reference — Scout, Research, and Browsing tools with parameters, examples, and response formats.
+See [TOOLS.md](TOOLS.md) for the full tool reference — computer use, Browsing, Research, and Scout tools with parameters, examples, and response formats.
 
 ## Development
 
@@ -433,6 +391,12 @@ yutori-mcp login    # authenticate (one-time)
 yutori-mcp          # run the server (or: python -m yutori_mcp.server)
 ```
 
+### Computer-use runtime
+
+`computer-use doctor` verifies the pinned `yutori` SDK install against the published wheel.
+SDK contributors testing an editable checkout can override that with
+`YUTORI_MCP_ALLOW_EDITABLE_SDK=1`.
+
 ### Debugging with MCP Inspector
 
 ```bash
@@ -446,14 +410,3 @@ For full API documentation, visit [docs.yutori.com](https://docs.yutori.com).
 ## License
 
 Apache 2.0
-
-## Computer-use SDK harness and runtime dependency
-
-The SDK-owned `yutori.navigator.N2ComputerAgent` and `MacOSComputer` provide the complete
-runtime. The MCP package pins SDK 0.9.2 and verifies the installed files against the immutable
-published wheel plus its packaged provenance during `computer-use doctor`. There is no
-TypeScript bundle, Node executable, alternate harness, or private dependency access.
-
-SDK contributors may deliberately test an editable 0.9.2 checkout by setting
-`YUTORI_MCP_ALLOW_EDITABLE_SDK=1`; without that explicit override, doctor rejects editable or
-modified SDK installations.

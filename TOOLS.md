@@ -4,74 +4,316 @@ All tool outputs are formatted as human-readable text optimized for LLM consumpt
 
 All tool inputs enforce validation: webhook URLs must use HTTPS, and `output_fields` (where supported) must contain at least one entry. Unknown/extra fields are rejected.
 
-## `run_computer_use_task` (macOS computer use)
+## Computer Use Tools
 
-Runs a foreground task on the visible Mac desktop. This tool is listed only on macOS. Do not
-touch the Mac during a run. Visible desktop content is sent to Yutori.
+### run_computer_use_task
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `task` | Yes | Natural-language desktop task |
-| `app` | No | Application to target; omit for cross-app tasks |
-| `start_url` | No | Starting URL; requires `app` |
-| `minutes` | No | Absolute deadline, 1–15 minutes (default 3) |
-| `max_steps` | No | Maximum actions, 1–100 (default 60) |
+Operate the foreground Mac desktop with the computer-use agent - clicking, typing, and driving
+apps like a person. Listed only on macOS, and only once the setup in
+[README](README.md#macos-computer-use) is done. One task controls the Mac at a time. Do not
+touch the Mac during a run; visible desktop content is sent to Yutori.
 
-First-time setup: authenticate with `uvx yutori-mcp login`, then run
-`uvx yutori-mcp computer-use setup` and `uvx yutori-mcp computer-use doctor`. Use
-`uvx yutori-mcp computer-use smoke` for the Calculator smoke test. To run from a terminal, use
-`uvx yutori-mcp computer-use run "<task>" --app <AppName>`. The tool uses the SDK-owned
-Python CUA harness (`yutori==0.9.2`), Navigator n2, `computer_use_tools-20260815`, and
-`cua-driver==0.19.3`; `doctor` verifies those pinned runtime artifacts before a task runs.
-
-Dependencies: macOS 15+, Python 3.10+, `uvx`, a Yutori API key with computer-use access,
-`CuaDriver.app`/`cua-driver==0.19.3`, Screen Recording and Accessibility permissions, and
-optionally Xcode Command Line Tools for the native reasoning overlay. `computer-use setup`
-installs the pinned driver and prompts for the macOS permissions; the task runner can continue
-without the optional overlay.
-
-## Usage
-
-### list_api_usage
-
-Get API usage statistics including active scout counts, rate limits, and activity metrics.
+**Basic example:**
 
 ```json
 {
-  "period": "7d"
+  "task": "In Calculator, compute 17 * 23 and report the result.",
+  "app": "Calculator"
+}
+```
+
+**Advanced example (target app, start URL, longer budget):**
+
+```json
+{
+  "task": "Open the Yutori company page and list the founders.",
+  "app": "Safari",
+  "start_url": "https://yutori.com",
+  "minutes": 5,
+  "max_steps": 80
+}
+```
+
+Example response:
+
+```
+Outcome: completed
+Delivery mode: foreground
+Final text: 17 * 23 = 391
+Elapsed: 18452 ms
+Perf: total 18.5s over 6 steps (3.1s/step)
+Actions:
+- #1 computer_batch: executed (raw: confirmed; mode: foreground; route: pixel; refusal: None) took 412 ms
+- #2 left_click: executed (raw: confirmed; mode: foreground; route: pixel; refusal: None) took 138 ms
+```
+
+`Outcome` is `completed`, `limit` (hit `minutes` or `max_steps`), `aborted`, or `failed`.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `task` | Yes | Natural language instruction for the desktop agent |
+| `app` | No | Application to target; omit for cross-app tasks |
+| `start_url` | No | URL to open before the task starts; requires `app` |
+| `minutes` | No | Wall-clock deadline in minutes (1-15). Default: 3 |
+| `max_steps` | No | Max desktop actions, 1 or more. Default: 60 |
+
+`max_steps` has no upper bound. On long runs, compact or summarize older screenshots and tool
+results so the conversation stays within `max_context_len`.
+
+## Browsing Tools
+
+### list_browsing_tasks
+
+List one-time browsing tasks for the user with optional filtering and cursor pagination.
+
+```json
+{
+  "limit": 10,
+  "status": "succeeded"
 }
 ```
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `period` | No | Activity time range: `24h` (default), `7d`, `30d`, or `90d` |
+| `limit` | No | Max tasks to return (1-100). Default: 10 |
+| `status` | No | Filter by `running`, `succeeded`, or `failed` |
+| `cursor` | No | Cursor from a previous response |
 
 Example response:
 
 ```
-Active Scouts: 5
-  - a1b2c3d4-e5f6-7890-abcd-ef1234567890
-  - b2c3d4e5-f6a7-8901-bcde-f12345678901
-  ... and 3 more
+Found 42 browsing tasks: 1 running, 39 succeeded, 2 failed.
 
-API Rate Limits (available):
-  Requests today: 1250
-  Daily limit: 10000
-  Remaining: 8750
-  Resets at: 2026-03-04T00:00:00+00:00
+Showing 10 of 39 matching tasks (42 total):
 
-Navigator API Rate Limits:
-  Requests today: 342
-  Daily limit: 50000
-  Remaining: 49658
-  Per-second limit: 20
-  Resets at: 2026-03-04T00:00:00+00:00
+1. Give me a list of all employees of Yutori. (succeeded)
+   ID: 54fb19fd-277e-4098-ab72-5a9f8a4347fc
+   URL: https://platform.yutori.com/browsing/tasks/54fb19fd-277e-4098-ab72-5a9f8a4347fc
+   Created: 2026-06-25
 
-Activity (7d):
-  Scout runs: 47
-  Browsing tasks: 12
-  Research tasks: 8
-  Navigator API calls: 1523
+More tasks available. Use list_browsing_tasks(cursor="eyJjcmVhdGVkX2F0...") to load more.
+Use list_browsing_tasks(status="succeeded") to list tasks with retrievable results.
+Use get_browsing_task_result(task_id) for full details.
+```
+
+### run_browsing_task
+
+Execute a one-time web browsing task using the navigator agent. The agent runs either a cloud browser or Yutori Local on the desktop and operates it like a person - clicking, typing, scrolling, and navigating for you.
+
+**Basic example:**
+
+```json
+{
+  "task": "Give me a list of all employees (names and titles) of Yutori.",
+  "start_url": "https://yutori.com"
+}
+```
+
+**Advanced example (webhooks, structured output):**
+
+```json
+{
+  "task": "Log in and export the latest invoice.",
+  "start_url": "https://example.com/login",
+  "max_steps": 75,
+  "require_auth": true,
+  "webhook_url": "https://example.com/webhook",
+  "output_fields": ["name", "title"]
+}
+```
+
+Example response:
+
+```
+Browsing task started.
+
+Task ID: 54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396
+Status: queued
+View progress: https://platform.yutori.com/browsing/tasks/54fb19fd-277e-4098-ab72-5a9f8a4347fc
+
+Poll with get_browsing_task_result(task_id="54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396") to check status.
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `task` | Yes | Natural language instruction for the navigator |
+| `start_url` | Yes | URL where browsing begins |
+| `max_steps` | No | Max browser actions (1-100). Default: 25 |
+| `require_auth` | No | If true, use an auth-optimized cloud browser provider for login flows. Only applies when browser is `cloud` (default) |
+| `browser` | No | `cloud` (default) or `local` to use Yutori Local with the user's logged-in desktop browser |
+| `output_fields` | No | List of field names for structured output as array of objects |
+| `webhook_url` | No | HTTPS URL for completion notification |
+| `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
+
+### get_browsing_task_result
+
+Poll for the status and result of a browsing task. Call this after `run_browsing_task` until status is `succeeded` or `failed`.
+
+```json
+{
+  "task_id": "54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396"
+}
+```
+
+Example response (running):
+
+```
+Task in progress.
+
+Task ID: 54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396
+Status: running
+
+Poll again in a few seconds.
+```
+
+Example response (succeeded):
+
+```
+Task completed.
+
+Task ID: 54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396
+Status: succeeded
+
+Result:
+Summary of All Yutori Employees
+
+I have successfully located all employees of Yutori on their company page.
+Here is the complete list of 17 employees with their names and titles:
+
+Founders & Leadership:
+1. Abhishek Das - Co-founder and Co-CEO
+2. Devi Parikh - Co-founder and Co-CEO
+3. Dhruv Batra - Co-founder and Chief Scientist
+
+Executive:
+4. Kristi Edleson - Chief of Staff
+
+Technical Staff:
+5. Rui Wang - Member of Technical Staff
+... (17 employees total)
+
+Source Page: https://yutori.com/company#team
+```
+
+## Research Tools
+
+### list_research_tasks
+
+List one-time research tasks for the user with optional filtering and cursor pagination.
+
+```json
+{
+  "limit": 10,
+  "status": "succeeded"
+}
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `limit` | No | Max tasks to return (1-100). Default: 10 |
+| `status` | No | Filter by `running`, `succeeded`, or `failed` |
+| `cursor` | No | Cursor from a previous response |
+
+Example response:
+
+```
+Found 248 research tasks: 0 running, 245 succeeded, 3 failed.
+
+Showing 10 of 245 matching tasks (248 total):
+
+1. Competitive landscape for AI code assistants (succeeded)
+   ID: ae27a17c-a4ed-4c69-8b2a-4bec330fc935
+   URL: https://platform.yutori.com/research/tasks/ae27a17c-a4ed-4c69-8b2a-4bec330fc935
+   Created: 2026-06-25
+
+More tasks available. Use list_research_tasks(cursor="eyJjcmVhdGVkX2F0...") to load more.
+Use list_research_tasks(status="succeeded") to list tasks with retrievable results.
+Use get_research_task_result(task_id) for full details.
+```
+
+### run_research_task
+
+Execute a one-time deep web research task. The research agent searches, reads, and synthesizes information from across the web.
+
+**Basic example:**
+
+```json
+{
+  "query": "What are the latest developments in quantum computing from the past week? Include company announcements, research papers, and product releases."
+}
+```
+
+**Advanced example (webhooks, structured output):**
+
+```json
+{
+  "query": "What are the latest developments in quantum computing from the past week? Include company announcements, research papers, and product releases.",
+  "user_timezone": "America/Los_Angeles",
+  "webhook_url": "https://example.com/webhook",
+  "output_fields": ["title", "summary", "source_url", "category"]
+}
+```
+
+Example response:
+
+```
+Research task started.
+
+Task ID: ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395
+Status: queued
+View progress: https://platform.yutori.com/research/tasks/ae27a17c-a4ed-4c69-8b2a-4bec330fc935
+
+Poll with get_research_task_result(task_id="ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395") to check status.
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `query` | Yes | Natural language description of what to research |
+| `user_timezone` | No | Timezone for context. Default: 'America/Los_Angeles' |
+| `user_location` | No | Location for context. Default: 'San Francisco, CA, US' |
+| `output_fields` | No | List of field names for structured output as array of objects |
+| `webhook_url` | No | HTTPS URL for completion notification |
+| `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
+
+### get_research_task_result
+
+Poll for the status and result of a research task. Call this after `run_research_task` until status is `succeeded` or `failed`.
+
+```json
+{
+  "task_id": "ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395"
+}
+```
+
+Example response (running):
+
+```
+Task in progress.
+
+Task ID: ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395
+Status: running
+
+Poll again in a few seconds.
+```
+
+Example response (succeeded):
+
+```
+Task completed.
+
+Task ID: ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395
+Status: succeeded
+
+Result:
+Hardware strides and strategic moves this week
+
+I focused on notable hardware breakthroughs, leadership changes, applied research,
+and an industry appearance from January 12–19, 2026.
+
+• MIT demonstrated chip-based cooling for trapped-ion qubits
+• EeroQ unveiled a scalable quantum control chip
+• IonQ appointed Katie Arrington as Chief Information Officer
+• Researchers introduced QUPID, a quantum neural network
 ```
 
 ## Scout Tools
@@ -321,260 +563,48 @@ Date: 2026-01-15 05:45 UTC
 No new findings since last update.
 ```
 
-## Research Tools
+## Usage
 
-### list_research_tasks
+### list_api_usage
 
-List one-time research tasks for the user with optional filtering and cursor pagination.
+Get API usage statistics including active scout counts, rate limits, and activity metrics.
 
 ```json
 {
-  "limit": 10,
-  "status": "succeeded"
+  "period": "7d"
 }
 ```
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `limit` | No | Max tasks to return (1-100). Default: 10 |
-| `status` | No | Filter by `running`, `succeeded`, or `failed` |
-| `cursor` | No | Cursor from a previous response |
+| `period` | No | Activity time range: `24h` (default), `7d`, `30d`, or `90d` |
 
 Example response:
 
 ```
-Found 248 research tasks: 0 running, 245 succeeded, 3 failed.
-
-Showing 10 of 245 matching tasks (248 total):
-
-1. Competitive landscape for AI code assistants (succeeded)
-   ID: ae27a17c-a4ed-4c69-8b2a-4bec330fc935
-   URL: https://platform.yutori.com/research/tasks/ae27a17c-a4ed-4c69-8b2a-4bec330fc935
-   Created: 2026-06-25
-
-More tasks available. Use list_research_tasks(cursor="eyJjcmVhdGVkX2F0...") to load more.
-Use list_research_tasks(status="succeeded") to list tasks with retrievable results.
-Use get_research_task_result(task_id) for full details.
-```
-
-### run_research_task
-
-Execute a one-time deep web research task. The research agent searches, reads, and synthesizes information from across the web.
-
-**Basic example:**
-
-```json
-{
-  "query": "What are the latest developments in quantum computing from the past week? Include company announcements, research papers, and product releases."
-}
-```
-
-**Advanced example (webhooks, structured output):**
-
-```json
-{
-  "query": "What are the latest developments in quantum computing from the past week? Include company announcements, research papers, and product releases.",
-  "user_timezone": "America/Los_Angeles",
-  "webhook_url": "https://example.com/webhook",
-  "output_fields": ["title", "summary", "source_url", "category"]
-}
-```
-
-Example response:
-
-```
-Research task started.
-
-Task ID: ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395
-Status: queued
-View progress: https://platform.yutori.com/research/tasks/ae27a17c-a4ed-4c69-8b2a-4bec330fc935
-
-Poll with get_research_task_result(task_id="ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395") to check status.
-```
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `query` | Yes | Natural language description of what to research |
-| `user_timezone` | No | Timezone for context. Default: 'America/Los_Angeles' |
-| `user_location` | No | Location for context. Default: 'San Francisco, CA, US' |
-| `output_fields` | No | List of field names for structured output as array of objects |
-| `webhook_url` | No | HTTPS URL for completion notification |
-| `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
-
-### get_research_task_result
-
-Poll for the status and result of a research task. Call this after `run_research_task` until status is `succeeded` or `failed`.
-
-```json
-{
-  "task_id": "ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395"
-}
-```
-
-Example response (running):
-
-```
-Task in progress.
-
-Task ID: ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395
-Status: running
-
-Poll again in a few seconds.
-```
-
-Example response (succeeded):
-
-```
-Task completed.
-
-Task ID: ae27a17c-a4ed-4c69-8b2a-4bec330fc935-1768848395
-Status: succeeded
-
-Result:
-Hardware strides and strategic moves this week
-
-I focused on notable hardware breakthroughs, leadership changes, applied research,
-and an industry appearance from January 12–19, 2026.
-
-• MIT demonstrated chip-based cooling for trapped-ion qubits
-• EeroQ unveiled a scalable quantum control chip
-• IonQ appointed Katie Arrington as Chief Information Officer
-• Researchers introduced QUPID, a quantum neural network
-```
-
-## Browsing Tools
-
-### list_browsing_tasks
-
-List one-time browsing tasks for the user with optional filtering and cursor pagination.
-
-```json
-{
-  "limit": 10,
-  "status": "succeeded"
-}
-```
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `limit` | No | Max tasks to return (1-100). Default: 10 |
-| `status` | No | Filter by `running`, `succeeded`, or `failed` |
-| `cursor` | No | Cursor from a previous response |
-
-Example response:
-
-```
-Found 42 browsing tasks: 1 running, 39 succeeded, 2 failed.
-
-Showing 10 of 39 matching tasks (42 total):
-
-1. Give me a list of all employees of Yutori. (succeeded)
-   ID: 54fb19fd-277e-4098-ab72-5a9f8a4347fc
-   URL: https://platform.yutori.com/browsing/tasks/54fb19fd-277e-4098-ab72-5a9f8a4347fc
-   Created: 2026-06-25
-
-More tasks available. Use list_browsing_tasks(cursor="eyJjcmVhdGVkX2F0...") to load more.
-Use list_browsing_tasks(status="succeeded") to list tasks with retrievable results.
-Use get_browsing_task_result(task_id) for full details.
-```
-
-### run_browsing_task
-
-Execute a one-time web browsing task using the navigator agent. The agent runs either a cloud browser or Yutori Local on the desktop and operates it like a person - clicking, typing, scrolling, and navigating for you.
-
-**Basic example:**
-
-```json
-{
-  "task": "Give me a list of all employees (names and titles) of Yutori.",
-  "start_url": "https://yutori.com"
-}
-```
-
-**Advanced example (webhooks, structured output):**
-
-```json
-{
-  "task": "Log in and export the latest invoice.",
-  "start_url": "https://example.com/login",
-  "max_steps": 75,
-  "require_auth": true,
-  "webhook_url": "https://example.com/webhook",
-  "output_fields": ["name", "title"]
-}
-```
-
-Example response:
-
-```
-Browsing task started.
-
-Task ID: 54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396
-Status: queued
-View progress: https://platform.yutori.com/browsing/tasks/54fb19fd-277e-4098-ab72-5a9f8a4347fc
-
-Poll with get_browsing_task_result(task_id="54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396") to check status.
-```
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `task` | Yes | Natural language instruction for the navigator |
-| `start_url` | Yes | URL where browsing begins |
-| `max_steps` | No | Max browser actions (1-100). Default: 25 |
-| `require_auth` | No | If true, use an auth-optimized cloud browser provider for login flows. Only applies when browser is `cloud` (default) |
-| `browser` | No | `cloud` (default) or `local` to use Yutori Local with the user's logged-in desktop browser |
-| `output_fields` | No | List of field names for structured output as array of objects |
-| `webhook_url` | No | HTTPS URL for completion notification |
-| `webhook_format` | No | `scout` (default), `slack`, or `zapier` |
-
-### get_browsing_task_result
-
-Poll for the status and result of a browsing task. Call this after `run_browsing_task` until status is `succeeded` or `failed`.
-
-```json
-{
-  "task_id": "54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396"
-}
-```
-
-Example response (running):
-
-```
-Task in progress.
-
-Task ID: 54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396
-Status: running
-
-Poll again in a few seconds.
-```
-
-Example response (succeeded):
-
-```
-Task completed.
-
-Task ID: 54fb19fd-277e-4098-ab72-5a9f8a4347fc-1768848396
-Status: succeeded
-
-Result:
-Summary of All Yutori Employees
-
-I have successfully located all employees of Yutori on their company page.
-Here is the complete list of 17 employees with their names and titles:
-
-Founders & Leadership:
-1. Abhishek Das - Co-founder and Co-CEO
-2. Devi Parikh - Co-founder and Co-CEO
-3. Dhruv Batra - Co-founder and Chief Scientist
-
-Executive:
-4. Kristi Edleson - Chief of Staff
-
-Technical Staff:
-5. Rui Wang - Member of Technical Staff
-... (17 employees total)
-
-Source Page: https://yutori.com/company#team
+Active Scouts: 5
+  - a1b2c3d4-e5f6-7890-abcd-ef1234567890
+  - b2c3d4e5-f6a7-8901-bcde-f12345678901
+  ... and 3 more
+
+API Rate Limits (available):
+  Requests today: 1250
+  Daily limit: 10000
+  Remaining: 8750
+  Resets at: 2026-03-04T00:00:00+00:00
+
+Navigator API Rate Limits:
+  Requests today: 342
+  Daily limit: 50000
+  Remaining: 49658
+  Per-second limit: 20
+  Resets at: 2026-03-04T00:00:00+00:00
+
+Activity (7d):
+  Scout runs: 47
+  Browsing tasks: 12
+  Research tasks: 8
+  Navigator API calls: 1523
 ```
 
 ## Tool Annotations
@@ -583,6 +613,7 @@ Tools include hints for client behavior:
 
 | Tool | Annotation |
 |------|------------|
-| `list_api_usage`, `list_scouts`, `get_scout_detail`, `get_scout_updates`, `list_browsing_tasks`, `get_browsing_task_result`, `list_research_tasks`, `get_research_task_result` | `readOnlyHint: true` |
+| `run_computer_use_task` | `destructiveHint: true`, `openWorldHint: true` |
+| `list_browsing_tasks`, `get_browsing_task_result`, `list_research_tasks`, `get_research_task_result`, `list_scouts`, `get_scout_detail`, `get_scout_updates`, `list_api_usage` | `readOnlyHint: true` |
 | `edit_scout` | `idempotentHint: true` |
 | `delete_scout` | `destructiveHint: true` |

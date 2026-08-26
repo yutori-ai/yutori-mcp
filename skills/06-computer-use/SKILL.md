@@ -15,8 +15,10 @@ If the user has not set up computer use yet, ask them to run these commands in a
 ```bash
 uvx yutori-mcp login
 uvx yutori-mcp computer-use setup
-uvx yutori-mcp computer-use doctor
 ```
+
+`setup` ends with the readiness checks and reports anything still missing. To re-check later,
+or when a run fails, use `uvx yutori-mcp computer-use doctor`.
 
 Use the smoke test when validating a fresh install:
 
