@@ -342,8 +342,10 @@ and system permissions on top of the install above:
 
 ```bash
 uvx yutori-mcp computer-use setup    # installs CuaDriver.app, requests Screen Recording + Accessibility
-uvx yutori-mcp computer-use doctor   # verifies the driver, permissions, and API access
 ```
+
+`setup` finishes by running the readiness checks and reports anything still missing. Re-run
+those checks any time with `uvx yutori-mcp computer-use doctor`.
 
 One task controls the Mac at a time, using the real cursor and keyboard — don't touch the
 machine while a task runs.
