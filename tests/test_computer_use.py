@@ -198,6 +198,16 @@ def test_protected_entrypoint_applies_computer_use_environment(monkeypatch, argu
     assert observed == {"environment": expected}
 
 
+def test_entrypoint_env_choices_match_adapter_environments():
+    """entrypoint._ENV_CHOICES is a hardcoded duplicate of adapter.ENVIRONMENT_BASE_URLS's keys
+    (see the comment on _ENV_CHOICES for why it can't just import that dict). This pins the two
+    together so a new environment added to one is caught if it is not added to the other."""
+    from yutori_mcp import entrypoint
+    from yutori_mcp.adapter import ENVIRONMENT_BASE_URLS
+
+    assert set(entrypoint._ENV_CHOICES) == set(ENVIRONMENT_BASE_URLS)
+
+
 def test_lock_rejects_second_owner_and_releases(tmp_path):
     path = tmp_path / "desktop.lock"
     with DesktopLock(path), pytest.raises(ComputerUseBusyError), DesktopLock(path):
