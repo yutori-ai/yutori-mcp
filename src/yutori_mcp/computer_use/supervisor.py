@@ -22,7 +22,7 @@ from .constants import (
 )
 from .lock import ComputerUseBusyError, DesktopLock
 from .preflight import child_search_path, find_cua_driver
-from .result import failure
+from .result import failure, redact
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
 async def _drain_stderr(stream: asyncio.StreamReader, secret: str) -> list[str]:
     diagnostics: list[str] = []
     while line := await stream.readline():
-        diagnostics.append(line.decode(errors="replace").replace(secret, "[REDACTED]").rstrip())
+        diagnostics.append(redact(line.decode(errors="replace"), secret).rstrip())
     return diagnostics[-20:]
 
 
@@ -185,7 +185,7 @@ async def _supervise(
             if not line:
                 break
             try:
-                event = json.loads(line.decode().replace(api_key, "[REDACTED]"))
+                event = json.loads(redact(line.decode(), api_key))
             except (json.JSONDecodeError, UnicodeDecodeError):
                 return failure("Computer-use runner emitted invalid JSON.", actions=actions)
             if not isinstance(event, dict):
