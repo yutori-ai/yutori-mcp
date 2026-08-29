@@ -41,12 +41,15 @@ def _load_config() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _environments(config: dict[str, Any]) -> dict[str, Any]:
+    """The ``environments`` map from ``config``, or an empty dict if absent or malformed."""
+    environments = config.get(ENVIRONMENTS_FIELD)
+    return environments if isinstance(environments, dict) else {}
+
+
 def stored_environment_key(environment: str) -> str | None:
     """The key saved for ``environment``, or None if there isn't one."""
-    environments = _load_config().get(ENVIRONMENTS_FIELD)
-    if not isinstance(environments, dict):
-        return None
-    entry = environments.get(environment)
+    entry = _environments(_load_config()).get(environment)
     if not isinstance(entry, dict):
         return None
     key = entry.get(API_KEY_FIELD)
@@ -99,9 +102,7 @@ def save_environment_key(environment: str, api_key: str) -> Path:
     os.chmod(config_path.parent, stat.S_IRWXU)
 
     config = _load_config()
-    environments = config.get(ENVIRONMENTS_FIELD)
-    if not isinstance(environments, dict):
-        environments = {}
+    environments = _environments(config)
     environments[environment] = {API_KEY_FIELD: api_key.strip()}
     config[ENVIRONMENTS_FIELD] = environments
 
@@ -112,8 +113,8 @@ def save_environment_key(environment: str, api_key: str) -> Path:
 def clear_environment_key(environment: str) -> bool:
     """Forget the key stored for ``environment``. True if one was removed."""
     config = _load_config()
-    environments = config.get(ENVIRONMENTS_FIELD)
-    if not isinstance(environments, dict) or environment not in environments:
+    environments = _environments(config)
+    if environment not in environments:
         return False
     del environments[environment]
     if environments:
