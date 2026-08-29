@@ -92,7 +92,7 @@ def format_action_line(event: dict[str, Any], *, index_default: Any = None) -> s
 def format_result(result: dict[str, Any]) -> str:
     lines = [
         f"Outcome: {result.get('outcome', 'failed')}",
-        f"Delivery mode: {result.get('delivery_mode', 'foreground')}",
+        f"Delivery mode: {result.get('delivery_mode', DELIVERY_MODE_FOREGROUND)}",
     ]
     if result.get("final_text"):
         lines.append(f"Final text: {result['final_text']}")
