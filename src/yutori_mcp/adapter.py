@@ -45,7 +45,7 @@ def resolve_base_url(environment: str | None = None) -> str:
     for names not in ENVIRONMENT_BASE_URLS so a typo fails loudly instead
     of silently targeting production.
     """
-    name = environment or os.environ.get(ENV_VAR_ENVIRONMENT) or DEFAULT_ENVIRONMENT
+    name = environment or current_environment()
     try:
         return ENVIRONMENT_BASE_URLS[name]
     except KeyError:
