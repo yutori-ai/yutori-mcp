@@ -25,6 +25,7 @@ from yutori.navigator.macos.transport import CuaDriverToolError, CuaDriverUncert
 from yutori_mcp.computer_use import preflight, runner as runner_module, supervisor
 from yutori_mcp.computer_use.app import pick_best_window, prepare_app
 from yutori_mcp.computer_use.constants import (
+    DELIVERY_MODE_FOREGROUND,
     DRIVER_VERSION,
     MCP_VERSION,
     PROTOCOL_VERSION,
@@ -35,7 +36,7 @@ from yutori_mcp.computer_use.constants import (
     TOOL_SET,
 )
 from yutori_mcp.computer_use.lock import ComputerUseBusyError, DesktopLock
-from yutori_mcp.computer_use.result import format_result, redact
+from yutori_mcp.computer_use.result import failure, format_result, redact, terminal_result
 from yutori_mcp.computer_use.runner import (
     ActionReporter,
     Emitter,
@@ -1238,6 +1239,20 @@ def test_redact_scrubs_every_occurrence_of_the_secret():
 
 def test_redact_is_a_noop_when_the_secret_is_absent():
     assert redact("nothing sensitive here", "yt-secret") == "nothing sensitive here"
+
+
+def test_terminal_result_carries_the_outcome_and_shared_shape():
+    actions = [{"index": 0}]
+    assert terminal_result("limit", "deadline expired", actions=actions) == {
+        "outcome": "limit",
+        "delivery_mode": DELIVERY_MODE_FOREGROUND,
+        "final_text": "deadline expired",
+        "actions": actions,
+    }
+
+
+def test_failure_is_the_failed_outcome_of_the_shared_shape():
+    assert failure("boom") == terminal_result("failed", "boom")
 
 
 class _CollectStream:
