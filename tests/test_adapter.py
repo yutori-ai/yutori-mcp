@@ -12,6 +12,7 @@ from yutori_mcp.adapter import (
     MCPClientAdapter,
     YutoriAPIError,
     _strip_none,
+    is_scoped_environment,
     resolve_base_url,
     resolve_run_credentials,
 )
@@ -209,6 +210,31 @@ class TestResolveBaseUrl:
         monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "staging")
         with pytest.raises(ValueError, match="Unknown Yutori environment 'staging'"):
             resolve_base_url()
+
+
+# ---------------------------------------------------------------------------
+# is_scoped_environment
+# ---------------------------------------------------------------------------
+
+
+class TestIsScopedEnvironment:
+    """Whether an `--env` argument names a non-default environment to target.
+
+    server.py's `_auth_login`/`_auth_logout`/`_auth_status` each branch on this to decide
+    between the per-environment paste flow and the SDK's own single-credential flow.
+    """
+
+    def test_none_is_not_scoped(self):
+        assert is_scoped_environment(None) is False
+
+    def test_empty_string_is_not_scoped(self):
+        assert is_scoped_environment("") is False
+
+    def test_default_environment_is_not_scoped(self):
+        assert is_scoped_environment(DEFAULT_ENVIRONMENT) is False
+
+    def test_a_named_non_default_environment_is_scoped(self):
+        assert is_scoped_environment("dev") is True
 
 
 # ---------------------------------------------------------------------------
