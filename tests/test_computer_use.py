@@ -297,6 +297,22 @@ def _result_event(**overrides):
     return event
 
 
+async def _run_supervised(process, *, api_key="yt-key", deadline_seconds=1, **supervise_kwargs):
+    """Patch the child process and call `_supervise` with the shared fixed args this file's tests repeat.
+
+    Only for tests that don't need to assert on the `create_subprocess_exec` mock itself or patch anything
+    beyond it -- those keep their own inline `with patch(...)` block.
+    """
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+        return await _supervise(
+            command=python_runner_command(),
+            request={"type": "run"},
+            api_key=api_key,
+            deadline=time.monotonic() + deadline_seconds,
+            **supervise_kwargs,
+        )
+
+
 async def test_supervisor_redacts_key_and_keeps_it_out_of_argv():
     secret = "yt-super-secret-value"
     process = _Process(
@@ -338,14 +354,7 @@ async def test_supervisor_forwards_ready_and_action_events():
     async def on_event(event):
         seen.append(event)
 
-    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
-        result = await _supervise(
-            command=python_runner_command(),
-            request={"type": "run"},
-            api_key="yt-key",
-            deadline=time.monotonic() + 1,
-            on_event=on_event,
-        )
+    result = await _run_supervised(process, on_event=on_event)
     assert [event["type"] for event in seen] == ["ready", "action"]
     assert result["actions"] == [events[1]]
 
@@ -379,13 +388,7 @@ async def test_supervisor_rejects_result_larger_than_configured_stream_limit():
     process = _Process(stream, _stream(""))
     process.returncode = 0
 
-    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
-        result = await _supervise(
-            command=python_runner_command(),
-            request={"type": "run"},
-            api_key="yt-key",
-            deadline=time.monotonic() + 1,
-        )
+    result = await _run_supervised(process)
 
     assert result["outcome"] == "failed"
     assert "exceeded" in result["final_text"]
@@ -433,13 +436,7 @@ async def test_supervisor_rejects_runner_provenance_drift():
 async def test_supervisor_rejects_malformed_events(event):
     process = _Process(_stream(json.dumps(_ready_event()), json.dumps(event)), _stream(""))
     process.returncode = 0
-    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
-        result = await _supervise(
-            command=python_runner_command(),
-            request={"type": "run"},
-            api_key="yt-key",
-            deadline=time.monotonic() + 1,
-        )
+    result = await _run_supervised(process)
     assert result["outcome"] == "failed"
     assert "malformed" in result["final_text"]
 
@@ -451,13 +448,7 @@ async def test_supervisor_rejects_invalid_utf8_in_an_otherwise_valid_event():
     stream.feed_eof()
     process = _Process(stream, _stream(""))
     process.returncode = 0
-    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
-        result = await _supervise(
-            command=python_runner_command(),
-            request={"type": "run"},
-            api_key="yt-key",
-            deadline=time.monotonic() + 1,
-        )
+    result = await _run_supervised(process)
     assert result["outcome"] == "failed"
     assert "invalid JSON" in result["final_text"]
 
@@ -481,13 +472,7 @@ async def test_supervisor_overwrites_child_supplied_actions():
         ),
         _stream(""),
     )
-    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
-        result = await _supervise(
-            command=python_runner_command(),
-            request={"type": "run"},
-            api_key="yt-key",
-            deadline=time.monotonic() + 1,
-        )
+    result = await _run_supervised(process)
     assert result["actions"] == [action]
 
 
@@ -501,13 +486,7 @@ async def test_supervisor_rejects_data_after_a_terminal_event():
         _stream(""),
     )
     process.returncode = 0
-    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
-        result = await _supervise(
-            command=python_runner_command(),
-            request={"type": "run"},
-            api_key="yt-key",
-            deadline=time.monotonic() + 1,
-        )
+    result = await _run_supervised(process)
     assert result["outcome"] == "failed"
     assert "after its terminal event" in result["final_text"]
 
