@@ -11,7 +11,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .constants import (
-    DELIVERY_MODE_FOREGROUND,
     DRIVER_VERSION,
     MCP_VERSION,
     MODEL,
@@ -22,7 +21,7 @@ from .constants import (
 )
 from .lock import ComputerUseBusyError, DesktopLock
 from .preflight import child_search_path, find_cua_driver
-from .result import failure, redact
+from .result import failure, redact, terminal_result
 
 logger = logging.getLogger(__name__)
 
@@ -234,20 +233,14 @@ async def _supervise(
         return terminal
     except asyncio.TimeoutError:
         await _stop_process_group(process)
-        return {
-            "outcome": "limit",
-            "delivery_mode": DELIVERY_MODE_FOREGROUND,
-            "final_text": "The absolute deadline expired.",
-            "actions": actions,
-        }
+        return terminal_result("limit", "The absolute deadline expired.", actions=actions)
     except asyncio.CancelledError:
         await _stop_process_group(process)
-        return {
-            "outcome": "aborted",
-            "delivery_mode": DELIVERY_MODE_FOREGROUND,
-            "final_text": "Computer-use task was cancelled; the runner process group was terminated.",
-            "actions": actions,
-        }
+        return terminal_result(
+            "aborted",
+            "Computer-use task was cancelled; the runner process group was terminated.",
+            actions=actions,
+        )
     finally:
         if process.returncode is None:
             await _stop_process_group(process)

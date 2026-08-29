@@ -118,10 +118,24 @@ def format_result(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def failure(message: str, *, actions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def terminal_result(outcome: str, message: str, *, actions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Build the supervisor-side terminal result dict every caller returns to the host.
+
+    Single source of truth for this shape. The supervisor synthesizes one of these
+    whenever it has to conclude a run itself rather than relay the runner's own
+    terminal event — a failed protocol exchange (``failure`` below), an expired
+    deadline (``limit``), or a cancelled task (``aborted``) — and all three carried
+    hand-written copies of the same four keys, so a shape change had to be made in
+    three places at once.
+    """
     return {
-        "outcome": "failed",
+        "outcome": outcome,
         "delivery_mode": DELIVERY_MODE_FOREGROUND,
         "final_text": message,
         "actions": actions or [],
     }
+
+
+def failure(message: str, *, actions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """The terminal result for a run that could not be carried out."""
+    return terminal_result("failed", message, actions=actions)
