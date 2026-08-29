@@ -22,6 +22,7 @@ from .adapter import (
     ENVIRONMENT_BASE_URLS,
     MCPClientAdapter,
     YutoriAPIError,
+    is_scoped_environment,
     resolve_base_url,
 )
 from .formatters import (
@@ -708,7 +709,7 @@ def _register_computer_use_tool() -> None:
 
 
 def _auth_login(environment: str | None) -> NoReturn:
-    if environment and environment != DEFAULT_ENVIRONMENT:
+    if is_scoped_environment(environment):
         from getpass import getpass
 
         from .credentials import mask, save_environment_key
@@ -742,7 +743,7 @@ def _auth_login(environment: str | None) -> NoReturn:
 
 
 def _auth_logout(environment: str | None) -> NoReturn:
-    if environment and environment != DEFAULT_ENVIRONMENT:
+    if is_scoped_environment(environment):
         from .credentials import clear_environment_key
 
         removed = clear_environment_key(environment)
@@ -761,7 +762,7 @@ def _auth_logout(environment: str | None) -> NoReturn:
 
 
 def _auth_status(environment: str | None) -> NoReturn:
-    if environment and environment != DEFAULT_ENVIRONMENT:
+    if is_scoped_environment(environment):
         from yutori.auth.credentials import get_config_path
 
         from .credentials import mask, stored_environment_key

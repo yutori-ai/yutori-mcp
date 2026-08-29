@@ -55,6 +55,17 @@ def resolve_base_url(environment: str | None = None) -> str:
         ) from None
 
 
+def is_scoped_environment(environment: str | None) -> bool:
+    """Whether ``environment`` explicitly names a non-default environment to target.
+
+    None (unset) and the literal ``DEFAULT_ENVIRONMENT`` both mean "use the SDK's single
+    top-level credential/config", the behavior every install had before per-environment
+    support existed. Shared by server.py's auth subcommands so a future change to what counts
+    as "the default" only needs to happen here.
+    """
+    return bool(environment) and environment != DEFAULT_ENVIRONMENT
+
+
 def resolve_run_credentials(environment: str | None = None) -> tuple[str | None, str]:
     """The (api_key, base_url) pair a computer-use run should authenticate with.
 
