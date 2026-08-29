@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .constants import (
+    DELIVERY_MODE_FOREGROUND,
     DRIVER_VERSION,
     MCP_VERSION,
     MODEL,
@@ -235,7 +236,7 @@ async def _supervise(
         await _stop_process_group(process)
         return {
             "outcome": "limit",
-            "delivery_mode": "foreground",
+            "delivery_mode": DELIVERY_MODE_FOREGROUND,
             "final_text": "The absolute deadline expired.",
             "actions": actions,
         }
@@ -243,7 +244,7 @@ async def _supervise(
         await _stop_process_group(process)
         return {
             "outcome": "aborted",
-            "delivery_mode": "foreground",
+            "delivery_mode": DELIVERY_MODE_FOREGROUND,
             "final_text": "Computer-use task was cancelled; the runner process group was terminated.",
             "actions": actions,
         }

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .constants import DELIVERY_MODE_FOREGROUND
+
 
 def _seconds(ms: Any) -> str:
     return f"{ms / 1000:.1f}s" if isinstance(ms, (int, float)) else "?"
@@ -108,7 +110,7 @@ def format_result(result: dict[str, Any]) -> str:
 def failure(message: str, *, actions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     return {
         "outcome": "failed",
-        "delivery_mode": "foreground",
+        "delivery_mode": DELIVERY_MODE_FOREGROUND,
         "final_text": message,
         "actions": actions or [],
     }
