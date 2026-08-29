@@ -8,6 +8,11 @@ PROTOCOL_VERSION = 1
 MCP_VERSION = __version__
 MODEL = "n2"
 TOOL_SET = "computer_use_tools-20260815"
+# The only delivery mode this runtime implements today. Repeated verbatim across every
+# `action`/`result` protocol event (runner.py, supervisor.py's timeout/cancellation
+# fallbacks, and result.py's failure() shape); centralized so a future second mode can't
+# be introduced with one of those spots left on the old literal by accident.
+DELIVERY_MODE_FOREGROUND = "foreground"
 SDK_VERSION = "0.9.2"
 # The PyPI wheel digest and a digest derived from its stable RECORD entries.
 # Doctor compares the latter with the unpacked installation before any task runs.

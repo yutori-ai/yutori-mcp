@@ -26,6 +26,7 @@ from yutori.navigator.macos import (
 
 from .app import prepare_app
 from .constants import (
+    DELIVERY_MODE_FOREGROUND,
     DRIVER_VERSION,
     PROTOCOL_VERSION,
     SDK_ARTIFACT_SHA256,
@@ -245,7 +246,7 @@ class ActionReporter:
                 "tool": str(item.get("name") or "unknown").lower(),
                 "status": _status_for(raw_status),
                 "raw_status": raw_status,
-                "delivery_mode": "foreground",
+                "delivery_mode": DELIVERY_MODE_FOREGROUND,
                 "route": "pixel",
                 "refusal_code": "driver_refused" if raw_status == "refused" else None,
                 "elapsed_ms": max(0, round((self._clock() - self._run_start) * 1000)),
@@ -448,7 +449,7 @@ async def run_request(
             {
                 "type": "result",
                 "outcome": "limit",
-                "delivery_mode": "foreground",
+                "delivery_mode": DELIVERY_MODE_FOREGROUND,
                 "final_text": "The deadline expired before the run started.",
                 "elapsed_ms": 0,
                 "steps": 0,
@@ -533,7 +534,7 @@ async def run_request(
         {
             "type": "result",
             "outcome": outcome,
-            "delivery_mode": "foreground",
+            "delivery_mode": DELIVERY_MODE_FOREGROUND,
             "final_text": final_text,
             "elapsed_ms": elapsed_ms,
             "steps": guard.steps,
@@ -629,7 +630,7 @@ def main() -> int:
             {
                 "type": "result",
                 "outcome": "failed",
-                "delivery_mode": "foreground",
+                "delivery_mode": DELIVERY_MODE_FOREGROUND,
                 "final_text": message,
                 "steps": 0,
             }
