@@ -4,6 +4,17 @@ from typing import Any
 
 from .constants import DELIVERY_MODE_FOREGROUND
 
+REDACTED = "[REDACTED]"
+
+
+def redact(text: str, secret: str) -> str:
+    """Scrub ``secret`` out of ``text`` before it can reach the protocol stream or logs.
+
+    Shared by the runner (exception text) and the supervisor (stderr diagnostics and
+    protocol stdout lines) so the child's API key never survives past this one point.
+    """
+    return text.replace(secret, REDACTED)
+
 
 def _seconds(ms: Any) -> str:
     return f"{ms / 1000:.1f}s" if isinstance(ms, (int, float)) else "?"

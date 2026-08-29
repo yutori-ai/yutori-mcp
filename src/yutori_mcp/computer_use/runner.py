@@ -34,6 +34,7 @@ from .constants import (
     SDK_VERSION,
     TOOL_SET,
 )
+from .result import redact
 
 SYSTEM_CONTEXT = (
     "You control the entire macOS screen. This is macOS, not Linux: do not use "
@@ -317,7 +318,7 @@ def _redacted_error_text(error: BaseException, secret: str) -> str:
     Falls back to the exception's type name when str(error) is empty (e.g. a bare
     `RuntimeError()`), so the caller always reports something readable.
     """
-    return str(error).replace(secret, "[REDACTED]") or type(error).__name__
+    return redact(str(error), secret) or type(error).__name__
 
 
 async def _collect_run(agent: Any, messages: Any) -> list[dict[str, Any]]:

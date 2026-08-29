@@ -35,7 +35,7 @@ from yutori_mcp.computer_use.constants import (
     TOOL_SET,
 )
 from yutori_mcp.computer_use.lock import ComputerUseBusyError, DesktopLock
-from yutori_mcp.computer_use.result import format_result
+from yutori_mcp.computer_use.result import format_result, redact
 from yutori_mcp.computer_use.runner import (
     ActionReporter,
     Emitter,
@@ -1251,6 +1251,14 @@ def test_redacted_error_text_scrubs_the_secret():
 
 def test_redacted_error_text_falls_back_to_type_name_when_message_is_empty():
     assert runner_module._redacted_error_text(RuntimeError(), "yt-secret-123") == "RuntimeError"
+
+
+def test_redact_scrubs_every_occurrence_of_the_secret():
+    assert redact("key=yt-secret then yt-secret again", "yt-secret") == "key=[REDACTED] then [REDACTED] again"
+
+
+def test_redact_is_a_noop_when_the_secret_is_absent():
+    assert redact("nothing sensitive here", "yt-secret") == "nothing sensitive here"
 
 
 class _CollectStream:
