@@ -1009,14 +1009,23 @@ async def test_mechanical_calculator_check_uses_cua_driver(monkeypatch, tmp_path
     assert computers[0].calls.count(("keypress", ["CMD", "C"])) == 2
 
 
+def _patch_smoke_preflight(monkeypatch, cli, lock_path, first_blocker=lambda: None):
+    """Patch the DesktopLock path and first_blocker() result every _smoke_live() test needs.
+
+    Every caller of `_smoke_live()` reserves the desktop at a test-owned lock path and stubs
+    the preflight gate before exercising it; only the blocker (or lack of one) differs per test.
+    """
+    monkeypatch.setattr(cli, "DesktopLock", lambda: DesktopLock(lock_path))
+    monkeypatch.setattr(cli, "first_blocker", first_blocker)
+
+
 async def test_smoke_reserves_desktop_before_mechanical_check(monkeypatch, tmp_path, capsys):
     from yutori_mcp.computer_use import cli
 
     lock_path = tmp_path / "desktop.lock"
     mechanical_check = AsyncMock()
     preflight = Mock()
-    monkeypatch.setattr(cli, "DesktopLock", lambda: DesktopLock(lock_path))
-    monkeypatch.setattr(cli, "first_blocker", preflight)
+    _patch_smoke_preflight(monkeypatch, cli, lock_path, preflight)
     monkeypatch.setattr(cli, "_mechanical_calculator_check", mechanical_check)
 
     with DesktopLock(lock_path):
@@ -1031,8 +1040,7 @@ async def test_smoke_does_not_print_mismatched_clipboard_contents(monkeypatch, t
     from yutori_mcp.computer_use import cli
 
     secret = "clipboard-secret-value"
-    monkeypatch.setattr(cli, "DesktopLock", lambda: DesktopLock(tmp_path / "desktop.lock"))
-    monkeypatch.setattr(cli, "first_blocker", lambda: None)
+    _patch_smoke_preflight(monkeypatch, cli, tmp_path / "desktop.lock")
     monkeypatch.setattr(cli, "_mechanical_calculator_check", AsyncMock(return_value=secret))
 
     assert await cli._smoke_live() == 1
@@ -1046,8 +1054,7 @@ async def test_smoke_allows_two_minutes_for_live_check(monkeypatch, tmp_path):
     from yutori_mcp.computer_use import cli
 
     run = AsyncMock(return_value={"outcome": "completed"})
-    monkeypatch.setattr(cli, "DesktopLock", lambda: DesktopLock(tmp_path / "desktop.lock"))
-    monkeypatch.setattr(cli, "first_blocker", lambda: None)
+    _patch_smoke_preflight(monkeypatch, cli, tmp_path / "desktop.lock")
     monkeypatch.setattr(cli, "_mechanical_calculator_check", AsyncMock(return_value="42"))
     monkeypatch.setattr(cli, "run_task", run)
     monkeypatch.setattr(cli, "format_result", lambda _result: "complete")
@@ -1159,8 +1166,7 @@ async def test_smoke_reports_preflight_detail_and_fix(monkeypatch, tmp_path, cap
         "Invalid model",
         "Use a supported model.",
     )
-    monkeypatch.setattr(cli, "DesktopLock", lambda: DesktopLock(tmp_path / "desktop.lock"))
-    monkeypatch.setattr(cli, "first_blocker", lambda: blocker)
+    _patch_smoke_preflight(monkeypatch, cli, tmp_path / "desktop.lock", lambda: blocker)
     mechanical = AsyncMock()
     monkeypatch.setattr(cli, "_mechanical_calculator_check", mechanical)
 
