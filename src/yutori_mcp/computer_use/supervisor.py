@@ -86,6 +86,20 @@ async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
         await process.wait()
 
 
+def _remaining_seconds(deadline: float) -> float:
+    """Seconds left before ``deadline``, or raise ``asyncio.TimeoutError`` if none remain.
+
+    ``_supervise`` checks this before both of its waits on the child process -- the
+    per-line read loop and the final ``process.wait()`` after EOF -- so an expired
+    absolute deadline is caught the same way in both places instead of one of them
+    risking a zero/negative timeout reaching ``asyncio.wait_for``.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise asyncio.TimeoutError
+    return remaining
+
+
 async def _drain_stderr(stream: asyncio.StreamReader, secret: str) -> list[str]:
     diagnostics: list[str] = []
     while line := await stream.readline():
@@ -171,9 +185,7 @@ async def _supervise(
         process.stdin.close()
         await process.stdin.wait_closed()
         while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise asyncio.TimeoutError
+            remaining = _remaining_seconds(deadline)
             try:
                 line = await asyncio.wait_for(process.stdout.readline(), remaining)
             except ValueError:
@@ -216,9 +228,7 @@ async def _supervise(
                 # Any further stdout is a protocol violation, so consume to EOF.
             else:
                 return failure(f"Computer-use runner emitted unknown event type: {event_type!r}.", actions=actions)
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise asyncio.TimeoutError
+        remaining = _remaining_seconds(deadline)
         await asyncio.wait_for(process.wait(), remaining)
         if terminal is None:
             diagnostics = await stderr_task

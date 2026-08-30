@@ -492,6 +492,17 @@ async def test_supervisor_rejects_data_after_a_terminal_event():
     assert "after its terminal event" in result["final_text"]
 
 
+def test_remaining_seconds_returns_positive_time_left():
+    deadline = time.monotonic() + 5
+    remaining = supervisor._remaining_seconds(deadline)
+    assert 0 < remaining <= 5
+
+
+def test_remaining_seconds_raises_once_deadline_has_passed():
+    with pytest.raises(asyncio.TimeoutError):
+        supervisor._remaining_seconds(time.monotonic() - 1)
+
+
 async def test_stop_process_group_escalates_to_kill():
     process = SimpleNamespace(pid=123, returncode=None, wait=AsyncMock(return_value=0))
 
