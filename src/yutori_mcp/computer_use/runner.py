@@ -437,6 +437,23 @@ def _cancelled_outcome(cause: str | None) -> tuple[str, str]:
     return "aborted", "The computer-use run was stopped."
 
 
+def _result_event(outcome: str, final_text: str | None) -> dict[str, Any]:
+    """The four keys every runner-to-supervisor "result" event shares.
+
+    A deadline that expires before the run starts, a normal run outcome, and an unexpected
+    top-level exception in ``main()`` each terminate at a different point with different
+    additional data available (elapsed_ms/steps, timings, presentation state), but all three
+    must still agree on this core shape -- the same one `supervisor._event_shape_error()`
+    validates on the other side of the pipe.
+    """
+    return {
+        "type": "result",
+        "outcome": outcome,
+        "delivery_mode": DELIVERY_MODE_FOREGROUND,
+        "final_text": final_text,
+    }
+
+
 async def run_request(
     request: dict[str, Any],
     emitter: Emitter,
@@ -448,10 +465,7 @@ async def run_request(
     if remaining_seconds <= 0:
         emitter.emit(
             {
-                "type": "result",
-                "outcome": "limit",
-                "delivery_mode": DELIVERY_MODE_FOREGROUND,
-                "final_text": "The deadline expired before the run started.",
+                **_result_event("limit", "The deadline expired before the run started."),
                 "elapsed_ms": 0,
                 "steps": 0,
             }
@@ -533,10 +547,7 @@ async def run_request(
     elapsed_ms = max(0, round((time.monotonic() - run_start) * 1000))
     emitter.emit(
         {
-            "type": "result",
-            "outcome": outcome,
-            "delivery_mode": DELIVERY_MODE_FOREGROUND,
-            "final_text": final_text,
+            **_result_event(outcome, final_text),
             "elapsed_ms": elapsed_ms,
             "steps": guard.steps,
             "timings": _timings_payload(elapsed_ms, agent, api_counter, reporter, computer),
@@ -629,10 +640,7 @@ def main() -> int:
         message = _redacted_error_text(error, api_key)
         emitter.emit(
             {
-                "type": "result",
-                "outcome": "failed",
-                "delivery_mode": DELIVERY_MODE_FOREGROUND,
-                "final_text": message,
+                **_result_event("failed", message),
                 "steps": 0,
             }
         )
