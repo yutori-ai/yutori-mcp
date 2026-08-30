@@ -121,6 +121,22 @@ class TestErrorFormattingContract:
 # ---------------------------------------------------------------------------
 
 
+def _create_adapter_with_resolved_key(**adapter_kwargs):
+    """Patch resolve_api_key_for_environment + AsyncYutoriClient and construct MCPClientAdapter(**adapter_kwargs).
+
+    Returns the AsyncYutoriClient class mock so the caller can assert on its call args, which differ per test.
+    """
+    with (
+        patch(
+            "yutori_mcp.adapter.resolve_api_key_for_environment",
+            return_value="yt-key",
+        ),
+        patch("yutori_mcp.adapter.AsyncYutoriClient") as mock_client_cls,
+    ):
+        MCPClientAdapter(**adapter_kwargs)
+    return mock_client_cls
+
+
 class TestAdapterInit:
     def test_raises_without_api_key(self):
         with patch(
@@ -131,46 +147,27 @@ class TestAdapterInit:
 
     def test_creates_client_with_resolved_key(self, monkeypatch):
         monkeypatch.delenv(ENV_VAR_ENVIRONMENT, raising=False)
-        with (
-            patch(
-                "yutori_mcp.adapter.resolve_api_key_for_environment",
-                return_value="yt-key",
-            ),
-            patch("yutori_mcp.adapter.AsyncYutoriClient") as mock_client_cls,
-        ):
-            MCPClientAdapter()
-            mock_client_cls.assert_called_once_with(
-                api_key="yt-key",
-                base_url=ENVIRONMENT_BASE_URLS[DEFAULT_ENVIRONMENT],
-            )
+        mock_client_cls = _create_adapter_with_resolved_key()
+        mock_client_cls.assert_called_once_with(
+            api_key="yt-key",
+            base_url=ENVIRONMENT_BASE_URLS[DEFAULT_ENVIRONMENT],
+        )
 
     def test_env_var_selects_dev_base_url(self, monkeypatch):
         monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
-        with (
-            patch(
-                "yutori_mcp.adapter.resolve_api_key_for_environment",
-                return_value="yt-key",
-            ),
-            patch("yutori_mcp.adapter.AsyncYutoriClient") as mock_client_cls,
-        ):
-            MCPClientAdapter()
-            mock_client_cls.assert_called_once_with(
-                api_key="yt-key", base_url=ENVIRONMENT_BASE_URLS["dev"]
-            )
+        mock_client_cls = _create_adapter_with_resolved_key()
+        mock_client_cls.assert_called_once_with(
+            api_key="yt-key", base_url=ENVIRONMENT_BASE_URLS["dev"]
+        )
 
     def test_explicit_base_url_wins_over_env_var(self, monkeypatch):
         monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
-        with (
-            patch(
-                "yutori_mcp.adapter.resolve_api_key_for_environment",
-                return_value="yt-key",
-            ),
-            patch("yutori_mcp.adapter.AsyncYutoriClient") as mock_client_cls,
-        ):
-            MCPClientAdapter(base_url="http://localhost:8000/v1")
-            mock_client_cls.assert_called_once_with(
-                api_key="yt-key", base_url="http://localhost:8000/v1"
-            )
+        mock_client_cls = _create_adapter_with_resolved_key(
+            base_url="http://localhost:8000/v1"
+        )
+        mock_client_cls.assert_called_once_with(
+            api_key="yt-key", base_url="http://localhost:8000/v1"
+        )
 
     async def test_close_closes_client(self, adapter):
         adapter._client.close = AsyncMock()
