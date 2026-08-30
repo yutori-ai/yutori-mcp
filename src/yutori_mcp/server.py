@@ -33,6 +33,7 @@ from .formatters import (
 )
 from .schema_utils import output_fields_to_output_schema
 from .schemas import (
+    COMPUTER_USE_DEFAULT_MAX_STEPS,
     COMPUTER_USE_DEFAULT_MINUTES,
     DEFAULT_LIST_LIMIT,
     BrowserChoice,
@@ -405,7 +406,7 @@ async def run_computer_use_task(
     app: str | None = None,
     start_url: str | None = None,
     minutes: float = COMPUTER_USE_DEFAULT_MINUTES,
-    max_steps: int = 60,
+    max_steps: int = COMPUTER_USE_DEFAULT_MAX_STEPS,
     ctx: Context | None = None,
 ) -> str:
     # `ctx` is FastMCP's injected request context (excluded from the client-facing

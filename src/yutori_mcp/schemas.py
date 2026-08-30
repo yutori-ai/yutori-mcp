@@ -391,6 +391,10 @@ class BrowsingTaskInput(ToolInput):
 
 COMPUTER_USE_DEFAULT_MINUTES = 30
 COMPUTER_USE_MAX_MINUTES = 60
+# Shared with computer_use/cli.py's `--max-steps` argparse default and server.py's
+# run_computer_use_task signature default, mirroring COMPUTER_USE_DEFAULT_MINUTES above so the
+# three call sites cannot drift apart if the default ever changes.
+COMPUTER_USE_DEFAULT_MAX_STEPS = 60
 
 
 class ComputerUseTaskInput(ToolInput):
@@ -406,7 +410,7 @@ class ComputerUseTaskInput(ToolInput):
         description=f"Absolute run deadline in minutes (1-{COMPUTER_USE_MAX_MINUTES})",
     )
     max_steps: int = Field(
-        default=60, ge=1, description="Maximum actions before stopping the run"
+        default=COMPUTER_USE_DEFAULT_MAX_STEPS, ge=1, description="Maximum actions before stopping the run"
     )
     @model_validator(mode="after")
     def require_app_for_start_url(self) -> ComputerUseTaskInput:

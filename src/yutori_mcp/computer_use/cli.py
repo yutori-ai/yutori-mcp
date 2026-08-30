@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 from ..schemas import (
+    COMPUTER_USE_DEFAULT_MAX_STEPS,
     COMPUTER_USE_DEFAULT_MINUTES,
     COMPUTER_USE_MAX_MINUTES,
     ComputerUseTaskInput,
@@ -253,7 +254,13 @@ def register_parser(
         default=COMPUTER_USE_DEFAULT_MINUTES,
         help=f"Absolute deadline in minutes (1-{COMPUTER_USE_MAX_MINUTES})",
     )
-    run_parser.add_argument("--max-steps", dest="max_steps", type=int, default=60, help="Maximum actions")
+    run_parser.add_argument(
+        "--max-steps",
+        dest="max_steps",
+        type=int,
+        default=COMPUTER_USE_DEFAULT_MAX_STEPS,
+        help="Maximum actions",
+    )
 
 
 def dispatch(command: str, args: argparse.Namespace | None = None) -> int:
