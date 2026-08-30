@@ -437,6 +437,16 @@ def _cancelled_outcome(cause: str | None) -> tuple[str, str]:
     return "aborted", "The computer-use run was stopped."
 
 
+def _error_event(code: str, message: str) -> dict[str, Any]:
+    """The two keys every runner-to-supervisor "error" event shares.
+
+    `main()` reports a malformed request and a missing API key at two different points before
+    the run ever starts, but both must still agree on this shape -- the same one
+    `supervisor._event_shape_error()` validates on the other side of the pipe.
+    """
+    return {"type": "error", "code": code, "message": message}
+
+
 def _result_event(outcome: str, final_text: str | None) -> dict[str, Any]:
     """The four keys every runner-to-supervisor "result" event shares.
 
@@ -623,16 +633,10 @@ def main() -> int:
             raise RequestError("INVALID_JSON", "Request was not valid JSON.") from None
         request = parse_request(payload)
     except RequestError as error:
-        emitter.emit({"type": "error", "code": error.code, "message": str(error)})
+        emitter.emit(_error_event(error.code, str(error)))
         return 1
     if not api_key:
-        emitter.emit(
-            {
-                "type": "error",
-                "code": "MISSING_API_KEY",
-                "message": "YUTORI_API_KEY is not set in the runner environment.",
-            }
-        )
+        emitter.emit(_error_event("MISSING_API_KEY", "YUTORI_API_KEY is not set in the runner environment."))
         return 1
     try:
         outcome = asyncio.run(_run_until_terminated(request, emitter, api_key))
