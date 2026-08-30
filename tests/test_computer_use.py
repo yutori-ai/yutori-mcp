@@ -1261,6 +1261,15 @@ def test_failure_is_the_failed_outcome_of_the_shared_shape():
     assert failure("boom") == terminal_result("failed", "boom")
 
 
+def test_result_event_carries_the_outcome_and_shared_shape():
+    assert runner_module._result_event("limit", "deadline expired") == {
+        "type": "result",
+        "outcome": "limit",
+        "delivery_mode": DELIVERY_MODE_FOREGROUND,
+        "final_text": "deadline expired",
+    }
+
+
 class _CollectStream:
     def __init__(self):
         self.lines: list[str] = []
@@ -1463,6 +1472,23 @@ async def test_run_request_reports_an_action_interrupted_by_cancellation(monkeyp
     assert [event["type"] for event in events[-2:]] == ["action", "result"]
     assert events[-2]["raw_status"] == "interrupted"
     assert events[-2]["status"] == "uncertain"
+
+
+async def test_run_request_reports_limit_when_the_deadline_has_already_passed():
+    stream = _CollectStream()
+    request = parse_request(_valid_request(deadline_ms=int((time.time() - 1) * 1000)))
+
+    assert await runner_module.run_request(request, Emitter(stream), "yt-secret") == "limit"
+
+    (event,) = [json.loads(line) for line in stream.lines]
+    assert event == {
+        "type": "result",
+        "outcome": "limit",
+        "delivery_mode": DELIVERY_MODE_FOREGROUND,
+        "final_text": "The deadline expired before the run started.",
+        "elapsed_ms": 0,
+        "steps": 0,
+    }
 
 
 def test_format_result_handles_python_runtime_action_fields():
