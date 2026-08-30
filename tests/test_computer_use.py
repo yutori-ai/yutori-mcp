@@ -1270,6 +1270,14 @@ def test_result_event_carries_the_outcome_and_shared_shape():
     }
 
 
+def test_error_event_carries_the_code_and_message():
+    assert runner_module._error_event("MISSING_API_KEY", "not set") == {
+        "type": "error",
+        "code": "MISSING_API_KEY",
+        "message": "not set",
+    }
+
+
 class _CollectStream:
     def __init__(self):
         self.lines: list[str] = []
