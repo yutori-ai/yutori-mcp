@@ -172,44 +172,48 @@ def _stable_distribution_digest(distribution: importlib.metadata.Distribution) -
 
 def check_runtime() -> CheckResult:
     remediation = f"Reinstall the pinned runtime: uvx --refresh --from yutori-mcp=={MCP_VERSION} yutori-mcp"
+
+    def report(ok: bool, detail: str) -> CheckResult:
+        return _result("Python runtime", ok, detail, remediation)
+
     try:
         distribution = importlib.metadata.distribution("yutori")
         version = distribution.version
     except (ImportError, importlib.metadata.PackageNotFoundError, OSError, ValueError) as error:
-        return _result("Python runtime", False, str(error), remediation)
+        return report(False, str(error))
 
     editable = _editable_distribution(distribution)
     if editable:
         override = os.environ.get(_EDITABLE_SDK_OVERRIDE) == "1"
         detail = f"yutori {version}; editable installation; override {'enabled' if override else 'required'}"
         if not override or version != SDK_VERSION:
-            return _result("Python runtime", False, detail, remediation)
+            return report(False, detail)
         try:
             provenance = _provenance_path(distribution, editable=True).read_bytes()
         except (OSError, ValueError, json.JSONDecodeError) as error:
-            return _result("Python runtime", False, str(error), remediation)
+            return report(False, str(error))
         ok = hashlib.sha256(provenance).hexdigest() == SDK_PROVENANCE_SHA256
-        return _result("Python runtime", ok, detail, remediation)
+        return report(ok, detail)
 
     try:
         installation_digest = _stable_distribution_digest(distribution)
     except OSError as error:
-        return _result("Python runtime", False, f"installed file unavailable: {error}", remediation)
+        return report(False, f"installed file unavailable: {error}")
     if version != SDK_VERSION or installation_digest != SDK_INSTALLATION_SHA256:
         detail = (
             f"yutori {version}; artifact sha256 {SDK_ARTIFACT_SHA256}; installation sha256 {installation_digest}"
         )
-        return _result("Python runtime", False, detail, remediation)
+        return report(False, detail)
     try:
         provenance = _provenance_path(distribution, editable=False).read_bytes()
     except (OSError, ValueError) as error:
-        return _result("Python runtime", False, str(error), remediation)
+        return report(False, str(error))
     provenance_digest = hashlib.sha256(provenance).hexdigest()
     detail = (
         f"yutori {version}; artifact sha256 {SDK_ARTIFACT_SHA256}; installation sha256 {installation_digest}; "
         f"provenance sha256 {provenance_digest}"
     )
-    return _result("Python runtime", provenance_digest == SDK_PROVENANCE_SHA256, detail, remediation)
+    return report(provenance_digest == SDK_PROVENANCE_SHA256, detail)
 
 
 def _run_safely(
@@ -465,6 +469,13 @@ def check_api_access() -> CheckResult:
 
     environment = current_environment()
     remediation = _api_access_remediation(environment)
+
+    def report(ok: bool, detail: str) -> CheckResult:
+        # `remediation` is read here at call time, not capture time, so the
+        # invalid_model/billing overrides below (assigned to the enclosing
+        # function's `remediation` before either return) still apply.
+        return _result("Yutori API", ok, detail, remediation)
+
     try:
         key, base_url = resolve_run_credentials(environment)
         request = Request(
@@ -485,7 +496,7 @@ def check_api_access() -> CheckResult:
             payload = json.loads(response.read().decode() or "{}")
     except HTTPError as error:
         if error.code in {401, 403}:
-            return _result("Yutori API", False, "credential rejected", remediation)
+            return report(False, "credential rejected")
         try:
             body = error.read()
             error_payload = json.loads(body.decode()) if isinstance(body, bytes) else {}
@@ -499,10 +510,10 @@ def check_api_access() -> CheckResult:
                     f"This build requests {MODEL!r}; use an environment where that model is enabled "
                     "or select a build configured for an available computer-use model."
                 )
-            return _result("Yutori API", False, message, remediation)
-        return _result("Yutori API", False, f"probe failed (HTTP {error.code})", remediation)
+            return report(False, message)
+        return report(False, f"probe failed (HTTP {error.code})")
     except (URLError, OSError, ValueError):
-        return _result("Yutori API", False, "unreachable", remediation)
+        return report(False, "unreachable")
 
     error = payload.get("error")
     if isinstance(error, dict):
@@ -513,10 +524,10 @@ def check_api_access() -> CheckResult:
             if "billing" in kind or "funds" in kind
             else remediation
         )
-        return _result("Yutori API", False, message, remediation)
+        return report(False, message)
     if not payload.get("choices"):
-        return _result("Yutori API", False, "no completion returned", remediation)
-    return _result("Yutori API", True, "computer-use model returned a completion", remediation)
+        return report(False, "no completion returned")
+    return report(True, "computer-use model returned a completion")
 
 
 _PLATFORM_CHECKS: tuple[Callable[[], CheckResult], ...] = (
