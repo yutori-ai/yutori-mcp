@@ -928,15 +928,25 @@ def test_installer_checksum_aborts_before_execution(monkeypatch):
     run.assert_not_called()
 
 
-def test_setup_prepares_overlay_after_driver_permissions(monkeypatch, tmp_path):
-    from yutori_mcp.computer_use import cli
+def _patch_successful_driver_setup(monkeypatch, cli, tmp_path) -> None:
+    """Patch every _setup() gate before the overlay step so it always reaches that step.
 
+    Both overlay-outcome tests below need `_setup()` to sail through the runtime check,
+    installer download, checksum verification, and `find_cua_driver()` lookup identically;
+    only what happens at the overlay-preparation step differs between them.
+    """
     driver = tmp_path / "cua-driver"
     driver.write_text("")
     monkeypatch.setattr(cli, "check_runtime", lambda: preflight.CheckResult("runtime", True, "ok"))
     monkeypatch.setattr(cli, "_download_installer", lambda _: b"installer")
     monkeypatch.setattr(cli, "DRIVER_INSTALLER_SHA256", hashlib.sha256(b"installer").hexdigest())
     monkeypatch.setattr(cli, "find_cua_driver", lambda: driver)
+
+
+def test_setup_prepares_overlay_after_driver_permissions(monkeypatch, tmp_path):
+    from yutori_mcp.computer_use import cli
+
+    _patch_successful_driver_setup(monkeypatch, cli, tmp_path)
     prepared = SimpleNamespace(binary=tmp_path / "overlay")
     prepare = patch("yutori.navigator.macos.prepare_macos_overlay", return_value=prepared)
     with prepare as prepare_overlay, patch.object(cli.subprocess, "run"), patch.object(cli, "_doctor", return_value=0):
@@ -947,12 +957,7 @@ def test_setup_prepares_overlay_after_driver_permissions(monkeypatch, tmp_path):
 def test_setup_treats_overlay_file_errors_as_warnings(monkeypatch, tmp_path, capsys):
     from yutori_mcp.computer_use import cli
 
-    driver = tmp_path / "cua-driver"
-    driver.write_text("")
-    monkeypatch.setattr(cli, "check_runtime", lambda: preflight.CheckResult("runtime", True, "ok"))
-    monkeypatch.setattr(cli, "_download_installer", lambda _: b"installer")
-    monkeypatch.setattr(cli, "DRIVER_INSTALLER_SHA256", hashlib.sha256(b"installer").hexdigest())
-    monkeypatch.setattr(cli, "find_cua_driver", lambda: driver)
+    _patch_successful_driver_setup(monkeypatch, cli, tmp_path)
     with (
         patch("yutori.navigator.macos.prepare_macos_overlay", side_effect=OSError("read-only cache")),
         patch.object(cli.subprocess, "run"),
