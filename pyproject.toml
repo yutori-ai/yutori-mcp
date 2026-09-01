@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.5.6"
+version = "0.5.7"
 description = "MCP server and workflow skills for building agents with Yutori"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,9 +30,9 @@ dependencies = [
     # breaks the install as soon as 2.x resolves.
     "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
-    # SDK 0.9.2 owns the complete Python/Swift macOS runtime. Doctor verifies
+    # SDK 0.9.9 owns the complete Python/Swift macOS runtime. Doctor verifies
     # the installed payload against the exact published wheel before use.
-    "yutori==0.9.2",
+    "yutori==0.9.9",
 ]
 
 [project.optional-dependencies]

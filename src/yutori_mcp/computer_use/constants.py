@@ -14,12 +14,12 @@ TOOL_SET = "computer_use_tools-20260815"
 # so a future second mode can't be introduced with one of those spots left on the old
 # literal by accident.
 DELIVERY_MODE_FOREGROUND = "foreground"
-SDK_VERSION = "0.9.2"
+SDK_VERSION = "0.9.9"
 # The PyPI wheel digest and a digest derived from its stable RECORD entries.
 # Doctor compares the latter with the unpacked installation before any task runs.
-SDK_ARTIFACT_SHA256 = "bb2de3d77e73be6abe8e27663e425518dc6fe0170502a7337c5b59456a9e8cad"
-SDK_INSTALLATION_SHA256 = "19af218c916ad34efd8212377ed9b540b87b825fda8e42b98066f8bd723f7d64"
-SDK_PROVENANCE_SHA256 = "aa3c8b58281f0dcde3446cc87cfd8b9c4e57b6c5e0b2be56450eef33c09dd59c"
+SDK_ARTIFACT_SHA256 = "c1e64663033eb3a6550d6b3af8de331825ebdf5e8ecb7f39575b9544a1b59908"
+SDK_INSTALLATION_SHA256 = "5309391db4d8af899cc84f517969545faf75e8878f04d9278d5af8ed9ded0be6"
+SDK_PROVENANCE_SHA256 = "7cab595d2f00e1a9ab5cd121204fbd6dd4c24163ead3eb76f76eef7fba495fc4"
 
 # The cua-driver release that implements this tool contract, and the checksum
 # of its installer script. Both are hard gates.
