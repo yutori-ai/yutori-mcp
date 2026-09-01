@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from collections.abc import Callable
 from urllib.error import HTTPError
 from pathlib import Path
 from types import SimpleNamespace
@@ -135,15 +136,26 @@ def test_main_applies_explicit_environment_before_computer_use_registration(monk
     assert observed == ["prod"]
 
 
-def test_main_applies_explicit_environment_before_computer_use_dispatch(monkeypatch):
-    import yutori_mcp.computer_use.cli as computer_use_cli
-    from yutori_mcp import server
+def _recording_dispatch() -> tuple[dict[str, str | None], Callable[[str, object], int]]:
+    """A `dispatch`-shaped stub that records the ambient YUTORI_ENV it sees when called.
 
+    Shared by the three tests below pinning how `--env`/ambient YUTORI_ENV reaches
+    `computer_use.cli.dispatch` through server.main() and entrypoint._computer_use_main().
+    """
     observed: dict[str, str | None] = {}
 
     def record_dispatch(_command: str, _args: object) -> int:
         observed["environment"] = os.environ.get("YUTORI_ENV")
         return 0
+
+    return observed, record_dispatch
+
+
+def test_main_applies_explicit_environment_before_computer_use_dispatch(monkeypatch):
+    import yutori_mcp.computer_use.cli as computer_use_cli
+    from yutori_mcp import server
+
+    observed, record_dispatch = _recording_dispatch()
 
     monkeypatch.setenv("YUTORI_ENV", "prod")
     monkeypatch.setattr(sys, "argv", ["yutori-mcp", "--env", "dev", "computer-use", "doctor"])
@@ -159,11 +171,7 @@ def test_main_clears_ambient_environment_for_computer_use_without_explicit_env(m
     import yutori_mcp.computer_use.cli as computer_use_cli
     from yutori_mcp import server
 
-    observed: dict[str, str | None] = {}
-
-    def record_dispatch(_command: str, _args: object) -> int:
-        observed["environment"] = os.environ.get("YUTORI_ENV")
-        return 0
+    observed, record_dispatch = _recording_dispatch()
 
     monkeypatch.setenv("YUTORI_ENV", "dev")
     monkeypatch.setattr(sys, "argv", ["yutori-mcp", "computer-use", "doctor"])
@@ -183,11 +191,7 @@ def test_protected_entrypoint_applies_computer_use_environment(monkeypatch, argu
     import yutori_mcp.computer_use.cli as computer_use_cli
     from yutori_mcp import entrypoint
 
-    observed: dict[str, str | None] = {}
-
-    def record_dispatch(_command: str, _args: object) -> int:
-        observed["environment"] = os.environ.get("YUTORI_ENV")
-        return 0
+    observed, record_dispatch = _recording_dispatch()
 
     monkeypatch.setenv("YUTORI_ENV", ambient)
     monkeypatch.setattr(sys, "argv", ["yutori-mcp", *arguments, "computer-use", "doctor"])
