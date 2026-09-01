@@ -11,11 +11,28 @@ import json
 import os
 import stat
 import sys
+from collections.abc import Callable
 from unittest.mock import patch
 
 import pytest
 
 from yutori_mcp import credentials
+
+
+def _recording_auth_dispatch() -> tuple[dict[str, object], Callable[..., None]]:
+    """A `_handle_auth_command`-shaped stub that records the command/environment it was called with.
+
+    Shared by the two tests below pinning how a plain `login` vs. an explicit `--env` flag
+    reaches `server._handle_auth_command` through `server.main()`.
+    """
+    seen: dict[str, object] = {}
+
+    def record(command, environment=None):
+        seen["command"] = command
+        seen["environment"] = environment
+        raise SystemExit(0)
+
+    return seen, record
 
 
 @pytest.fixture
@@ -115,12 +132,7 @@ def test_ambient_yutori_env_does_not_change_what_login_means(
     import yutori_mcp.server as server
 
     monkeypatch.setenv("YUTORI_ENV", "dev")
-    seen: dict[str, object] = {}
-
-    def record(command, environment=None):
-        seen["command"] = command
-        seen["environment"] = environment
-        raise SystemExit(0)
+    seen, record = _recording_auth_dispatch()
 
     monkeypatch.setattr(server, "_handle_auth_command", record)
     monkeypatch.setattr(sys, "argv", ["yutori-mcp", "login"])
@@ -133,11 +145,7 @@ def test_ambient_yutori_env_does_not_change_what_login_means(
 def test_an_explicit_env_flag_still_selects_the_environment(monkeypatch):
     import yutori_mcp.server as server
 
-    seen: dict[str, object] = {}
-
-    def record(command, environment=None):
-        seen["environment"] = environment
-        raise SystemExit(0)
+    seen, record = _recording_auth_dispatch()
 
     monkeypatch.setattr(server, "_handle_auth_command", record)
     monkeypatch.setattr(sys, "argv", ["yutori-mcp", "--env", "dev", "login"])
