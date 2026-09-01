@@ -179,6 +179,18 @@ async def _supervise(
     actions: list[dict[str, Any]] = []
     terminal: dict[str, Any] | None = None
     ready = False
+
+    def protocol_failure(detail: str) -> dict[str, Any]:
+        """A runner protocol violation, reported with the actions observed so far.
+
+        Every violation below returned the same two things by hand -- the
+        "Computer-use runner" subject the host reads the message by, and the running
+        ``actions`` list -- across eleven early-return branches. Binding both here
+        means a new branch cannot word the subject differently or, worse, omit
+        ``actions`` and silently drop the action history from the result.
+        """
+        return failure(f"Computer-use runner {detail}", actions=actions)
+
     try:
         process.stdin.write(json.dumps(request, separators=(",", ":")).encode() + b"\n")
         await process.stdin.drain()
@@ -189,51 +201,45 @@ async def _supervise(
             try:
                 line = await asyncio.wait_for(process.stdout.readline(), remaining)
             except ValueError:
-                return failure(
-                    f"Computer-use runner event exceeded the {RUNNER_FRAME_LIMIT_BYTES}-byte limit.",
-                    actions=actions,
-                )
+                return protocol_failure(f"event exceeded the {RUNNER_FRAME_LIMIT_BYTES}-byte limit.")
             if not line:
                 break
             try:
                 event = json.loads(redact(line.decode(), api_key))
             except (json.JSONDecodeError, UnicodeDecodeError):
-                return failure("Computer-use runner emitted invalid JSON.", actions=actions)
+                return protocol_failure("emitted invalid JSON.")
             if not isinstance(event, dict):
-                return failure("Computer-use runner emitted a non-object event.", actions=actions)
+                return protocol_failure("emitted a non-object event.")
             if terminal is not None:
-                return failure("Computer-use runner emitted data after its terminal event.", actions=actions)
+                return protocol_failure("emitted data after its terminal event.")
             event_type = event.get("type")
             if shape_error := _event_shape_error(event):
-                return failure(
-                    f"Computer-use runner emitted malformed {event_type!r} event: {shape_error}.",
-                    actions=actions,
-                )
+                return protocol_failure(f"emitted malformed {event_type!r} event: {shape_error}.")
             if event_type == "action":
                 if not ready:
-                    return failure("Computer-use runner emitted an action before ready.", actions=actions)
+                    return protocol_failure("emitted an action before ready.")
                 actions.append(event)
                 on_event = await _notify(on_event, event)
             elif event_type == "ready":
                 if ready:
-                    return failure("Computer-use runner emitted multiple ready events.", actions=actions)
+                    return protocol_failure("emitted multiple ready events.")
                 if mismatch := _ready_error(event):
-                    return failure(f"Computer-use runner provenance mismatch: {mismatch}", actions=actions)
+                    return protocol_failure(f"provenance mismatch: {mismatch}")
                 ready = True
                 on_event = await _notify(on_event, event)
             elif event_type in {"result", "error"}:
                 if not ready:
-                    return failure("Computer-use runner terminated before ready.", actions=actions)
+                    return protocol_failure("terminated before ready.")
                 terminal = event
                 # Any further stdout is a protocol violation, so consume to EOF.
             else:
-                return failure(f"Computer-use runner emitted unknown event type: {event_type!r}.", actions=actions)
+                return protocol_failure(f"emitted unknown event type: {event_type!r}.")
         remaining = _remaining_seconds(deadline)
         await asyncio.wait_for(process.wait(), remaining)
         if terminal is None:
             diagnostics = await stderr_task
             suffix = f" Diagnostics: {'; '.join(diagnostics)}" if diagnostics else ""
-            return failure(f"Computer-use runner exited without a result.{suffix}", actions=actions)
+            return protocol_failure(f"exited without a result.{suffix}")
         if terminal["type"] == "error":
             return failure(
                 f"{terminal.get('code', 'RUNNER_ERROR')}: {terminal.get('message', 'Runner error')}",
