@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Any
 from urllib.request import urlopen
 
 from ..schemas import (
@@ -100,6 +101,12 @@ def _blocked() -> bool:
     return True
 
 
+def _report(result: dict[str, Any]) -> int:
+    """Print the formatted run result and derive the process exit code from its outcome."""
+    print(format_result(result))
+    return 0 if result.get("outcome") == "completed" else 1
+
+
 async def _mechanical_calculator_check() -> str:
     from yutori.navigator.macos import MacOSComputer
     from yutori.navigator.macos.transport import CuaDriverTransport
@@ -177,8 +184,7 @@ async def _smoke_live() -> int:
     except ComputerUseBusyError as error:
         print(error)
         return 1
-    print(format_result(result))
-    return 0 if result.get("outcome") == "completed" else 1
+    return _report(result)
 
 
 async def _print_event(event: dict) -> None:
@@ -217,8 +223,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
         api_base_url=api_base_url,
         on_event=_print_event,
     )
-    print(format_result(result))
-    return 0 if result.get("outcome") == "completed" else 1
+    return _report(result)
 
 
 def apply_computer_use_environment(env: str | None) -> None:
