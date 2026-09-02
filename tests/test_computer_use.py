@@ -318,6 +318,19 @@ async def _run_supervised(process, *, api_key="yt-key", deadline_seconds=1, **su
         )
 
 
+def _stub_process_group_stop(process) -> Callable[[Any], Any]:
+    """`side_effect` for a patched `_stop_process_group` that marks `process` SIGTERM'd.
+
+    Stands in for the real stop path so tests can force `_supervise` to observe a terminated
+    child without actually spawning a process group to signal.
+    """
+
+    async def stop(_process):
+        process.returncode = -signal.SIGTERM
+
+    return stop
+
+
 async def test_supervisor_redacts_key_and_keeps_it_out_of_argv():
     secret = "yt-super-secret-value"
     process = _Process(
@@ -405,12 +418,9 @@ async def test_supervisor_rejects_runner_provenance_drift():
         _stream(""),
     )
 
-    async def stop(_process):
-        process.returncode = -signal.SIGTERM
-
     with (
         patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)),
-        patch("yutori_mcp.computer_use.supervisor._stop_process_group", side_effect=stop),
+        patch("yutori_mcp.computer_use.supervisor._stop_process_group", side_effect=_stub_process_group_stop(process)),
     ):
         result = await _supervise(
             command=python_runner_command(),
@@ -529,12 +539,12 @@ async def test_stop_process_group_escalates_to_kill():
 async def test_supervisor_stdout_deadline_returns_limit_and_stops_group():
     process = _Process(asyncio.StreamReader(), asyncio.StreamReader())
 
-    async def stop(_process):
-        process.returncode = -signal.SIGTERM
-
     with (
         patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)),
-        patch("yutori_mcp.computer_use.supervisor._stop_process_group", side_effect=stop) as stopped,
+        patch(
+            "yutori_mcp.computer_use.supervisor._stop_process_group",
+            side_effect=_stub_process_group_stop(process),
+        ) as stopped,
     ):
         result = await _supervise(
             command=python_runner_command(),
@@ -552,13 +562,13 @@ async def test_supervisor_eof_does_not_bypass_the_deadline():
     async def wait_forever():
         await asyncio.Future()
 
-    async def stop(_process):
-        process.returncode = -signal.SIGTERM
-
     process.wait = wait_forever
     with (
         patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)),
-        patch("yutori_mcp.computer_use.supervisor._stop_process_group", side_effect=stop) as stopped,
+        patch(
+            "yutori_mcp.computer_use.supervisor._stop_process_group",
+            side_effect=_stub_process_group_stop(process),
+        ) as stopped,
     ):
         result = await _supervise(
             command=python_runner_command(),
@@ -573,12 +583,12 @@ async def test_supervisor_eof_does_not_bypass_the_deadline():
 async def test_supervisor_cancellation_is_aborted_and_stops_group():
     process = _Process(asyncio.StreamReader(), asyncio.StreamReader())
 
-    async def stop(_process):
-        process.returncode = -signal.SIGTERM
-
     with (
         patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)),
-        patch("yutori_mcp.computer_use.supervisor._stop_process_group", side_effect=stop) as stopped,
+        patch(
+            "yutori_mcp.computer_use.supervisor._stop_process_group",
+            side_effect=_stub_process_group_stop(process),
+        ) as stopped,
     ):
         task = asyncio.create_task(
             _supervise(
