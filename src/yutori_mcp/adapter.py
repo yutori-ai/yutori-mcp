@@ -31,6 +31,13 @@ ENVIRONMENT_BASE_URLS: dict[str, str] = {
 DEFAULT_ENVIRONMENT = "prod"
 ENV_VAR_ENVIRONMENT = "YUTORI_ENV"
 
+# The developer platform that shows each Navigator run, keyed like ENVIRONMENT_BASE_URLS
+# so a run made against the dev API links to the dev platform and never the other way round.
+ENVIRONMENT_PLATFORM_URLS: dict[str, str] = {
+    "prod": "https://platform.yutori.com",
+    "dev": "https://platform.dev.yutori.com",
+}
+
 
 def current_environment() -> str:
     """The environment name this process is targeting."""
@@ -50,6 +57,22 @@ def resolve_base_url(environment: str | None = None) -> str:
         return ENVIRONMENT_BASE_URLS[name]
     except KeyError:
         valid = ", ".join(sorted(ENVIRONMENT_BASE_URLS))
+        raise ValueError(
+            f"Unknown Yutori environment {name!r}; expected one of: {valid}"
+        ) from None
+
+
+def resolve_platform_url(environment: str | None = None) -> str:
+    """Return the developer-platform URL for an environment name.
+
+    Same resolution order as ``resolve_base_url`` so the run link a computer-use
+    result carries always points at the platform that recorded the run.
+    """
+    name = environment or current_environment()
+    try:
+        return ENVIRONMENT_PLATFORM_URLS[name]
+    except KeyError:
+        valid = ", ".join(sorted(ENVIRONMENT_PLATFORM_URLS))
         raise ValueError(
             f"Unknown Yutori environment {name!r}; expected one of: {valid}"
         ) from None

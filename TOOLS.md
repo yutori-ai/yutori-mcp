@@ -39,6 +39,7 @@ Example response:
 ```
 Outcome: completed
 Delivery mode: foreground
+Run: https://platform.yutori.com/navigator/chats/5d90f532-6c0f-4159-8e46-2ce55e7084c9
 Final text: 17 * 23 = 391
 Elapsed: 18452 ms
 Perf: total 18.5s over 6 steps (3.1s/step)
@@ -48,6 +49,9 @@ Actions:
 ```
 
 `Outcome` is `completed`, `limit` (hit `minutes` or `max_steps`), `aborted`, or `failed`.
+`Run` links to the run's page on the Yutori platform (platform.yutori.com, or
+platform.dev.yutori.com when `--env dev` is selected); it is omitted when the run ended
+before the model was called.
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|

@@ -9,11 +9,13 @@ from yutori_mcp.adapter import (
     DEFAULT_ENVIRONMENT,
     ENV_VAR_ENVIRONMENT,
     ENVIRONMENT_BASE_URLS,
+    ENVIRONMENT_PLATFORM_URLS,
     MCPClientAdapter,
     YutoriAPIError,
     _strip_none,
     is_scoped_environment,
     resolve_base_url,
+    resolve_platform_url,
     resolve_run_credentials,
 )
 from yutori_mcp.server import _format_api_error
@@ -232,6 +234,34 @@ class TestIsScopedEnvironment:
 
     def test_a_named_non_default_environment_is_scoped(self):
         assert is_scoped_environment("dev") is True
+
+
+# ---------------------------------------------------------------------------
+# resolve_platform_url
+# ---------------------------------------------------------------------------
+
+
+class TestResolvePlatformUrl:
+    """Environment-name -> developer-platform URL, resolved like resolve_base_url."""
+
+    def test_every_api_environment_has_a_platform(self):
+        assert sorted(ENVIRONMENT_PLATFORM_URLS) == sorted(ENVIRONMENT_BASE_URLS)
+
+    def test_defaults_to_prod(self, monkeypatch):
+        monkeypatch.delenv(ENV_VAR_ENVIRONMENT, raising=False)
+        assert resolve_platform_url() == "https://platform.yutori.com"
+
+    def test_env_var_selects_dev_platform(self, monkeypatch):
+        monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
+        assert resolve_platform_url() == "https://platform.dev.yutori.com"
+
+    def test_argument_overrides_env_var(self, monkeypatch):
+        monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
+        assert resolve_platform_url("prod") == ENVIRONMENT_PLATFORM_URLS["prod"]
+
+    def test_unknown_environment_fails_loudly(self):
+        with pytest.raises(ValueError, match="Unknown Yutori environment"):
+            resolve_platform_url("staging")
 
 
 # ---------------------------------------------------------------------------

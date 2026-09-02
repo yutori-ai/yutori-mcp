@@ -265,6 +265,29 @@ async def _supervise(
         await asyncio.gather(stderr_task, return_exceptions=True)
 
 
+def run_chat_id(result: dict[str, Any]) -> str | None:
+    """The platform chat id for a run: the result's own, else the latest one an action carried."""
+    chat_id = result.get("chat_id")
+    if isinstance(chat_id, str) and chat_id:
+        return chat_id
+    for action in reversed(result.get("actions") or []):
+        candidate = action.get("chat_id")
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None
+
+
+def attach_run_link(result: dict[str, Any], platform_url: str | None) -> dict[str, Any]:
+    """Add ``chat_id`` and, when the platform is known, the ``run_url`` of this run's page."""
+    chat_id = run_chat_id(result)
+    if chat_id is None:
+        return result
+    result["chat_id"] = chat_id
+    if platform_url:
+        result["run_url"] = f"{platform_url.rstrip('/')}/navigator/chats/{chat_id}"
+    return result
+
+
 def python_runner_command() -> list[str]:
     """The Python runner child's argv: this interpreter, running the runner module.
 
@@ -287,6 +310,7 @@ async def run_task(
     max_steps: int,
     api_key: str,
     api_base_url: str,
+    platform_url: str | None = None,
     lock: DesktopLock | None = None,
     on_event: EventCallback | None = None,
 ) -> dict[str, Any]:
@@ -307,12 +331,13 @@ async def run_task(
             }
             if find_cua_driver() is None:  # Kept defensive; preflight already checked it.
                 return failure("cua-driver not found. Run: yutori-mcp computer-use setup")
-            return await _supervise(
+            result = await _supervise(
                 command=python_runner_command(),
                 request=request,
                 api_key=api_key,
                 deadline=deadline,
                 on_event=on_event,
             )
+            return attach_run_link(result, platform_url)
     except (ComputerUseBusyError, RuntimeError, OSError, ValueError) as error:
         return failure(str(error))

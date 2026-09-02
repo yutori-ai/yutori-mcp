@@ -94,6 +94,8 @@ def format_result(result: dict[str, Any]) -> str:
         f"Outcome: {result.get('outcome', 'failed')}",
         f"Delivery mode: {result.get('delivery_mode', DELIVERY_MODE_FOREGROUND)}",
     ]
+    if result.get("run_url"):
+        lines.append(f"Run: {result['run_url']}")
     if result.get("final_text"):
         lines.append(f"Final text: {result['final_text']}")
     if result.get("elapsed_ms") is not None:

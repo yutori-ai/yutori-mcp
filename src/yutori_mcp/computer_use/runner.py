@@ -210,10 +210,12 @@ class ActionReporter:
         run_start: float,
         *,
         clock: Callable[[], float] = time.monotonic,
+        chat: ChatTracker | None = None,
     ) -> None:
         self._emitter = emitter
         self._run_start = run_start
         self._clock = clock
+        self._chat = chat
         self._index = 0
         self._call_start: float | None = None
         self._pending_item: dict[str, Any] | None = None
@@ -255,6 +257,9 @@ class ActionReporter:
                 "command": shell_command_preview(item),
                 "run_in_background": run_in_background,
                 "background_task_id": _background_task_id(result) if run_in_background else None,
+                # Carried on every action so the supervisor can still link the run when it
+                # has to conclude the run itself and never sees the runner's result event.
+                "chat_id": self._chat.chat_id if self._chat is not None else None,
             }
         )
         self._index += 1
@@ -267,6 +272,27 @@ class ApiCounter:
 
     async def on_api_start(self, _kwargs: dict[str, Any]) -> None:
         self.calls += 1
+
+
+class ChatTracker:
+    """Remember the platform's identity for this run: the first model call's request_id.
+
+    The SDK echoes each response's ``request_id`` back as ``prev_request_id``, and the
+    platform files every call in that chain under the first one, so the first response
+    names the chat page the run appears on.
+    """
+
+    def __init__(self) -> None:
+        self.chat_id: str | None = None
+
+    async def on_api_end(self, _kwargs: dict[str, Any], response: Any) -> None:
+        if self.chat_id is not None:
+            return
+        if hasattr(response, "model_dump"):
+            response = response.model_dump()
+        request_id = response.get("request_id") if isinstance(response, dict) else None
+        if isinstance(request_id, str) and request_id:
+            self.chat_id = request_id
 
 
 class RunGuard:
@@ -484,7 +510,8 @@ async def run_request(
 
     deadline = run_start + remaining_seconds
     guard = RunGuard(request["max_steps"], deadline)
-    reporter = ActionReporter(emitter, run_start)
+    chat = ChatTracker()
+    reporter = ActionReporter(emitter, run_start, chat=chat)
     api_counter = ApiCounter()
     computer = MacOSComputer(
         presentation=True,
@@ -517,7 +544,7 @@ async def run_request(
             api_key=api_key,
             base_url=request["api_base_url"],
             model=request["model"],
-            callbacks=[guard, reporter, api_counter],
+            callbacks=[guard, reporter, api_counter, chat],
             instructions=SYSTEM_CONTEXT,
             presentation=computer.presentation,
             screenshot_delay=0,
@@ -560,6 +587,7 @@ async def run_request(
             **_result_event(outcome, final_text),
             "elapsed_ms": elapsed_ms,
             "steps": guard.steps,
+            "chat_id": chat.chat_id,
             "timings": _timings_payload(elapsed_ms, agent, api_counter, reporter, computer),
             **_presentation_payload(computer, status),
         }

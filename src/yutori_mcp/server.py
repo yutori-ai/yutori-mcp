@@ -611,7 +611,7 @@ def _progress_reporter(
 async def _handle_computer_use(
     _: MCPClientAdapter, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    from .adapter import resolve_run_credentials
+    from .adapter import resolve_platform_url, resolve_run_credentials
     from .computer_use.lock import ComputerUseBusyError, DesktopLock
     from .computer_use.preflight import blocker_message, first_blocker
     from .computer_use.result import failure
@@ -632,6 +632,7 @@ async def _handle_computer_use(
                     **params.model_dump(),
                     api_key=api_key,
                     api_base_url=api_base_url,
+                    platform_url=resolve_platform_url(),
                     lock=lock,
                     on_event=_progress_reporter(ctx, params.max_steps) if ctx else None,
                 ),
