@@ -12,6 +12,7 @@ import sys
 import time
 import urllib.request
 from collections.abc import Callable
+from contextlib import contextmanager
 from urllib.error import HTTPError
 from pathlib import Path
 from types import SimpleNamespace
@@ -331,6 +332,25 @@ def _stub_process_group_stop(process) -> Callable[[Any], Any]:
     return stop
 
 
+@contextmanager
+def _patched_process_group_stop(process):
+    """Patch subprocess spawn and `_stop_process_group` for one `_supervise` call.
+
+    Covers the tests below that need both `_supervise`'s child process replaced with
+    `process` *and* the process-group stop path observed or stubbed -- `_run_supervised`
+    above only covers the simpler case that leaves `_stop_process_group` unpatched.
+    Yields the `_stop_process_group` mock so callers can assert on it.
+    """
+    with (
+        patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)),
+        patch(
+            "yutori_mcp.computer_use.supervisor._stop_process_group",
+            side_effect=_stub_process_group_stop(process),
+        ) as stopped,
+    ):
+        yield stopped
+
+
 async def test_supervisor_redacts_key_and_keeps_it_out_of_argv():
     secret = "yt-super-secret-value"
     process = _Process(
@@ -418,10 +438,7 @@ async def test_supervisor_rejects_runner_provenance_drift():
         _stream(""),
     )
 
-    with (
-        patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)),
-        patch("yutori_mcp.computer_use.supervisor._stop_process_group", side_effect=_stub_process_group_stop(process)),
-    ):
+    with _patched_process_group_stop(process):
         result = await _supervise(
             command=python_runner_command(),
             request={"type": "run"},
@@ -539,13 +556,7 @@ async def test_stop_process_group_escalates_to_kill():
 async def test_supervisor_stdout_deadline_returns_limit_and_stops_group():
     process = _Process(asyncio.StreamReader(), asyncio.StreamReader())
 
-    with (
-        patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)),
-        patch(
-            "yutori_mcp.computer_use.supervisor._stop_process_group",
-            side_effect=_stub_process_group_stop(process),
-        ) as stopped,
-    ):
+    with _patched_process_group_stop(process) as stopped:
         result = await _supervise(
             command=python_runner_command(),
             request={"type": "run"},
@@ -563,13 +574,7 @@ async def test_supervisor_eof_does_not_bypass_the_deadline():
         await asyncio.Future()
 
     process.wait = wait_forever
-    with (
-        patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)),
-        patch(
-            "yutori_mcp.computer_use.supervisor._stop_process_group",
-            side_effect=_stub_process_group_stop(process),
-        ) as stopped,
-    ):
+    with _patched_process_group_stop(process) as stopped:
         result = await _supervise(
             command=python_runner_command(),
             request={"type": "run"},
@@ -583,13 +588,7 @@ async def test_supervisor_eof_does_not_bypass_the_deadline():
 async def test_supervisor_cancellation_is_aborted_and_stops_group():
     process = _Process(asyncio.StreamReader(), asyncio.StreamReader())
 
-    with (
-        patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)),
-        patch(
-            "yutori_mcp.computer_use.supervisor._stop_process_group",
-            side_effect=_stub_process_group_stop(process),
-        ) as stopped,
-    ):
+    with _patched_process_group_stop(process) as stopped:
         task = asyncio.create_task(
             _supervise(
                 command=python_runner_command(),
