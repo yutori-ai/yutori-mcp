@@ -210,6 +210,21 @@ class TestMainAuthDispatch:
         assert calls == [(name, None)]
 
 
+def _run_failed_login(capsys, result: LoginResult) -> str:
+    """Dispatch `yutori-mcp login` with `run_login_flow` stubbed to fail with `result`.
+
+    Asserts the shared exit-code and call-arg contract every failed-login test relies
+    on, then returns the captured stdout for the caller's own assertions.
+    """
+    with (
+        patch("sys.argv", ["yutori-mcp", "login"]),
+        patch("yutori.auth.run_login_flow", return_value=result) as mock_run_login_flow,
+    ):
+        _assert_main_exits(1)
+    mock_run_login_flow.assert_called_once_with(key_source="yutori-mcp")
+    return capsys.readouterr().out
+
+
 class TestMainLoginAuthUrl:
     """Ensure `yutori-mcp login` surfaces auth_url on failure."""
 
@@ -219,28 +234,12 @@ class TestMainLoginAuthUrl:
             error="timed out",
             auth_url="https://clerk.example.com/oauth/authorize?x=1",
         )
-        with (
-            patch("sys.argv", ["yutori-mcp", "login"]),
-            patch(
-                "yutori.auth.run_login_flow", return_value=result
-            ) as mock_run_login_flow,
-        ):
-            _assert_main_exits(1)
-        mock_run_login_flow.assert_called_once_with(key_source="yutori-mcp")
-        output = capsys.readouterr().out
+        output = _run_failed_login(capsys, result)
         assert "https://clerk.example.com/oauth/authorize?x=1" in output
 
     def test_login_failure_without_auth_url(self, capsys):
         result = LoginResult(success=False, error="port in use")
-        with (
-            patch("sys.argv", ["yutori-mcp", "login"]),
-            patch(
-                "yutori.auth.run_login_flow", return_value=result
-            ) as mock_run_login_flow,
-        ):
-            _assert_main_exits(1)
-        mock_run_login_flow.assert_called_once_with(key_source="yutori-mcp")
-        output = capsys.readouterr().out
+        output = _run_failed_login(capsys, result)
         assert "browser" not in output.lower()
 
 
