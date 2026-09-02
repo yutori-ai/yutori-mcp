@@ -35,9 +35,11 @@ from .schema_utils import output_fields_to_output_schema
 from .schemas import (
     COMPUTER_USE_DEFAULT_MAX_STEPS,
     COMPUTER_USE_DEFAULT_MINUTES,
+    COMPUTER_USE_DEFAULT_MODE,
     DEFAULT_LIST_LIMIT,
     BrowserChoice,
     BrowsingTaskInput,
+    ComputerUseMode,
     ComputerUseTaskInput,
     CreateScoutInput,
     EditScoutInput,
@@ -407,6 +409,8 @@ async def run_computer_use_task(
     start_url: str | None = None,
     minutes: float = COMPUTER_USE_DEFAULT_MINUTES,
     max_steps: int = COMPUTER_USE_DEFAULT_MAX_STEPS,
+    mode: ComputerUseMode = COMPUTER_USE_DEFAULT_MODE,
+    allow_foreground_fallback: bool = False,
     ctx: Context | None = None,
 ) -> str:
     # `ctx` is FastMCP's injected request context (excluded from the client-facing
@@ -579,7 +583,11 @@ async def _handle_edit_scout(
 
 
 def _progress_reporter(
-    ctx: Context, max_steps: int
+    ctx: Context,
+    max_steps: int,
+    *,
+    mode: str = COMPUTER_USE_DEFAULT_MODE,
+    app: str | None = None,
 ) -> Callable[[dict[str, Any]], Awaitable[None]]:
     """Turn runner events into MCP progress + log notifications.
 
@@ -592,7 +600,8 @@ def _progress_reporter(
 
     async def on_event(event: dict[str, Any]) -> None:
         if event.get("type") == "ready":
-            message = f"Computer-use runner ready; driving the desktop (up to {max_steps} steps)."
+            surface = f"the {app} window in the background" if mode == "background" else "the desktop"
+            message = f"Computer-use runner ready; driving {surface} (up to {max_steps} steps)."
             await ctx.report_progress(progress=0, message=message)
             await ctx.info(message)
             return
@@ -634,7 +643,11 @@ async def _handle_computer_use(
                     api_base_url=api_base_url,
                     platform_url=platform_url,
                     lock=lock,
-                    on_event=_progress_reporter(ctx, params.max_steps) if ctx else None,
+                    on_event=(
+                        _progress_reporter(ctx, params.max_steps, mode=params.mode, app=params.app)
+                        if ctx
+                        else None
+                    ),
                 ),
                 {},
             )
@@ -698,8 +711,11 @@ def _register_computer_use_tool() -> None:
         return
     mcp.tool(
         description=(
-            "Operate the foreground Mac desktop using Yutori computer use. "
-            "Do not touch the Mac during the run. Visible desktop content is sent to Yutori."
+            "Operate a Mac with Yutori computer use. mode='foreground' (default) drives the whole "
+            "visible desktop: do not touch the Mac during the run, and visible desktop content is sent "
+            "to Yutori. mode='background' drives only the target app's window without taking focus, so "
+            "the user can keep working; only that window's content is sent. Use it when the user asks to "
+            "run something in the background or while they keep working. Background requires app."
         ),
         annotations=_DESTRUCTIVE_OPEN_WORLD,
     )(run_computer_use_task)

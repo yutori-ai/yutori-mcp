@@ -4,16 +4,19 @@ from __future__ import annotations
 
 from .. import __version__
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 MCP_VERSION = __version__
 MODEL = "n2"
 TOOL_SET = "computer_use_tools-20260815"
-# The only delivery mode this runtime implements today. Repeated verbatim across every
-# `action`/`result` protocol event (runner.py, and result.py's terminal_result() shape,
-# which the supervisor's timeout/cancellation fallbacks now build through); centralized
-# so a future second mode can't be introduced with one of those spots left on the old
-# literal by accident.
+# The two delivery modes this runtime implements. "foreground" drives the visible desktop
+# (the model sees the whole screen and the user keeps their hands off); "background" drives
+# one target app window through the SDK's window scope without taking the user's focus.
+# Every `action`/`result` protocol event carries one of these (runner.py, and result.py's
+# terminal_result() shape, which the supervisor's timeout/cancellation fallbacks build
+# through); centralized so no call site can drift onto a stray literal.
 DELIVERY_MODE_FOREGROUND = "foreground"
+DELIVERY_MODE_BACKGROUND = "background"
+DELIVERY_MODES = (DELIVERY_MODE_FOREGROUND, DELIVERY_MODE_BACKGROUND)
 SDK_VERSION = "0.9.10"
 # The PyPI wheel digest and a digest derived from its stable RECORD entries.
 # Doctor compares the latter with the unpacked installation before any task runs.

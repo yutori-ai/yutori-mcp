@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import re
@@ -26,7 +27,9 @@ from yutori.navigator.macos import (
 
 from .app import prepare_app
 from .constants import (
+    DELIVERY_MODE_BACKGROUND,
     DELIVERY_MODE_FOREGROUND,
+    DELIVERY_MODES,
     DRIVER_VERSION,
     PROTOCOL_VERSION,
     SDK_ARTIFACT_SHA256,
@@ -36,8 +39,9 @@ from .constants import (
 )
 from .result import redact
 
-SYSTEM_CONTEXT = (
-    "You control the entire macOS screen. This is macOS, not Linux: do not use "
+_FOREGROUND_OPENING = "You control the entire macOS screen. "
+_SHARED_CONTEXT = (
+    "This is macOS, not Linux: do not use "
     "Ubuntu or Linux UI conventions. Use macOS conventions: cmd, not ctrl, for "
     "standard shortcuts. Prefer reliable keyboard shortcuts such as cmd+w to close the "
     "current window, cmd+q to quit, and cmd+shift+s for Save As. If one visual attempt "
@@ -48,13 +52,23 @@ SYSTEM_CONTEXT = (
     "change, the target may be busy rather than mis-aimed: retry the same click up to "
     "three times, checking a fresh screenshot between attempts, and if it still does "
     "not respond, reach the same result another way — a menu item, a keyboard "
-    "shortcut, or a different control — instead of clicking it again. Once you have "
+    "shortcut, or a different control — instead of clicking it again. "
+)
+_FOREGROUND_FINISH = (
+    "Once you have "
     "confirmed a step worked, leave that result in view: bring the file, window, or "
     "view it changed to the front, reopening or refreshing it if the change was made "
     "somewhere the screen does not show, so progress stays visible while the task is "
     "still running. When you finish, open the final artifact (the document, file, "
     "page, or app view holding the result) so it is visible on screen, then take a "
-    "screenshot to confirm it before you summarize. Shell commands run headlessly "
+    "screenshot to confirm it before you summarize. "
+)
+_BACKGROUND_FINISH = (
+    "There is no need to bring results into view when you finish: take a final "
+    "screenshot of the window to confirm the result, then summarize. "
+)
+_SHARED_TAIL = (
+    "Shell commands run headlessly "
     "in bash as the logged-in user; do not use sudo. Do not use osascript or shell "
     "commands to inspect or control GUI applications because macOS Automation consent "
     "can block them indefinitely. Use screenshots and computer actions for GUI work "
@@ -71,6 +85,40 @@ SYSTEM_CONTEXT = (
     "Do not open or change System Settings, application settings, accounts, "
     "permissions, or defaults unless the user explicitly asked for that settings change."
 )
+
+
+def _background_opening(app: str) -> str:
+    return (
+        f"You control exactly one application window: {app}. Every screenshot shows only "
+        "that window, and coordinates are relative to it. You cannot see the Dock, the menu "
+        "bar, or any other application, and you must never try to switch apps, open other "
+        "applications, or bring anything to the front: the user is actively working on this "
+        "Mac, and your clicks and keystrokes are delivered to the target window in the "
+        "background without taking their focus. Keyboard shortcuts (cmd+...) work inside the "
+        "target app; modifier-clicks (cmd-click, shift-click) are unavailable. If an action is "
+        "reported as not landing, take a fresh screenshot and reach the same result through a "
+        "different control or shortcut rather than repeating it. If the window is minimized or "
+        "hidden, keyboard input may not reach it: report that and stop instead of trying to "
+        "restore it. Do not move or resize the window. Never use the shell to open, launch, or "
+        "activate applications or files (for example `open -a`): that takes the user's focus. "
+        "If the app stops accepting input, report the blocker instead of producing the result "
+        "through the shell. "
+    )
+
+
+def system_context(mode: str, app: str | None = None) -> str:
+    """The model's standing instructions for one delivery mode.
+
+    Foreground runs own the whole screen and keep results visible; background runs see and
+    drive one application window while the user keeps working.
+    """
+    if mode == DELIVERY_MODE_BACKGROUND:
+        opening = _background_opening(app or "the target application")
+        return opening + _SHARED_CONTEXT + _BACKGROUND_FINISH + _SHARED_TAIL
+    return _FOREGROUND_OPENING + _SHARED_CONTEXT + _FOREGROUND_FINISH + _SHARED_TAIL
+
+
+SYSTEM_CONTEXT = system_context(DELIVERY_MODE_FOREGROUND)
 STOP_SUMMARY_PROMPT = "Stop here. Briefly summarize what you accomplished and what you found."
 FINAL_TEXT_MARKERS = ("[DONE]", "[INFEASIBLE]")
 _SHELL_TOOL_NAMES = frozenset({"bash", "shell_command", "run_command"})
@@ -104,6 +152,20 @@ def _require_positive_int(request: dict[str, Any], field: str) -> int:
     return value
 
 
+def _require_mode(request: dict[str, Any]) -> str:
+    value = request.get("mode")
+    if value not in DELIVERY_MODES:
+        raise RequestError("INVALID_REQUEST", f"mode must be one of {', '.join(DELIVERY_MODES)}.")
+    return str(value)
+
+
+def _require_bool(request: dict[str, Any], field: str) -> bool:
+    value = request.get(field)
+    if not isinstance(value, bool):
+        raise RequestError("INVALID_REQUEST", f"{field} must be a boolean.")
+    return value
+
+
 def parse_request(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RequestError("INVALID_REQUEST", "Request must be a JSON object.")
@@ -116,6 +178,12 @@ def parse_request(payload: Any) -> dict[str, Any]:
     start_url = _require_optional_string(payload, "start_url")
     if start_url is not None and app is None:
         raise RequestError("INVALID_REQUEST", "start_url requires app.")
+    mode = _require_mode(payload)
+    allow_foreground_fallback = _require_bool(payload, "allow_foreground_fallback")
+    if mode == DELIVERY_MODE_BACKGROUND and app is None:
+        raise RequestError("INVALID_REQUEST", "mode 'background' requires app.")
+    if allow_foreground_fallback and mode != DELIVERY_MODE_BACKGROUND:
+        raise RequestError("INVALID_REQUEST", "allow_foreground_fallback requires mode 'background'.")
     deadline_ms = _require_positive_int(payload, "deadline_ms")
     max_steps = _require_positive_int(payload, "max_steps")
     return {
@@ -124,6 +192,8 @@ def parse_request(payload: Any) -> dict[str, Any]:
         "start_url": start_url,
         "deadline_ms": deadline_ms,
         "max_steps": max_steps,
+        "mode": mode,
+        "allow_foreground_fallback": allow_foreground_fallback,
         "model": _require_string(payload, "model"),
         "api_base_url": _require_string(payload, "api_base_url"),
     }
@@ -211,11 +281,17 @@ class ActionReporter:
         *,
         clock: Callable[[], float] = time.monotonic,
         chat: ChatTracker | None = None,
+        delivery_mode: str = DELIVERY_MODE_FOREGROUND,
+        action_delivery: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._emitter = emitter
         self._run_start = run_start
         self._clock = clock
         self._chat = chat
+        self._delivery_mode = delivery_mode
+        # Reads the SDK's verdict on the latest driver action (window scope only) so each
+        # event reports the delivery that actually happened, not just the configured mode.
+        self.action_delivery = action_delivery
         self._index = 0
         self._call_start: float | None = None
         self._pending_item: dict[str, Any] | None = None
@@ -242,6 +318,7 @@ class ActionReporter:
         run_in_background = bool(
             str(item.get("name") or "").lower() == "bash" and arguments.get("run_in_background") is True
         )
+        delivery = self.action_delivery() if self.action_delivery is not None else {}
         self._emitter.emit(
             {
                 "type": "action",
@@ -249,9 +326,11 @@ class ActionReporter:
                 "tool": str(item.get("name") or "unknown").lower(),
                 "status": _status_for(raw_status),
                 "raw_status": raw_status,
-                "delivery_mode": DELIVERY_MODE_FOREGROUND,
-                "route": "pixel",
-                "refusal_code": "driver_refused" if raw_status == "refused" else None,
+                "delivery_mode": delivery.get("delivery_mode") or self._delivery_mode,
+                "route": delivery.get("route") or "pixel",
+                "refusal_code": delivery.get("refusal_code") or ("driver_refused" if raw_status == "refused" else None),
+                "effect": delivery.get("effect"),
+                "escalated": bool(delivery.get("escalated")),
                 "elapsed_ms": max(0, round((self._clock() - self._run_start) * 1000)),
                 "duration_ms": duration_ms,
                 "command": shell_command_preview(item),
@@ -433,13 +512,97 @@ def _timings_payload(
     }
 
 
+def _supports_background_mode() -> bool:
+    """Whether the installed SDK's MacOSComputer has window scope (yutori >= 0.9.10)."""
+    try:
+        return "scope" in inspect.signature(MacOSComputer.__init__).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _computer_kwargs(
+    request: dict[str, Any],
+    *,
+    deadline: float,
+    cancellation: CancellationLatch,
+    api_key: str,
+) -> dict[str, Any]:
+    """MacOSComputer construction per mode; the foreground shape is the long-standing one."""
+    kwargs: dict[str, Any] = {
+        "presentation": True,
+        "allow_local_shell": True,
+        "execution_deadline": deadline,
+        "cancellation": cancellation,
+        "known_secrets": (api_key,),
+    }
+    if request["mode"] == DELIVERY_MODE_BACKGROUND:
+        # Window scope captures and drives one window. The SDK shows no full-screen overlay for
+        # it; with presentation on it keeps a menu bar item with the latest frame and Stop.
+        kwargs.update(
+            scope="window",
+            allow_foreground_fallback=request["allow_foreground_fallback"],
+        )
+    return kwargs
+
+
+async def _bind_window_target(computer: MacOSComputer, target: dict[str, Any]) -> None:
+    """Point a window-scope session at the window prepare_app resolved."""
+    from yutori.navigator.macos import MacOSWindowTarget  # window scope: yutori >= 0.9.10
+
+    window_id = target.get("window_id")
+    if not isinstance(window_id, int):
+        raise RuntimeError(f"{target.get('name')!r} has no window to drive in background mode")
+    await computer.set_window_target(MacOSWindowTarget(target["pid"], window_id, app_name=target.get("name")))
+
+
+def _action_delivery(computer: MacOSComputer) -> Callable[[], dict[str, Any]]:
+    """Delivery facts for one top-level tool call, aggregated over the driver actions it issued.
+
+    A `computer_batch` issues several driver actions; the call counts as foreground-delivered
+    when any of them escalated, and reports the last route/effect and the first refusal code.
+    Calls that drove no driver action (shell, screenshot) report nothing.
+    """
+    seen = {"count": 0}
+
+    def read() -> dict[str, Any]:
+        outcomes = tuple(getattr(computer, "action_outcomes", ()) or ())
+        fresh = outcomes[seen["count"] :]
+        seen["count"] = len(outcomes)
+        if not fresh:
+            return {}
+        escalated = any(outcome.escalated for outcome in fresh)
+        last = fresh[-1]
+        return {
+            "delivery_mode": DELIVERY_MODE_FOREGROUND if escalated else last.requested_delivery,
+            "route": last.route,
+            "effect": last.effect,
+            "escalated": escalated,
+            "refusal_code": next((outcome.refusal_code for outcome in fresh if outcome.refusal_code), None),
+        }
+
+    return read
+
+
+def _window_telemetry(computer: MacOSComputer) -> dict[str, Any]:
+    counts = getattr(computer, "delivery_counts", None) or {}
+    return {
+        "fallback_escalations": int(counts.get("foreground_escalations", 0)),
+        "fallback_skips": int(counts.get("fallback_skips", 0)),
+        "background_refusals": int(counts.get("background_refusals", 0)),
+        "window_rebinds": int(counts.get("window_rebinds", 0)),
+        "focus_guard_trips": int(getattr(computer, "focus_guard_trips", 0) or 0),
+        "preview_frames": int(getattr(computer, "preview_frames_sent", 0) or 0),
+        "window_target": getattr(computer, "window_target_info", None),
+    }
+
+
 def _presentation_payload(computer: MacOSComputer, status: MacOSPresentationStatus) -> dict[str, Any]:
     codec = status.codec
     if codec is None and computer.current_observation is not None:
         codec = computer.current_observation.media_type.rsplit("/", 1)[-1]
     telemetry = list(computer.presentation.telemetry) if computer.presentation is not None else []
     return {
-        "reasoning_overlay_requested": True,
+        "reasoning_overlay_requested": bool(getattr(computer, "presentation_requested", True)),
         "reasoning_overlay_effective": status.available,
         "presentation": asdict(status),
         "presentation_telemetry": telemetry,
@@ -473,7 +636,9 @@ def _error_event(code: str, message: str) -> dict[str, Any]:
     return {"type": "error", "code": code, "message": message}
 
 
-def _result_event(outcome: str, final_text: str | None) -> dict[str, Any]:
+def _result_event(
+    outcome: str, final_text: str | None, delivery_mode: str = DELIVERY_MODE_FOREGROUND
+) -> dict[str, Any]:
     """The four keys every runner-to-supervisor "result" event shares.
 
     A deadline that expires before the run starts, a normal run outcome, and an unexpected
@@ -485,7 +650,7 @@ def _result_event(outcome: str, final_text: str | None) -> dict[str, Any]:
     return {
         "type": "result",
         "outcome": outcome,
-        "delivery_mode": DELIVERY_MODE_FOREGROUND,
+        "delivery_mode": delivery_mode,
         "final_text": final_text,
     }
 
@@ -497,28 +662,45 @@ async def run_request(
     cancellation: CancellationLatch | None = None,
 ) -> str:
     run_start = time.monotonic()
+    mode = request["mode"]
+    background = mode == DELIVERY_MODE_BACKGROUND
     remaining_seconds = request["deadline_ms"] / 1000 - time.time()
     if remaining_seconds <= 0:
         emitter.emit(
             {
-                **_result_event("limit", "The deadline expired before the run started."),
+                **_result_event("limit", "The deadline expired before the run started.", mode),
                 "elapsed_ms": 0,
                 "steps": 0,
             }
         )
         return "limit"
+    if background and not _supports_background_mode():
+        emitter.emit(
+            _error_event(
+                "UNSUPPORTED_MODE",
+                f"mode 'background' needs a yutori SDK with window scope; the pinned SDK {SDK_VERSION} has none.",
+            )
+        )
+        return "failed"
 
     deadline = run_start + remaining_seconds
     guard = RunGuard(request["max_steps"], deadline)
     chat = ChatTracker()
-    reporter = ActionReporter(emitter, run_start, chat=chat)
     api_counter = ApiCounter()
     computer = MacOSComputer(
-        presentation=True,
-        allow_local_shell=True,
-        execution_deadline=deadline,
-        cancellation=cancellation or CancellationLatch(),
-        known_secrets=(api_key,),
+        **_computer_kwargs(
+            request,
+            deadline=deadline,
+            cancellation=cancellation or CancellationLatch(),
+            api_key=api_key,
+        )
+    )
+    reporter = ActionReporter(
+        emitter,
+        run_start,
+        chat=chat,
+        delivery_mode=mode,
+        action_delivery=_action_delivery(computer) if background else None,
     )
     agent: Any = None
     outcome = "failed"
@@ -526,14 +708,20 @@ async def run_request(
     try:
         await computer.__aenter__()
         if request["app"]:
-            # Consume the pre-launch frame captured during session startup so
-            # the first model observation is guaranteed to show the target.
-            await computer.screenshot()
-            target = await prepare_app(computer, request["app"], request["start_url"])
+            if not background:
+                # Consume the pre-launch frame captured during session startup so
+                # the first model observation is guaranteed to show the target.
+                # (Window scope captures nothing until a window is bound.)
+                await computer.screenshot()
+            target = await prepare_app(computer, request["app"], request["start_url"], front=not background)
             computer.target_pid = target["pid"]
+            if background:
+                await _bind_window_target(computer, target)
 
             async def recover_target() -> int | None:
-                recovered = await prepare_app(computer, request["app"], request["start_url"])
+                recovered = await prepare_app(computer, request["app"], request["start_url"], front=not background)
+                if background:
+                    await _bind_window_target(computer, recovered)
                 return recovered["pid"]
 
             computer.recover_target = recover_target
@@ -545,7 +733,7 @@ async def run_request(
             base_url=request["api_base_url"],
             model=request["model"],
             callbacks=[guard, reporter, api_counter, chat],
-            instructions=SYSTEM_CONTEXT,
+            instructions=system_context(mode, request["app"]),
             presentation=computer.presentation,
             screenshot_delay=0,
             execution_deadline=deadline,
@@ -584,12 +772,13 @@ async def run_request(
     elapsed_ms = max(0, round((time.monotonic() - run_start) * 1000))
     emitter.emit(
         {
-            **_result_event(outcome, final_text),
+            **_result_event(outcome, final_text, mode),
             "elapsed_ms": elapsed_ms,
             "steps": guard.steps,
             "chat_id": chat.chat_id,
             "timings": _timings_payload(elapsed_ms, agent, api_counter, reporter, computer),
             **_presentation_payload(computer, status),
+            **_window_telemetry(computer),
         }
     )
     return outcome
@@ -651,6 +840,7 @@ def main() -> int:
             "observation_format": "webp",
             "observation_format_fallback": True,
             "observation_fallback_format": "jpeg",
+            # The request is not parsed yet; the result event carries the truthful value.
             "reasoning_overlay_requested": True,
         }
     )

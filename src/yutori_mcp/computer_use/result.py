@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .constants import DELIVERY_MODE_FOREGROUND
+from .constants import DELIVERY_MODE_BACKGROUND, DELIVERY_MODE_FOREGROUND
 
 REDACTED = "[REDACTED]"
 
@@ -84,9 +84,18 @@ def format_action_line(event: dict[str, Any], *, index_default: Any = None) -> s
     line = f"action #{index}: {event.get('tool')} -> {event.get('status')}"
     if event.get("refusal_code"):
         line += f" ({event['refusal_code']})"
+    if event.get("escalated"):
+        line += " [fronted]"
     if event.get("duration_ms") is not None:
         line += f" took {event['duration_ms']} ms"
     return line
+
+
+def _window_target_line(target: Any) -> str | None:
+    if not isinstance(target, dict) or target.get("pid") is None:
+        return None
+    label = target.get("app_name") or target.get("title") or "window"
+    return f"Window target: {label} (pid {target['pid']}, window {target.get('window_id')})"
 
 
 def format_result(result: dict[str, Any]) -> str:
@@ -96,13 +105,28 @@ def format_result(result: dict[str, Any]) -> str:
     ]
     if result.get("run_url"):
         lines.append(f"Run: {result['run_url']}")
+    if (window_target := _window_target_line(result.get("window_target"))) is not None:
+        lines.append(window_target)
     if result.get("final_text"):
         lines.append(f"Final text: {result['final_text']}")
     if result.get("elapsed_ms") is not None:
         lines.append(f"Elapsed: {result['elapsed_ms']} ms")
     if result.get("reasoning_overlay_requested"):
         state = "active" if result.get("reasoning_overlay_effective") else "unavailable"
-        lines.append(f"Reasoning overlay: {state}; codec: {result.get('codec') or 'unknown'}")
+        # Background runs show a menu bar item (latest frame + Stop) instead of the overlay.
+        surface = "Menu bar status" if result.get("delivery_mode") == DELIVERY_MODE_BACKGROUND else "Reasoning overlay"
+        lines.append(f"{surface}: {state}; codec: {result.get('codec') or 'unknown'}")
+    escalations = result.get("fallback_escalations") or 0
+    skips = result.get("fallback_skips") or 0
+    refusals = result.get("background_refusals") or 0
+    if result.get("delivery_mode") == DELIVERY_MODE_BACKGROUND or escalations or skips or refusals:
+        line = f"Delivery: {escalations} foreground escalation(s), {refusals} background refusal(s)"
+        if skips:
+            # Foreground retries the SDK withheld because the window had already changed.
+            line += f", {skips} retry(ies) skipped after the window changed"
+        lines.append(line)
+    if result.get("preview_frames"):
+        lines.append(f"Live view: {result['preview_frames']} frame(s) streamed to the menu bar item")
     lines.extend(format_perf(result))
     actions = result.get("actions", [])
     if actions:
@@ -112,6 +136,10 @@ def format_result(result: dict[str, Any]) -> str:
                 "- #{index} {tool}: {status} (raw: {raw_status}; mode: {delivery_mode}; "
                 "route: {route}; refusal: {refusal_code})".format(**action)
             )
+            if action.get("effect"):
+                line += f"; effect: {action['effect']}"
+            if action.get("escalated"):
+                line += " [fronted]"
             if action.get("duration_ms") is not None:
                 line += f" took {action['duration_ms']} ms"
             if action.get("command"):
@@ -120,7 +148,13 @@ def format_result(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def terminal_result(outcome: str, message: str, *, actions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def terminal_result(
+    outcome: str,
+    message: str,
+    *,
+    actions: list[dict[str, Any]] | None = None,
+    delivery_mode: str = DELIVERY_MODE_FOREGROUND,
+) -> dict[str, Any]:
     """Build the supervisor-side terminal result dict every caller returns to the host.
 
     Single source of truth for this shape. The supervisor synthesizes one of these
@@ -132,12 +166,17 @@ def terminal_result(outcome: str, message: str, *, actions: list[dict[str, Any]]
     """
     return {
         "outcome": outcome,
-        "delivery_mode": DELIVERY_MODE_FOREGROUND,
+        "delivery_mode": delivery_mode,
         "final_text": message,
         "actions": actions or [],
     }
 
 
-def failure(message: str, *, actions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def failure(
+    message: str,
+    *,
+    actions: list[dict[str, Any]] | None = None,
+    delivery_mode: str = DELIVERY_MODE_FOREGROUND,
+) -> dict[str, Any]:
     """The terminal result for a run that could not be carried out."""
-    return terminal_result("failed", message, actions=actions)
+    return terminal_result("failed", message, actions=actions, delivery_mode=delivery_mode)

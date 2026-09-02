@@ -393,12 +393,18 @@ COMPUTER_USE_DEFAULT_MINUTES = 30
 COMPUTER_USE_MAX_MINUTES = 60
 # Shared with computer_use/cli.py's `--max-steps` argparse default and server.py's
 # run_computer_use_task signature default, mirroring COMPUTER_USE_DEFAULT_MINUTES above so the
-# three call sites cannot drift apart if the default ever changes.
+# three call sites cannot drift apart if the default ever changes. The same holds for
+# COMPUTER_USE_DEFAULT_MODE and the `mode` / `allow_foreground_fallback` fields below, which
+# cli.py's `--mode` / `--allow-foreground-fallback` and server.py's signature mirror.
 COMPUTER_USE_DEFAULT_MAX_STEPS = 60
+# Mirrors computer_use/constants.py DELIVERY_MODES (this module stays free of computer_use
+# imports so the schema can load without the runtime); a test pins the two together.
+ComputerUseMode = Literal["foreground", "background"]
+COMPUTER_USE_DEFAULT_MODE: ComputerUseMode = "foreground"
 
 
 class ComputerUseTaskInput(ToolInput):
-    task: str = Field(..., description="Task to perform on the visible Mac desktop")
+    task: str = Field(..., description="Task to perform on the Mac desktop or in the target app's window")
     app: str | None = Field(default=None, description="Optional application to target")
     start_url: str | None = Field(
         default=None, description="Optional URL to open in the target app"
@@ -412,10 +418,38 @@ class ComputerUseTaskInput(ToolInput):
     max_steps: int = Field(
         default=COMPUTER_USE_DEFAULT_MAX_STEPS, ge=1, description="Maximum actions before stopping the run"
     )
+    mode: ComputerUseMode = Field(
+        default=COMPUTER_USE_DEFAULT_MODE,
+        description=(
+            "'foreground' (default) drives the whole visible desktop; the user must not touch the Mac. "
+            "'background' drives only the target app's window without taking focus, so the user can keep "
+            "working; only that window is captured. Requires app."
+        ),
+    )
+    allow_foreground_fallback: bool = Field(
+        default=False,
+        description=(
+            "Background mode only. When true, an action the driver reports as not landing in the "
+            "background is retried once with the target window fronted briefly and the prior app restored."
+        ),
+    )
+
     @model_validator(mode="after")
     def require_app_for_start_url(self) -> ComputerUseTaskInput:
         if self.start_url is not None and self.app is None:
             raise ValueError("start_url requires app")
+        return self
+
+    @model_validator(mode="after")
+    def require_app_for_background(self) -> ComputerUseTaskInput:
+        if self.mode == "background" and self.app is None:
+            raise ValueError("mode='background' requires app")
+        return self
+
+    @model_validator(mode="after")
+    def require_background_for_fallback(self) -> ComputerUseTaskInput:
+        if self.allow_foreground_fallback and self.mode != "background":
+            raise ValueError("allow_foreground_fallback requires mode='background'")
         return self
 
 
