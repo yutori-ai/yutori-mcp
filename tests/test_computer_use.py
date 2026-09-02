@@ -39,6 +39,7 @@ from yutori_mcp.computer_use.constants import (
 )
 from yutori_mcp.computer_use.lock import ComputerUseBusyError, DesktopLock
 from yutori_mcp.computer_use.result import failure, format_result, redact, terminal_result
+from yutori_mcp.computer_use.supervisor import attach_run_link, run_chat_id
 from yutori_mcp.computer_use.runner import (
     ActionReporter,
     Emitter,
@@ -674,6 +675,30 @@ async def test_run_task_uses_only_python_runner_and_sdk_driver_discovery(tmp_pat
     request = supervise.await_args.kwargs["request"]
     assert request["model"] == "n2"
     assert "driver_path" not in request and "harness" not in request
+
+
+async def test_run_task_links_the_run_to_the_platform_chat_page(tmp_path):
+    driver = tmp_path / "cua-driver"
+    driver.write_text("")
+    action = {
+        "index": 0,
+        "tool": "screenshot",
+        "status": "executed",
+        "raw_status": "confirmed",
+        "delivery_mode": "foreground",
+        "route": "pixel",
+        "refusal_code": None,
+        "chat_id": "chat-1",
+    }
+    supervised = terminal_result("limit", "deadline", actions=[action])
+    with (
+        patch.object(supervisor, "_supervise", AsyncMock(return_value=supervised)),
+        patch.object(supervisor, "find_cua_driver", return_value=driver),
+    ):
+        result = await run_task(**_run_task_kwargs(tmp_path, platform_url="https://platform.dev.yutori.com"))
+    assert result["chat_id"] == "chat-1"
+    assert result["run_url"] == "https://platform.dev.yutori.com/navigator/chats/chat-1"
+    assert "Run: https://platform.dev.yutori.com/navigator/chats/chat-1" in format_result(result)
 
 
 async def test_server_holds_desktop_lock_across_preflight_and_runner(monkeypatch, tmp_path):
@@ -1432,6 +1457,8 @@ class _FakeAgent:
                 return
             if hasattr(callback, "on_api_start"):
                 await callback.on_api_start({})
+            if hasattr(callback, "on_api_end"):
+                await callback.on_api_end({}, {"request_id": "req-first", "choices": []})
         item = {"name": "left_click", "arguments": {"coordinates": [1, 1]}}
         for callback in self.callbacks:
             if hasattr(callback, "on_computer_call_start"):
@@ -1526,6 +1553,62 @@ async def test_run_request_reports_limit_when_the_deadline_has_already_passed():
         "elapsed_ms": 0,
         "steps": 0,
     }
+
+
+class _PydanticLikeResponse:
+    def __init__(self, request_id):
+        self._request_id = request_id
+
+    def model_dump(self):
+        return {"request_id": self._request_id, "choices": []}
+
+
+async def test_chat_tracker_keeps_the_first_request_id_from_dict_or_model_responses():
+    tracker = runner_module.ChatTracker()
+    await tracker.on_api_end({}, {"choices": []})
+    assert tracker.chat_id is None
+    await tracker.on_api_end({}, _PydanticLikeResponse("req-1"))
+    await tracker.on_api_end({}, {"request_id": "req-2", "choices": []})
+    assert tracker.chat_id == "req-1"
+
+
+async def test_run_request_carries_the_chat_id_on_actions_and_the_result(monkeypatch):
+    monkeypatch.setattr(runner_module, "MacOSComputer", _FakeComputer)
+    monkeypatch.setattr(runner_module, "N2ComputerAgent", _FakeAgent)
+    stream = _CollectStream()
+    request = parse_request(_valid_request(deadline_ms=int((time.time() + 60) * 1000)))
+
+    assert await runner_module.run_request(request, Emitter(stream), "yt-secret") == "completed"
+
+    events = [json.loads(line) for line in stream.lines]
+    action, result = events[-2], events[-1]
+    assert (action["type"], action["chat_id"]) == ("action", "req-first")
+    assert (result["type"], result["chat_id"]) == ("result", "req-first")
+
+
+def test_run_chat_id_prefers_the_result_then_the_latest_action():
+    assert run_chat_id({"chat_id": "from-result", "actions": [{"chat_id": "from-action"}]}) == "from-result"
+    assert run_chat_id({"actions": [{"chat_id": None}, {"chat_id": "later"}, {"tool": "screenshot"}]}) == "later"
+    assert run_chat_id({"actions": []}) is None
+
+
+def test_attach_run_link_builds_the_platform_chat_url():
+    result = terminal_result("limit", "deadline", actions=[{"chat_id": "abc-123"}])
+    assert attach_run_link(result, "https://platform.yutori.com/") is result
+    assert result["chat_id"] == "abc-123"
+    assert result["run_url"] == "https://platform.yutori.com/navigator/chats/abc-123"
+    assert "run_url" not in attach_run_link(terminal_result("failed", "no model call"), "https://platform.yutori.com")
+    assert "run_url" not in attach_run_link({"chat_id": "abc-123", "actions": []}, None)
+
+
+def test_format_result_prints_the_run_link_right_after_the_outcome():
+    text = format_result({"outcome": "completed", "run_url": "https://platform.yutori.com/navigator/chats/abc"})
+    assert text.splitlines()[:3] == [
+        "Outcome: completed",
+        "Delivery mode: foreground",
+        "Run: https://platform.yutori.com/navigator/chats/abc",
+    ]
+    assert "Run:" not in format_result({"outcome": "failed"})
 
 
 def test_format_result_handles_python_runtime_action_fields():

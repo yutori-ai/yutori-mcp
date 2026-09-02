@@ -151,7 +151,7 @@ async def _mechanical_calculator_check() -> str:
 
 
 async def _smoke_live() -> int:
-    from ..adapter import resolve_run_credentials
+    from ..adapter import resolve_platform_url, resolve_run_credentials
 
     try:
         with DesktopLock() as lock:
@@ -179,6 +179,7 @@ async def _smoke_live() -> int:
                 max_steps=10,
                 api_key=api_key,
                 api_base_url=api_base_url,
+                platform_url=resolve_platform_url(),
                 lock=lock,
             )
     except ComputerUseBusyError as error:
@@ -200,7 +201,7 @@ async def _print_event(event: dict) -> None:
 
 
 async def _run_custom(args: argparse.Namespace) -> int:
-    from ..adapter import resolve_run_credentials
+    from ..adapter import resolve_platform_url, resolve_run_credentials
 
     # Reuses the MCP tool's input schema so the CLI enforces the same bounds
     # (minutes 1-60, positive steps, start_url requires app) with the same
@@ -221,6 +222,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
         **params.model_dump(),
         api_key=api_key,
         api_base_url=api_base_url,
+        platform_url=resolve_platform_url(),
         on_event=_print_event,
     )
     return _report(result)
