@@ -720,8 +720,8 @@ async def test_server_holds_desktop_lock_across_preflight_and_runner(monkeypatch
     monkeypatch.setattr(preflight, "first_blocker", first_blocker)
     monkeypatch.setattr(supervisor, "run_task", run_with_lock)
     monkeypatch.setattr(
-        "yutori_mcp.adapter.resolve_run_credentials",
-        lambda: ("api-key", "https://api.yutori.com/v1"),
+        "yutori_mcp.adapter.resolve_run_credentials_and_platform_url",
+        lambda: ("api-key", "https://api.yutori.com/v1", "https://platform.yutori.com"),
     )
 
     result, raw = await server._handle_computer_use(None, {"task": "open calculator"})
@@ -1113,8 +1113,8 @@ async def test_smoke_allows_two_minutes_for_live_check(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "run_task", run)
     monkeypatch.setattr(cli, "format_result", lambda _result: "complete")
     monkeypatch.setattr(
-        "yutori_mcp.adapter.resolve_run_credentials",
-        lambda: ("dev-key", "https://api.yutori.com/v1"),
+        "yutori_mcp.adapter.resolve_run_credentials_and_platform_url",
+        lambda: ("dev-key", "https://api.yutori.com/v1", "https://platform.yutori.com"),
     )
 
     assert await cli._smoke_live() == 0
