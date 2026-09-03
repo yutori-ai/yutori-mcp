@@ -17,7 +17,10 @@ One task controls the Mac at a time, in one of two modes:
 - `mode: "background"` drives only the target `app`'s window without taking focus, so you can
   keep working on the Mac (leave that one window alone). Only that window's content is captured
   and sent to Yutori. A menu bar item (the Yutori mark) stays up for the whole run; its menu
-  shows the latest frame the agent saw, its latest action, and Stop (also ⇧⌘Esc). Actions the driver cannot deliver in the background come back to the agent
+  shows the latest frame the agent saw, its latest action, Show activity, and Stop (also ⇧⌘Esc).
+  Show activity opens a window with the live frame above the run's conversation with the model
+  -- its thinking, every action, and every shell command; foreground runs offer the same window
+  from the same menu, without the frame. Actions the driver cannot deliver in the background come back to the agent
   as refusals; `allow_foreground_fallback: true` lets it retry such an action once with the
   window fronted briefly and the prior app restored. Background keyboard delivery is
   app-dependent (clicks reach more apps than typed keys), so typing-heavy tasks usually want it.

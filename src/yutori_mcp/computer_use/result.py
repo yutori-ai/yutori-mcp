@@ -124,6 +124,7 @@ def format_result(result: dict[str, Any]) -> str:
     if result.get("reasoning_overlay_requested"):
         state = "active" if result.get("reasoning_overlay_effective") else "unavailable"
         # Background runs show a menu bar item (latest frame + Stop) instead of the overlay.
+        # Either way the run also offers the activity window, opened from that menu.
         surface = "Menu bar status" if result.get("delivery_mode") == DELIVERY_MODE_BACKGROUND else "Reasoning overlay"
         lines.append(f"{surface}: {state}; codec: {result.get('codec') or 'unknown'}")
     escalations = result.get("fallback_escalations") or 0
@@ -136,7 +137,7 @@ def format_result(result: dict[str, Any]) -> str:
             line += f", {skips} retry(ies) skipped after the window changed"
         lines.append(line)
     if result.get("preview_frames"):
-        lines.append(f"Live view: {result['preview_frames']} frame(s) streamed to the menu bar item")
+        lines.append(f"Activity window: {result['preview_frames']} frame(s) streamed while it was open")
     lines.extend(format_perf(result))
     actions = result.get("actions", [])
     if actions:

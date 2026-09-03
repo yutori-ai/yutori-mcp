@@ -537,7 +537,8 @@ def _computer_kwargs(
     }
     if request["mode"] == DELIVERY_MODE_BACKGROUND:
         # Window scope captures and drives one window. The SDK shows no full-screen overlay for
-        # it; with presentation on it keeps a menu bar item with the latest frame and Stop.
+        # it; with presentation on it keeps a menu bar item with the latest frame, Stop, the shell rail,
+        # and the activity window.
         kwargs.update(
             scope="window",
             allow_foreground_fallback=request["allow_foreground_fallback"],
