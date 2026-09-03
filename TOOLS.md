@@ -8,10 +8,19 @@ All tool inputs enforce validation: webhook URLs must use HTTPS, and `output_fie
 
 ### run_computer_use_task
 
-Operate the foreground Mac desktop with the computer-use agent - clicking, typing, and driving
-apps like a person. Listed only on macOS, and only once the setup in
-[README](README.md#macos-computer-use) is done. One task controls the Mac at a time. Do not
-touch the Mac during a run; visible desktop content is sent to Yutori.
+Operate a Mac with the computer-use agent - clicking, typing, and driving apps like a person.
+Listed only on macOS, and only once the setup in [README](README.md#macos-computer-use) is done.
+One task controls the Mac at a time, in one of two modes:
+
+- `mode: "foreground"` (default) drives the whole visible desktop. Do not touch the Mac during
+  the run; visible desktop content is sent to Yutori.
+- `mode: "background"` drives only the target `app`'s window without taking focus, so you can
+  keep working on the Mac (leave that one window alone). Only that window's content is captured
+  and sent to Yutori. A menu bar item (the Yutori mark) stays up for the whole run; its menu
+  shows the latest frame the agent saw, its latest action, and Stop (also ⇧⌘Esc). Actions the driver cannot deliver in the background come back to the agent
+  as refusals; `allow_foreground_fallback: true` lets it retry such an action once with the
+  window fronted briefly and the prior app restored. Background keyboard delivery is
+  app-dependent (clicks reach more apps than typed keys), so typing-heavy tasks usually want it.
 
 **Basic example:**
 
@@ -34,6 +43,16 @@ touch the Mac during a run; visible desktop content is sent to Yutori.
 }
 ```
 
+**Background example (drive one window while you keep working):**
+
+```json
+{
+  "task": "Add a note titled 'Standup' with today's three agenda items.",
+  "app": "Notes",
+  "mode": "background"
+}
+```
+
 Example response:
 
 ```
@@ -48,6 +67,21 @@ Actions:
 - #2 left_click: executed (raw: confirmed; mode: foreground; route: pixel; refusal: None) took 138 ms
 ```
 
+Example background response:
+
+```
+Outcome: completed
+Delivery mode: background
+Window target: Notes (pid 4242, window 71)
+Final text: Created the Standup note with the three agenda items.
+Elapsed: 24107 ms
+Delivery: 0 foreground escalation(s), 1 background refusal(s)
+Perf: total 24.1s over 8 steps (3.0s/step)
+Actions:
+- #1 left_click: executed (raw: confirmed; mode: background; route: accessibility; refusal: None); effect: unverifiable took 233 ms
+- #2 type: uncertain (raw: unverifiable; mode: background; route: synthetic_events; refusal: None); effect: unverifiable took 610 ms
+```
+
 `Outcome` is `completed`, `limit` (hit `minutes` or `max_steps`), `aborted`, or `failed`.
 `Run` links to the run's page on the Yutori platform (platform.yutori.com, or
 platform.dev.yutori.com when `--env dev` is selected); it is omitted when the run ended
@@ -60,6 +94,8 @@ before the model was called.
 | `start_url` | No | URL to open before the task starts; requires `app` |
 | `minutes` | No | Wall-clock deadline in minutes (1-60). Default: 30 |
 | `max_steps` | No | Max desktop actions, 1 or more. Default: 60 |
+| `mode` | No | `foreground` (default) drives the visible desktop; `background` drives only `app`'s window without taking focus. Background requires `app` |
+| `allow_foreground_fallback` | No | Background only. Retry an action that did not land with the window fronted briefly. Default: false |
 
 `max_steps` has no upper bound. On long runs, compact or summarize older screenshots and tool
 results so the conversation stays within `max_context_len`.

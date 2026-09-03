@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import hashlib
 import importlib.metadata
@@ -13,6 +14,7 @@ import time
 import urllib.request
 from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import dataclass
 from urllib.error import HTTPError
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,7 +29,9 @@ from yutori.navigator.macos.transport import CuaDriverToolError, CuaDriverUncert
 from yutori_mcp.computer_use import preflight, runner as runner_module, supervisor
 from yutori_mcp.computer_use.app import pick_best_window, prepare_app
 from yutori_mcp.computer_use.constants import (
+    DELIVERY_MODE_BACKGROUND,
     DELIVERY_MODE_FOREGROUND,
+    DELIVERY_MODES,
     DRIVER_VERSION,
     MCP_VERSION,
     PROTOCOL_VERSION,
@@ -55,7 +59,7 @@ from yutori_mcp.computer_use.supervisor import (
     python_runner_command,
     run_task,
 )
-from yutori_mcp.schemas import COMPUTER_USE_DEFAULT_MINUTES, ComputerUseTaskInput
+from yutori_mcp.schemas import COMPUTER_USE_DEFAULT_MINUTES, COMPUTER_USE_DEFAULT_MODE, ComputerUseMode, ComputerUseTaskInput
 
 
 @pytest.mark.parametrize("minutes", [0.9, 60.1])
@@ -732,9 +736,9 @@ async def test_server_holds_desktop_lock_across_preflight_and_runner(monkeypatch
 
 def test_runtime_constants_select_latest_python_surface():
     assert TOOL_SET == "computer_use_tools-20260815"
-    assert SDK_VERSION == "0.9.10"
+    assert SDK_VERSION == "0.9.11"
     assert all(len(digest) == 64 for digest in (SDK_ARTIFACT_SHA256, SDK_INSTALLATION_SHA256, SDK_PROVENANCE_SHA256))
-    assert '"yutori==0.9.10"' in Path(__file__).parents[1].joinpath("pyproject.toml").read_text()
+    assert '"yutori==0.9.11"' in Path(__file__).parents[1].joinpath("pyproject.toml").read_text()
 
 
 def test_installed_sdk_matches_the_published_artifact():
@@ -1146,7 +1150,7 @@ async def test_prepare_app_retries_bundle_as_name_and_fronts_best_window():
         wait=AsyncMock(),
     )
     target = await prepare_app(computer, "com.apple.calculator", "https://example.com")
-    assert target == {"name": "Calculator", "pid": 42}
+    assert target == {"name": "Calculator", "pid": 42, "window_id": 7}
     assert computer.launch_app.await_args_list[0].kwargs == {
         "bundle_id": "com.apple.calculator",
         "urls": ["https://example.com"],
@@ -1164,7 +1168,7 @@ async def test_prepare_app_launches_finder_by_bundle_id():
 
     target = await prepare_app(computer, "Finder", None)
 
-    assert target == {"name": "Finder", "pid": 42}
+    assert target == {"name": "Finder", "pid": 42, "window_id": None}
     computer.launch_app.assert_awaited_once_with(bundle_id="com.apple.finder", urls=None)
 
 
@@ -1194,7 +1198,7 @@ async def test_prepare_app_fronts_running_persistent_app_after_launch_failure():
         wait=AsyncMock(),
     )
     target = await prepare_app(computer, "Finder", None)
-    assert target == {"name": "Finder", "pid": 42}
+    assert target == {"name": "Finder", "pid": 42, "window_id": None}
     computer._call_tool.assert_awaited_once_with("list_apps", {}, read_only=True)
     computer.bring_to_front.assert_awaited_once_with(42, None)
 
@@ -1206,7 +1210,7 @@ async def test_prepare_app_does_not_retry_uncertain_fronting():
         wait=AsyncMock(),
     )
     target = await prepare_app(computer, "Calculator", None)
-    assert target == {"name": "Calculator", "pid": 42}
+    assert target == {"name": "Calculator", "pid": 42, "window_id": None}
     computer.bring_to_front.assert_awaited_once_with(42, None)
     computer.wait.assert_awaited_once_with(800)
 
@@ -1231,13 +1235,15 @@ async def test_smoke_reports_preflight_detail_and_fix(monkeypatch, tmp_path, cap
 
 def _valid_request(**overrides):
     request = {
-        "protocol_version": 1,
+        "protocol_version": PROTOCOL_VERSION,
         "type": "run",
         "task": "open calculator",
         "app": None,
         "start_url": None,
         "deadline_ms": 1_000_000,
         "max_steps": 10,
+        "mode": "foreground",
+        "allow_foreground_fallback": False,
         "model": "n2",
         "api_base_url": "https://api.dev.yutori.com/v1",
     }
@@ -1254,10 +1260,15 @@ def test_parse_request_accepts_python_only_shape():
 @pytest.mark.parametrize(
     "overrides,code",
     [
-        ({"protocol_version": 2}, "UNSUPPORTED_PROTOCOL_VERSION"),
+        ({"protocol_version": PROTOCOL_VERSION + 1}, "UNSUPPORTED_PROTOCOL_VERSION"),
         ({"type": "walk"}, "INVALID_REQUEST"),
         ({"task": ""}, "INVALID_REQUEST"),
         ({"start_url": "https://x", "app": None}, "INVALID_REQUEST"),
+        ({"mode": "sideways"}, "INVALID_REQUEST"),
+        ({"mode": None}, "INVALID_REQUEST"),
+        ({"mode": "background", "app": None}, "INVALID_REQUEST"),
+        ({"allow_foreground_fallback": "yes"}, "INVALID_REQUEST"),
+        ({"allow_foreground_fallback": True, "mode": "foreground"}, "INVALID_REQUEST"),
         ({"deadline_ms": 0}, "INVALID_REQUEST"),
         ({"max_steps": -1}, "INVALID_REQUEST"),
         ({"api_base_url": None}, "INVALID_REQUEST"),
@@ -1343,6 +1354,27 @@ class _CollectStream:
         pass
 
 
+def test_runner_main_unexpected_failure_preserves_the_requested_background_mode(monkeypatch):
+    stream = _CollectStream()
+
+    async def fail(_request, _emitter, _api_key):
+        raise RuntimeError("unexpected runner failure")
+
+    monkeypatch.setattr(runner_module, "_take_api_key", lambda: "yt-key")
+    monkeypatch.setattr(runner_module, "_claim_protocol_stream", lambda: stream)
+    monkeypatch.setattr(
+        runner_module,
+        "_read_request_line",
+        lambda: json.dumps(_valid_request(app="Notes", mode="background")),
+    )
+    monkeypatch.setattr(runner_module, "_run_until_terminated", fail)
+
+    assert runner_module.main() == 1
+    terminal = json.loads(stream.lines[-1])
+    assert terminal["outcome"] == "failed"
+    assert terminal["delivery_mode"] == DELIVERY_MODE_BACKGROUND
+
+
 async def test_action_events_sanitize_commands_and_never_include_output(monkeypatch):
     secret = "private-value-1234"
     monkeypatch.setenv("SERVICE_API_KEY", secret)
@@ -1405,8 +1437,15 @@ class _FakeComputer:
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
-        self.presentation = _FakePresentation()
-        self.presentation_status = MacOSPresentationStatus(True, True, "active", "yutori", codec="webp")
+        self.presentation_requested = kwargs.get("presentation", True)
+        self.presentation = _FakePresentation() if self.presentation_requested else None
+        self.presentation_status = MacOSPresentationStatus(
+            self.presentation_requested,
+            self.presentation is not None,
+            "active" if self.presentation is not None else "unavailable",
+            "yutori" if self.presentation is not None else "hidden",
+            codec="webp",
+        )
         self.cancellation = _FakeCancellation()
         self.current_observation = None
         self.target_pid = None
@@ -1427,10 +1466,31 @@ class _FakeComputer:
             "screenshots": 2,
         }
         self.closed = False
+        self.screenshots = 0
+        self.window_targets: list[Any] = []
+        self.action_outcomes: tuple[Any, ...] = ()
+        self.focus_guard_trips = 0
+        self.delivery_counts = {
+            "background_attempts": 0,
+            "foreground_escalations": 0,
+            "fallback_skips": 0,
+            "background_refusals": 0,
+            "window_rebinds": 0,
+        }
+        self.window_target_info = None
+        self.__dict__.update(self.telemetry_overrides)
         self.__class__.instances.append(self)
+
+    telemetry_overrides: dict[str, Any] = {}
 
     async def __aenter__(self):
         return self
+
+    async def screenshot(self):
+        self.screenshots += 1
+
+    async def set_window_target(self, target):
+        self.window_targets.append(target)
 
     async def aclose(self):
         self.closed = True
@@ -1657,3 +1717,635 @@ def test_repository_contains_no_node_runtime_surface():
     assert "secrets.SDK_DEPLOY_KEY" not in text
     assert "PYSDK_DEPLOY_KEY" not in text
     assert "git+ssh" not in text
+
+
+# --- background mode ----------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _FakeWindowTarget:
+    pid: int
+    window_id: int
+    title: str | None = None
+    app_name: str | None = None
+
+
+def _background_request(**overrides):
+    request = _valid_request(app="Notes", mode="background", deadline_ms=int((time.time() + 60) * 1000))
+    request.update(overrides)
+    return request
+
+
+def test_computer_use_mode_defaults_and_validators():
+    params = ComputerUseTaskInput(task="t")
+    assert params.mode == "foreground" and params.allow_foreground_fallback is False
+    with pytest.raises(ValidationError, match="mode='background' requires app"):
+        ComputerUseTaskInput(task="t", mode="background")
+    with pytest.raises(ValidationError, match="allow_foreground_fallback requires mode='background'"):
+        ComputerUseTaskInput(task="t", app="Notes", allow_foreground_fallback=True)
+    with pytest.raises(ValidationError):
+        ComputerUseTaskInput(task="t", app="Notes", mode="sideways")
+    background = ComputerUseTaskInput(task="t", app="Notes", mode="background", allow_foreground_fallback=True)
+    assert background.model_dump()["mode"] == "background"
+    assert background.model_dump()["allow_foreground_fallback"] is True
+
+
+def test_computer_use_mode_literal_matches_runtime_delivery_modes():
+    from typing import get_args
+
+    assert set(get_args(ComputerUseMode)) == set(DELIVERY_MODES)
+    assert COMPUTER_USE_DEFAULT_MODE == DELIVERY_MODE_FOREGROUND
+
+
+def test_run_computer_use_task_signature_mirrors_the_schema_defaults():
+    import inspect
+
+    from yutori_mcp import server
+
+    parameters = inspect.signature(server.run_computer_use_task).parameters
+    fields = ComputerUseTaskInput.model_fields
+    assert parameters["mode"].default == fields["mode"].default == COMPUTER_USE_DEFAULT_MODE
+    assert parameters["allow_foreground_fallback"].default is fields["allow_foreground_fallback"].default is False
+    assert list(parameters)[-1] == "ctx"
+
+
+async def test_server_forwards_mode_and_fallback_to_the_runner(monkeypatch, tmp_path):
+    from yutori_mcp import server
+    from yutori_mcp.computer_use import lock as lock_module
+
+    forwarded: dict[str, Any] = {}
+
+    async def run_with_lock(**kwargs: Any) -> dict[str, str]:
+        forwarded.update(kwargs)
+        return {"outcome": "completed", "delivery_mode": "background"}
+
+    monkeypatch.setattr(lock_module, "DesktopLock", lambda: DesktopLock(tmp_path / "desktop.lock"))
+    monkeypatch.setattr(preflight, "first_blocker", lambda: None)
+    monkeypatch.setattr(supervisor, "run_task", run_with_lock)
+    monkeypatch.setattr(
+        "yutori_mcp.adapter.resolve_run_credentials_and_platform_url",
+        lambda: ("k", "https://api.yutori.com/v1", "https://platform.yutori.com"),
+    )
+
+    result, _ = await server._handle_computer_use(
+        None, {"task": "add a note", "app": "Notes", "mode": "background", "allow_foreground_fallback": True}
+    )
+    assert result["delivery_mode"] == "background"
+    assert forwarded["mode"] == "background" and forwarded["allow_foreground_fallback"] is True
+    assert forwarded["app"] == "Notes"
+    assert forwarded["platform_url"] == "https://platform.yutori.com"
+
+
+async def test_server_early_failures_preserve_the_requested_background_mode(monkeypatch, tmp_path):
+    from yutori_mcp import server
+    from yutori_mcp.computer_use import lock as lock_module
+
+    lock_path = tmp_path / "desktop.lock"
+    monkeypatch.setattr(lock_module, "DesktopLock", lambda: DesktopLock(lock_path))
+    blocker = preflight.CheckResult("driver", False, "missing", "run setup")
+    monkeypatch.setattr(preflight, "first_blocker", lambda: blocker)
+
+    arguments = {"task": "add a note", "app": "Notes", "mode": "background"}
+    blocked, _ = await server._handle_computer_use(None, arguments)
+    assert blocked["delivery_mode"] == DELIVERY_MODE_BACKGROUND
+
+    monkeypatch.setattr(preflight, "first_blocker", lambda: pytest.fail("busy run must not reach preflight"))
+    with DesktopLock(lock_path):
+        busy, _ = await server._handle_computer_use(None, arguments)
+    assert busy["delivery_mode"] == DELIVERY_MODE_BACKGROUND
+
+
+async def test_invoke_unexpected_failure_preserves_the_requested_background_mode(monkeypatch):
+    from yutori_mcp import server
+
+    async def fail_before_result(_client, _arguments):
+        raise RuntimeError("unexpected host failure")
+
+    monkeypatch.setitem(server._TOOL_HANDLERS, "run_computer_use_task", fail_before_result)
+    text = await server._invoke(
+        "run_computer_use_task",
+        {"task": "add a note", "app": "Notes", "mode": "background"},
+    )
+    assert "Outcome: failed" in text
+    assert "Delivery mode: background" in text
+
+
+def test_cli_run_parser_accepts_mode_and_fallback_flags():
+    from yutori_mcp.computer_use import cli
+
+    parser = argparse.ArgumentParser()
+    cli.register_parser(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(
+        ["computer-use", "run", "add a note", "--app", "Notes", "--mode", "background", "--allow-foreground-fallback"]
+    )
+    assert args.mode == "background" and args.allow_foreground_fallback is True
+    default = parser.parse_args(["computer-use", "run", "add a note"])
+    assert default.mode == COMPUTER_USE_DEFAULT_MODE and default.allow_foreground_fallback is False
+    with pytest.raises(SystemExit):
+        parser.parse_args(["computer-use", "run", "x", "--mode", "sideways"])
+
+
+def test_hands_off_notice_depends_on_the_mode():
+    from yutori_mcp.computer_use import cli
+
+    assert cli.hands_off_notice("foreground") == (
+        "The model takes over this Mac's desktop now; do not touch it during the run."
+    )
+    assert "keep working" in cli.hands_off_notice("background")
+    assert "leave that window alone" in cli.hands_off_notice("background")
+
+
+async def test_cli_run_forwards_the_mode_and_prints_the_matching_notice(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    run = AsyncMock(return_value={"outcome": "completed", "delivery_mode": "background", "final_text": "done"})
+    monkeypatch.setattr(cli, "_blocked", lambda: False)
+    monkeypatch.setattr(cli, "run_task", run)
+    monkeypatch.setattr(
+        "yutori_mcp.adapter.resolve_run_credentials_and_platform_url",
+        lambda: ("k", "https://api.yutori.com/v1", "https://platform.yutori.com"),
+    )
+    args = SimpleNamespace(
+        task="add a note",
+        app="Notes",
+        start_url=None,
+        minutes=30,
+        max_steps=60,
+        mode="background",
+        allow_foreground_fallback=True,
+    )
+    assert await cli._run_custom(args) == 0
+    assert run.await_args.kwargs["mode"] == "background"
+    assert run.await_args.kwargs["allow_foreground_fallback"] is True
+    assert run.await_args.kwargs["platform_url"] == "https://platform.yutori.com"
+    out = capsys.readouterr().out
+    assert cli.hands_off_notice("background") in out
+    assert "Delivery mode: background" in out
+    with pytest.raises(ValidationError, match="requires app"):
+        await cli._run_custom(SimpleNamespace(**{**vars(args), "app": None}))
+
+
+async def test_run_task_request_carries_mode_and_fallback(tmp_path):
+    driver = tmp_path / "cua-driver"
+    driver.write_text("")
+    supervise = AsyncMock(return_value={"outcome": "completed"})
+    with (
+        patch.object(supervisor, "_supervise", supervise),
+        patch.object(supervisor, "find_cua_driver", return_value=driver),
+    ):
+        await run_task(**_run_task_kwargs(tmp_path, app="Notes", mode="background", allow_foreground_fallback=True))
+    request = supervise.await_args.kwargs["request"]
+    assert request["protocol_version"] == PROTOCOL_VERSION == 2
+    assert request["mode"] == "background" and request["allow_foreground_fallback"] is True
+
+
+async def test_run_task_defaults_to_foreground_and_reports_failures_in_the_requested_mode(tmp_path):
+    with patch.object(supervisor, "find_cua_driver", return_value=None):
+        foreground = await run_task(**_run_task_kwargs(tmp_path))
+        background = await run_task(**_run_task_kwargs(tmp_path, app="Notes", mode="background"))
+    assert foreground["outcome"] == "failed" and foreground["delivery_mode"] == "foreground"
+    assert background["outcome"] == "failed" and background["delivery_mode"] == "background"
+
+
+async def test_supervisor_synthesized_results_carry_the_requested_mode():
+    process = _Process(_stream(json.dumps(_ready_event())), _stream())
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+        result = await _supervise(
+            command=python_runner_command(),
+            request={"type": "run", "mode": "background"},
+            api_key="yt-key",
+            deadline=time.monotonic() + 1,
+        )
+    assert result["outcome"] == "failed" and result["delivery_mode"] == "background"
+    assert "exited without a result" in result["final_text"]
+
+
+def test_event_shape_checks_delivery_modes_and_accepts_the_new_action_fields():
+    action = {
+        "type": "action",
+        "index": 0,
+        "tool": "left_click",
+        "status": "executed",
+        "raw_status": "confirmed",
+        "delivery_mode": "background",
+        "route": "accessibility",
+        "refusal_code": None,
+        "effect": "confirmed",
+        "escalated": True,
+    }
+    assert supervisor._event_shape_error(action) is None
+    assert supervisor._event_shape_error({**action, "delivery_mode": "sideways"}) == (
+        "invalid or missing fields: delivery_mode"
+    )
+    assert supervisor._event_shape_error(_result_event(delivery_mode="background")) is None
+    assert supervisor._event_shape_error(_result_event(delivery_mode="sideways")) == (
+        "invalid or missing fields: delivery_mode"
+    )
+
+
+def test_parse_request_accepts_background_with_app():
+    parsed = parse_request(_valid_request(app="Notes", mode="background", allow_foreground_fallback=True))
+    assert parsed["mode"] == "background" and parsed["allow_foreground_fallback"] is True
+    assert parse_request(_valid_request())["mode"] == "foreground"
+
+
+def test_computer_kwargs_keep_the_foreground_shape_and_add_window_scope_for_background():
+    cancellation = object()
+    foreground = runner_module._computer_kwargs(
+        parse_request(_valid_request()), deadline=1.0, cancellation=cancellation, api_key="k"
+    )
+    assert foreground == {
+        "presentation": True,
+        "allow_local_shell": True,
+        "execution_deadline": 1.0,
+        "cancellation": cancellation,
+        "known_secrets": ("k",),
+    }
+    background = runner_module._computer_kwargs(
+        parse_request(_valid_request(app="Notes", mode="background", allow_foreground_fallback=True)),
+        deadline=1.0,
+        cancellation=cancellation,
+        api_key="k",
+    )
+    assert background == {
+        **foreground,
+        "scope": "window",
+        "allow_foreground_fallback": True,
+    }
+
+
+def test_system_context_varies_only_in_the_mode_specific_parts():
+    foreground = runner_module.system_context("foreground")
+    background = runner_module.system_context("background", "Notes")
+    assert foreground == runner_module.SYSTEM_CONTEXT
+    assert foreground.startswith("You control the entire macOS screen.")
+    assert background.startswith("You control exactly one application window: Notes.")
+    assert "entire macOS screen" not in background and "bring anything to the front" in background
+    assert "Never use the shell to open, launch, or activate applications" in background
+    assert "open -a" not in foreground
+    assert "leave that result in view" not in background
+    for shared in ("cmd, not ctrl", "Shell commands run headlessly", "Do not open or change System Settings"):
+        assert shared in foreground and shared in background
+    assert "the target application" in runner_module.system_context("background")
+
+
+def test_supports_background_mode_reads_the_sdk_signature(monkeypatch):
+    class WithScope:
+        def __init__(self, *, scope="desktop"):
+            pass
+
+    class Legacy:
+        def __init__(self, *, presentation=True):
+            pass
+
+    monkeypatch.setattr(runner_module, "MacOSComputer", WithScope)
+    assert runner_module._supports_background_mode() is True
+    monkeypatch.setattr(runner_module, "MacOSComputer", Legacy)
+    assert runner_module._supports_background_mode() is False
+
+
+async def test_run_request_background_binds_the_window_and_never_fronts(monkeypatch):
+    _FakeComputer.instances.clear()
+    _FakeAgent.instances.clear()
+    prepared = AsyncMock(return_value={"name": "Notes", "pid": 42, "window_id": 7})
+    monkeypatch.setattr(runner_module, "MacOSComputer", _FakeComputer)
+    monkeypatch.setattr(runner_module, "N2ComputerAgent", _FakeAgent)
+    monkeypatch.setattr(runner_module, "prepare_app", prepared)
+    monkeypatch.setattr(runner_module, "_supports_background_mode", lambda: True)
+    monkeypatch.setattr("yutori.navigator.macos.MacOSWindowTarget", _FakeWindowTarget, raising=False)
+    monkeypatch.setattr(
+        _FakeComputer,
+        "telemetry_overrides",
+        {
+            "delivery_counts": {
+                "background_attempts": 5,
+                "foreground_escalations": 2,
+                "fallback_skips": 3,
+                "background_refusals": 1,
+                "window_rebinds": 1,
+            },
+            "window_target_info": {"pid": 42, "window_id": 7, "app_name": "Notes"},
+        },
+    )
+    stream = _CollectStream()
+    request = parse_request(_background_request(allow_foreground_fallback=True))
+
+    assert await runner_module.run_request(request, Emitter(stream), "yt-secret") == "completed"
+
+    computer = _FakeComputer.instances[-1]
+    agent = _FakeAgent.instances[-1]
+    assert computer.kwargs["scope"] == "window" and computer.kwargs["presentation"] is True
+    assert computer.kwargs["allow_foreground_fallback"] is True
+    assert computer.screenshots == 0  # no pre-launch desktop frame in window scope
+    assert prepared.await_args.args[1:] == ("Notes", None) and prepared.await_args.kwargs == {"front": False}
+    assert computer.window_targets == [_FakeWindowTarget(42, 7, app_name="Notes")]
+    assert computer.target_pid == 42
+    assert agent.kwargs["instructions"].startswith("You control exactly one application window: Notes.")
+    assert agent.kwargs["presentation"] is computer.presentation
+    result = json.loads(stream.lines[-1])
+    assert result["delivery_mode"] == "background"
+    assert result["reasoning_overlay_requested"] is True and result["reasoning_overlay_effective"] is True
+    assert result["fallback_escalations"] == 2 and result["background_refusals"] == 1
+    assert result["fallback_skips"] == 3
+    assert result["window_rebinds"] == 1 and result["focus_guard_trips"] == 0
+    assert result["preview_frames"] == 0
+    assert result["window_target"] == {"pid": 42, "window_id": 7, "app_name": "Notes"}
+    action = next(json.loads(line) for line in stream.lines if json.loads(line)["type"] == "action")
+    assert action["delivery_mode"] == "background" and action["route"] == "pixel"
+    assert action["effect"] is None and action["escalated"] is False
+
+    prepared.return_value = {"name": "Notes", "pid": 43, "window_id": 9}
+    assert await computer.recover_target() == 43
+    assert prepared.await_args.kwargs == {"front": False}
+    assert computer.window_targets[-1] == _FakeWindowTarget(43, 9, app_name="Notes")
+
+
+async def test_run_request_foreground_still_consumes_the_prelaunch_frame_and_fronts(monkeypatch):
+    _FakeComputer.instances.clear()
+    prepared = AsyncMock(return_value={"name": "Notes", "pid": 42, "window_id": 7})
+    monkeypatch.setattr(runner_module, "MacOSComputer", _FakeComputer)
+    monkeypatch.setattr(runner_module, "N2ComputerAgent", _FakeAgent)
+    monkeypatch.setattr(runner_module, "prepare_app", prepared)
+    stream = _CollectStream()
+    request = parse_request(_valid_request(app="Notes", deadline_ms=int((time.time() + 60) * 1000)))
+
+    assert await runner_module.run_request(request, Emitter(stream), "yt-secret") == "completed"
+
+    computer = _FakeComputer.instances[-1]
+    assert computer.screenshots == 1
+    assert prepared.await_args.kwargs == {"front": True}
+    assert computer.window_targets == []
+    result = json.loads(stream.lines[-1])
+    assert result["delivery_mode"] == "foreground" and result["window_target"] is None
+    assert result["fallback_escalations"] == 0 and result["background_refusals"] == 0
+
+
+async def test_run_request_background_without_sdk_support_fails_before_touching_the_desktop(monkeypatch):
+    class Untouchable:
+        def __init__(self, **_kwargs):
+            raise AssertionError("MacOSComputer must not be constructed")
+
+    monkeypatch.setattr(runner_module, "MacOSComputer", Untouchable)
+    monkeypatch.setattr(runner_module, "_supports_background_mode", lambda: False)
+    stream = _CollectStream()
+
+    assert await runner_module.run_request(parse_request(_background_request()), Emitter(stream), "k") == "failed"
+
+    (event,) = [json.loads(line) for line in stream.lines]
+    assert event["type"] == "error" and event["code"] == "UNSUPPORTED_MODE"
+    assert SDK_VERSION in event["message"]
+
+
+async def test_action_reporter_reports_the_delivery_the_sdk_observed():
+    computer = SimpleNamespace(action_outcomes=[])
+    stream = _CollectStream()
+    reporter = ActionReporter(
+        Emitter(stream),
+        time.monotonic(),
+        delivery_mode="background",
+        action_delivery=runner_module._action_delivery(computer),
+    )
+    item = {"name": "computer_batch", "arguments": {"actions": []}}
+    # One batch: a background click, an escalated type, then a background key press.
+    computer.action_outcomes.extend(
+        [
+            SimpleNamespace(
+                requested_delivery="background", route="accessibility", effect="unverifiable", escalated=False,
+                refusal_code=None,
+            ),
+            SimpleNamespace(
+                requested_delivery="foreground", route="synthetic_events", effect="unverifiable", escalated=True,
+                refusal_code="delivery_failed",
+            ),
+            SimpleNamespace(
+                requested_delivery="background", route="synthetic_events", effect="confirmed", escalated=False,
+                refusal_code=None,
+            ),
+        ]
+    )
+    await reporter.on_computer_call_start(item)
+    await reporter.on_computer_call_end(item, [{"output": "ok"}])
+    await reporter.on_computer_call_start({"name": "bash", "arguments": {"command": "ls"}})
+    await reporter.on_computer_call_end({"name": "bash", "arguments": {"command": "ls"}}, [{"output": "ok"}])
+    first, second = (json.loads(line) for line in stream.lines)
+    assert (first["delivery_mode"], first["route"], first["effect"], first["escalated"]) == (
+        "foreground",
+        "synthetic_events",
+        "confirmed",
+        True,
+    )
+    assert first["refusal_code"] == "delivery_failed"
+    # No new driver outcome for the shell call: fall back to the configured mode.
+    assert (second["delivery_mode"], second["route"], second["effect"], second["escalated"]) == (
+        "background",
+        "pixel",
+        None,
+        False,
+    )
+
+
+def _background_window(window_id: int = 7, **overrides: Any) -> dict[str, Any]:
+    window = {
+        "window_id": window_id,
+        "bounds": {"width": 400, "height": 500},
+        "is_on_screen": False,
+        "on_current_space": None,
+        "z_index": 3,
+    }
+    window.update(overrides)
+    return window
+
+
+async def test_prepare_app_background_unhides_and_returns_the_window_without_fronting():
+    computer = SimpleNamespace(
+        launch_app=AsyncMock(return_value={"pid": 42, "name": "Notes", "windows": [_background_window()]}),
+        unhide_app=AsyncMock(return_value=True),
+        bring_to_front=AsyncMock(side_effect=AssertionError("background runs must never front the app")),
+        list_windows=AsyncMock(),
+        wait=AsyncMock(),
+    )
+    target = await prepare_app(computer, "Notes", None, front=False)
+    assert target == {"name": "Notes", "pid": 42, "window_id": 7}
+    computer.unhide_app.assert_awaited_once_with(42)
+    computer.bring_to_front.assert_not_awaited()
+    computer.list_windows.assert_not_awaited()
+    computer.wait.assert_awaited_once_with(300)
+
+
+async def test_prepare_app_background_polls_for_a_window_after_a_cold_launch():
+    computer = SimpleNamespace(
+        launch_app=AsyncMock(return_value={"pid": 42, "name": "Notes", "windows": []}),
+        unhide_app=AsyncMock(return_value=True),
+        list_windows=AsyncMock(side_effect=[{"windows": []}, {"windows": [_background_window(9)]}]),
+        wait=AsyncMock(),
+    )
+    target = await prepare_app(computer, "Notes", None, front=False)
+    assert target["window_id"] == 9
+    assert computer.list_windows.await_args_list == [((42,),), ((42,),)]
+    assert [call.args for call in computer.wait.await_args_list] == [(250,), (300,)]
+
+
+async def test_prepare_app_background_still_resolves_a_window_when_unhide_fails():
+    computer = SimpleNamespace(
+        launch_app=AsyncMock(return_value={"pid": 42, "name": "Notes", "windows": []}),
+        unhide_app=AsyncMock(side_effect=CuaDriverToolError("unhide failed")),
+        list_windows=AsyncMock(return_value={"windows": [_background_window(9)]}),
+        wait=AsyncMock(),
+    )
+
+    target = await prepare_app(computer, "Notes", None, front=False)
+
+    assert target == {"name": "Notes", "pid": 42, "window_id": 9}
+    computer.unhide_app.assert_awaited_once_with(42)
+    computer.list_windows.assert_awaited_once_with(42)
+
+
+async def test_prepare_app_background_gives_up_when_no_window_appears(monkeypatch):
+    from yutori_mcp.computer_use import app as app_module
+
+    monkeypatch.setattr(app_module, "_WINDOW_POLL_ATTEMPTS", 2)
+    computer = SimpleNamespace(
+        launch_app=AsyncMock(return_value={"pid": 42, "name": "Notes"}),
+        unhide_app=AsyncMock(return_value=False),
+        list_windows=AsyncMock(return_value={"windows": []}),
+        wait=AsyncMock(),
+    )
+    with pytest.raises(RuntimeError, match="showed no window to target in background mode"):
+        await prepare_app(computer, "Notes", None, front=False)
+    assert computer.list_windows.await_count == 2
+
+
+def test_pick_best_window_prefers_offscreen_content_windows_over_helper_strips():
+    strip = {"window_id": 1, "bounds": {"width": 3360, "height": 30}, "is_on_screen": False, "z_index": 114}
+    content = _background_window(2, bounds={"width": 230, "height": 408}, z_index=67)
+    assert pick_best_window([strip, content])["window_id"] == 2
+    visible = _background_window(3, is_on_screen=True, on_current_space=True, z_index=1)
+    assert pick_best_window([strip, content, visible])["window_id"] == 3
+
+
+def test_format_result_renders_background_fields():
+    text = format_result(
+        {
+            "outcome": "completed",
+            "delivery_mode": "background",
+            "final_text": "done",
+            "reasoning_overlay_requested": True,
+            "reasoning_overlay_effective": True,
+            "codec": "jpeg",
+            "fallback_escalations": 1,
+            "background_refusals": 2,
+            "window_target": {"pid": 42, "window_id": 7, "app_name": "Notes"},
+            "actions": [
+                {
+                    "index": 0,
+                    "tool": "left_click",
+                    "status": "executed",
+                    "raw_status": "confirmed",
+                    "delivery_mode": "foreground",
+                    "route": "accessibility",
+                    "refusal_code": None,
+                    "effect": "confirmed",
+                    "escalated": True,
+                    "duration_ms": 5,
+                }
+            ],
+        }
+    )
+    assert "Delivery mode: background" in text
+    assert "Window target: Notes (pid 42, window 7)" in text
+    assert "Delivery: 1 foreground escalation(s), 2 background refusal(s)" in text
+    assert "mode: foreground; route: accessibility; refusal: None); effect: confirmed [fronted] took 5 ms" in text
+    assert "Menu bar status: active; codec: jpeg" in text
+    assert "Reasoning overlay" not in text
+
+
+def test_format_result_reports_skipped_retries_only_when_present():
+    base = {"outcome": "completed", "delivery_mode": "background", "final_text": "done"}
+    assert "Delivery: 0 foreground escalation(s), 0 background refusal(s)" in format_result(base)
+    assert "skipped" not in format_result(base)
+    assert "Live view" not in format_result(base)
+    assert "Live view: 7 frame(s) streamed to the menu bar item" in format_result({**base, "preview_frames": 7})
+    with_skips = format_result({**base, "fallback_skips": 2})
+    assert "Delivery: 0 foreground escalation(s), 0 background refusal(s), 2 retry(ies) skipped after the window changed" in with_skips
+
+
+def test_format_result_foreground_output_has_no_background_lines():
+    text = format_result({"outcome": "completed", "delivery_mode": "foreground", "final_text": "done"})
+    assert "Delivery:" not in text and "Window target" not in text
+
+
+def test_terminal_result_and_failure_carry_the_requested_mode():
+    assert terminal_result("limit", "x", delivery_mode=DELIVERY_MODE_BACKGROUND)["delivery_mode"] == "background"
+    assert failure("x", delivery_mode=DELIVERY_MODE_BACKGROUND) == terminal_result(
+        "failed", "x", delivery_mode=DELIVERY_MODE_BACKGROUND
+    )
+    assert failure("x")["delivery_mode"] == DELIVERY_MODE_FOREGROUND
+
+
+def test_docs_describe_background_mode():
+    root = Path(__file__).parents[1]
+    assert '"mode": "background"' in (root / "TOOLS.md").read_text()
+    assert "allow_foreground_fallback" in (root / "TOOLS.md").read_text()
+    assert "no background runs" not in (root / "README.md").read_text()
+    skill = " ".join((root / "skills/06-computer-use/SKILL.md").read_text().split())
+    assert "--mode background" in skill
+    assert '"in the background"' in skill and "ask which app to target" in skill
+
+
+# --- computer-use stop --------------------------------------------------------------------
+
+
+async def test_supervisor_advertises_the_runner_pid_only_while_it_runs(monkeypatch, tmp_path):
+    pid_path = tmp_path / "computer-use.pid"
+    monkeypatch.setattr(supervisor, "runner_pid_path", lambda: pid_path)
+    process = _Process(_stream(json.dumps(_ready_event()), json.dumps(_result_event())), _stream())
+    seen: list[str] = []
+
+    async def on_event(event):
+        seen.append(pid_path.read_text().strip())
+
+    result = await _run_supervised(process, on_event=on_event)
+    assert result["outcome"] == "completed"
+    assert seen == ["123"]
+    assert not pid_path.exists()
+
+
+def test_stop_active_run_signals_the_runner_process_group(monkeypatch, tmp_path):
+    pid_path = tmp_path / "computer-use.pid"
+    pid_path.write_text("4242\n")
+    monkeypatch.setattr(supervisor, "runner_pid_path", lambda: pid_path)
+    monkeypatch.setattr(supervisor, "_process_command", lambda pid: f"python -I -m {supervisor.RUNNER_MODULE}")
+    with patch("yutori_mcp.computer_use.supervisor.os.killpg") as killpg:
+        message = supervisor.stop_active_run()
+    killpg.assert_called_once_with(4242, signal.SIGTERM)
+    assert "pid 4242" in message and "aborted" in message
+    assert pid_path.exists()  # the supervisor removes it once the runner exits
+
+
+@pytest.mark.parametrize("command", [None, "/bin/bash -l"])
+def test_stop_active_run_ignores_and_removes_a_stale_pid_file(monkeypatch, tmp_path, command):
+    pid_path = tmp_path / "computer-use.pid"
+    pid_path.write_text("4242\n")
+    monkeypatch.setattr(supervisor, "runner_pid_path", lambda: pid_path)
+    monkeypatch.setattr(supervisor, "_process_command", lambda pid: command)
+    with patch("yutori_mcp.computer_use.supervisor.os.killpg") as killpg:
+        message = supervisor.stop_active_run()
+    killpg.assert_not_called()
+    assert message.startswith("No computer-use run is active")
+    assert not pid_path.exists()
+
+
+def test_stop_active_run_reports_no_run_without_a_pid_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(supervisor, "runner_pid_path", lambda: tmp_path / "missing.pid")
+    assert supervisor.stop_active_run() == "No computer-use run is active."
+
+
+def test_cli_stop_prints_the_stop_outcome(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    monkeypatch.setattr(cli, "stop_active_run", lambda: "No computer-use run is active.")
+    parser = argparse.ArgumentParser()
+    cli.register_parser(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(["computer-use", "stop"])
+    assert cli.dispatch(args.computer_use_command, args) == 0
+    assert capsys.readouterr().out == "No computer-use run is active.\n"

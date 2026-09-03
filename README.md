@@ -337,8 +337,9 @@ pip install yutori-mcp
 
 ### macOS computer use
 
-Optional, macOS 15+ only. Computer use operates the visible desktop, so it needs a local driver
-and system permissions on top of the install above:
+Optional, macOS 15+ only. Computer use operates the visible desktop, or a single app window in
+the background while you keep working, so it needs a local driver and system permissions on top
+of the install above:
 
 ```bash
 uvx yutori-mcp computer-use setup    # installs CuaDriver.app, requests Screen Recording + Accessibility
@@ -353,16 +354,21 @@ those checks any time with `uvx yutori-mcp computer-use doctor`.
 ```bash
 uvx yutori-mcp computer-use smoke
 uvx yutori-mcp computer-use run "In Calculator, compute 17 * 23 and report the result." --app Calculator
+uvx yutori-mcp computer-use run "Add a note titled Standup." --app Notes --mode background
 ```
 
 `smoke` is an end-to-end check: it types into Calculator to confirm the permissions took
 effect, then has the agent compute 9 * 9 in Calculator. `run` does whatever task you
-give it, printing each action as the agent takes it.
+give it, printing each action as the agent takes it. `--mode background` drives only the
+target app's window without taking focus, so you can keep working; add
+`--allow-foreground-fallback` to let an action that did not land in the background briefly
+front the window. `uvx yutori-mcp computer-use stop` ends the active run from another terminal
+(background runs have no on-screen Stop button).
 </details>
 
-The harness in this repository is minimal: it drives the foreground desktop one task at a time,
-no background runs, no multiplexing. For scalable sandbox runs, see
-[n2 on Daytona](https://docs.yutori.com/reference/n2-daytona).
+The harness in this repository is minimal: one task at a time (a machine-wide lock), either on
+the visible desktop or targeting one app window in the background, with no multiplexing. For
+scalable sandbox runs, see [n2 on Daytona](https://docs.yutori.com/reference/n2-daytona).
 
 ## Tools
 

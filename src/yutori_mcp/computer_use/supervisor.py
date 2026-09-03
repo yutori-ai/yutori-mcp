@@ -5,12 +5,17 @@ import json
 import logging
 import os
 import signal
+import subprocess
 import sys
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 from .constants import (
+    DELIVERY_MODE_FOREGROUND,
+    DELIVERY_MODES,
     DRIVER_VERSION,
     MCP_VERSION,
     MODEL,
@@ -35,6 +40,70 @@ EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 EVENT_CALLBACK_TIMEOUT_SECONDS = 5.0
 RUNNER_SHUTDOWN_GRACE_SECONDS = 5.0
 RUNNER_FRAME_LIMIT_BYTES = 8 * 1024 * 1024
+RUNNER_MODULE = "yutori_mcp.computer_use.runner"
+
+
+def runner_pid_path() -> Path:
+    """Where the supervisor advertises the live runner's pid for `computer-use stop`.
+
+    Next to the desktop lock. Advisory only: the lock stays the concurrency gate, and the
+    file names a process group that `stop` verifies is really a runner before signalling.
+    """
+    return Path.home() / ".yutori" / "computer-use.pid"
+
+
+def _record_runner_pid(pid: int) -> None:
+    with suppress(OSError):
+        path = runner_pid_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{pid}\n")
+
+
+def _clear_runner_pid(pid: int) -> None:
+    with suppress(OSError, ValueError):
+        path = runner_pid_path()
+        if int(path.read_text().strip()) == pid:
+            path.unlink()
+
+
+def _process_command(pid: int) -> str | None:
+    try:
+        listing = subprocess.run(
+            ["/bin/ps", "-o", "command=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=2,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+    return listing or None
+
+
+def stop_active_run() -> str:
+    """Ask the live runner to stop; its SIGTERM handler ends the run with outcome `aborted`.
+
+    A background run has no on-screen Stop button, so this is the operator's local stop.
+    The runner is its own process group leader (`start_new_session=True`), so signalling
+    the group also reaches any model-owned shells.
+    """
+    path = runner_pid_path()
+    try:
+        pid = int(path.read_text().strip())
+    except (OSError, ValueError):
+        return "No computer-use run is active."
+    command = _process_command(pid)
+    if command is None or RUNNER_MODULE not in command:
+        with suppress(OSError):
+            path.unlink()
+        return "No computer-use run is active (removed a stale pid file)."
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        with suppress(OSError):
+            path.unlink()
+        return "No computer-use run is active (removed a stale pid file)."
+    return f"Asked the computer-use runner (pid {pid}) to stop; the run ends with outcome 'aborted'."
 
 
 async def _notify(on_event: EventCallback | None, event: dict[str, Any]) -> EventCallback | None:
@@ -149,6 +218,8 @@ def _event_shape_error(event: dict[str, Any]) -> str | None:
     invalid = [
         name for name, expected in required.items() if name not in event or not isinstance(event[name], expected)
     ]
+    if "delivery_mode" in required and "delivery_mode" not in invalid and event["delivery_mode"] not in DELIVERY_MODES:
+        invalid.append("delivery_mode")
     return f"invalid or missing fields: {', '.join(invalid)}" if invalid else None
 
 
@@ -175,10 +246,12 @@ async def _supervise(
         cwd=os.path.expanduser("~"),
     )
     assert process.stdin and process.stdout and process.stderr
+    _record_runner_pid(process.pid)
     stderr_task = asyncio.create_task(_drain_stderr(process.stderr, api_key))
     actions: list[dict[str, Any]] = []
     terminal: dict[str, Any] | None = None
     ready = False
+    mode = str(request.get("mode") or DELIVERY_MODE_FOREGROUND)
 
     def protocol_failure(detail: str) -> dict[str, Any]:
         """A runner protocol violation, reported with the actions observed so far.
@@ -189,7 +262,7 @@ async def _supervise(
         means a new branch cannot word the subject differently or, worse, omit
         ``actions`` and silently drop the action history from the result.
         """
-        return failure(f"Computer-use runner {detail}", actions=actions)
+        return failure(f"Computer-use runner {detail}", actions=actions, delivery_mode=mode)
 
     try:
         process.stdin.write(json.dumps(request, separators=(",", ":")).encode() + b"\n")
@@ -244,22 +317,25 @@ async def _supervise(
             return failure(
                 f"{terminal.get('code', 'RUNNER_ERROR')}: {terminal.get('message', 'Runner error')}",
                 actions=actions,
+                delivery_mode=mode,
             )
         terminal["actions"] = actions
         return terminal
     except asyncio.TimeoutError:
         await _stop_process_group(process)
-        return terminal_result("limit", "The absolute deadline expired.", actions=actions)
+        return terminal_result("limit", "The absolute deadline expired.", actions=actions, delivery_mode=mode)
     except asyncio.CancelledError:
         await _stop_process_group(process)
         return terminal_result(
             "aborted",
             "Computer-use task was cancelled; the runner process group was terminated.",
             actions=actions,
+            delivery_mode=mode,
         )
     finally:
         if process.returncode is None:
             await _stop_process_group(process)
+        _clear_runner_pid(process.pid)
         if not stderr_task.done():
             stderr_task.cancel()
         await asyncio.gather(stderr_task, return_exceptions=True)
@@ -311,6 +387,8 @@ async def run_task(
     api_key: str,
     api_base_url: str,
     platform_url: str | None = None,
+    mode: str = DELIVERY_MODE_FOREGROUND,
+    allow_foreground_fallback: bool = False,
     lock: DesktopLock | None = None,
     on_event: EventCallback | None = None,
 ) -> dict[str, Any]:
@@ -326,11 +404,13 @@ async def run_task(
                 "start_url": start_url,
                 "deadline_ms": deadline_ms,
                 "max_steps": max_steps,
+                "mode": mode,
+                "allow_foreground_fallback": allow_foreground_fallback,
                 "model": MODEL,
                 "api_base_url": api_base_url,
             }
             if find_cua_driver() is None:  # Kept defensive; preflight already checked it.
-                return failure("cua-driver not found. Run: yutori-mcp computer-use setup")
+                return failure("cua-driver not found. Run: yutori-mcp computer-use setup", delivery_mode=mode)
             result = await _supervise(
                 command=python_runner_command(),
                 request=request,
@@ -340,4 +420,4 @@ async def run_task(
             )
             return attach_run_link(result, platform_url)
     except (ComputerUseBusyError, RuntimeError, OSError, ValueError) as error:
-        return failure(str(error))
+        return failure(str(error), delivery_mode=mode)

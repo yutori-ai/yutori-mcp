@@ -1,4 +1,4 @@
-"""MCP-owned target-app launch and fronting policy."""
+"""MCP-owned target-app launch policy: front the app for foreground runs, reveal it quietly for background ones."""
 
 from __future__ import annotations
 
@@ -16,6 +16,11 @@ from yutori.navigator.macos.transport import (
 _BUNDLE_ID_PATTERN = re.compile(r"^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
 _APP_BUNDLE_IDS = {"finder": "com.apple.finder"}
 _FRONTING_SETTLE_MS = 800
+# A freshly unhidden window needs a moment before its first capture; a cold launch may
+# take a few polls before it has any window at all.
+_BACKGROUND_SETTLE_MS = 300
+_WINDOW_POLL_MS = 250
+_WINDOW_POLL_ATTEMPTS = 12
 
 
 def structured_content(result: dict[str, Any]) -> dict[str, Any]:
@@ -43,20 +48,32 @@ def _windows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return windows
 
 
+def _area(window: dict[str, Any]) -> float:
+    return float(window["bounds"]["width"]) * float(window["bounds"]["height"])
+
+
 def pick_best_window(windows: list[dict[str, Any]], min_edge_points: float = 100) -> dict[str, Any] | None:
-    """Prefer a visible current-Space window, excluding helper strips."""
+    """Prefer the frontmost visible current-Space content window, excluding helper strips.
+
+    Content windows (both edges at least ``min_edge_points``) that are off screen or hidden
+    still beat helper strips: a background launch leaves every window off screen, and a
+    menu-bar strip can out-area the app's real window.
+    """
     if not windows:
         return None
+    content = [
+        window for window in windows if min(window["bounds"]["width"], window["bounds"]["height"]) >= min_edge_points
+    ]
     visible = [
         window
-        for window in windows
-        if window.get("is_on_screen") is not False
-        and window.get("on_current_space") is not False
-        and min(window["bounds"]["width"], window["bounds"]["height"]) >= min_edge_points
+        for window in content
+        if window.get("is_on_screen") is not False and window.get("on_current_space") is not False
     ]
-    if visible:
-        return max(visible, key=lambda window: window.get("z_index") or 0)
-    return max(windows, key=lambda window: window["bounds"]["width"] * window["bounds"]["height"])
+    on_space = [window for window in content if window.get("on_current_space") is not False]
+    for candidates in (visible, on_space, content):
+        if candidates:
+            return max(candidates, key=lambda window: (window.get("z_index") or 0, _area(window)))
+    return max(windows, key=_area)
 
 
 def _is_missing_app(error: CuaDriverToolError) -> bool:
@@ -81,8 +98,24 @@ async def _running_app(computer: MacOSComputer, requested: str) -> dict[str, Any
     return _find_running_app(structured_content(result), requested)
 
 
-async def prepare_app(computer: MacOSComputer, app: str, start_url: str | None) -> dict[str, Any]:
-    """Launch and best-effort front one allowed target application."""
+async def _await_window(computer: MacOSComputer, pid: int, app: str) -> dict[str, Any]:
+    for _ in range(_WINDOW_POLL_ATTEMPTS):
+        window = pick_best_window(_windows(await computer.list_windows(pid)))
+        if window is not None:
+            return window
+        await computer.wait(_WINDOW_POLL_MS)
+    raise RuntimeError(f"{app!r} is running (pid {pid}) but showed no window to target in background mode")
+
+
+async def prepare_app(
+    computer: MacOSComputer, app: str, start_url: str | None, *, front: bool = True
+) -> dict[str, Any]:
+    """Launch one allowed target application and make it drivable.
+
+    ``front=True`` (foreground runs) best-effort fronts it. ``front=False`` (background runs)
+    never steals focus: ``launch_app`` leaves the app hidden, so it is unhidden behind the
+    user's windows and the window to drive is resolved and returned as ``window_id``.
+    """
     urls = [start_url] if start_url else None
     bundle_id = app if _BUNDLE_ID_PATTERN.match(app) else _APP_BUNDLE_IDS.get(app.casefold())
     launch_error: CuaDriverToolError | None = None
@@ -112,14 +145,27 @@ async def prepare_app(computer: MacOSComputer, app: str, start_url: str | None) 
         pid = running["pid"]
 
     window = pick_best_window(_windows(payload))
-    try:
-        await computer.bring_to_front(pid, window.get("window_id") if window else None)
-    except CuaDriverUncertainActionError:
-        pass
-    except CuaDriverToolError:
+    if front:
+        try:
+            await computer.bring_to_front(pid, window.get("window_id") if window else None)
+        except CuaDriverUncertainActionError:
+            pass
+        except CuaDriverToolError:
+            with suppress(CuaDriverError):
+                await computer.bring_to_front(pid)
+        except CuaDriverError:
+            pass
+        await computer.wait(_FRONTING_SETTLE_MS)
+    else:
+        # Unhiding is best-effort just like foreground fronting: the window may
+        # already be usable, and window discovery below is the authoritative gate.
         with suppress(CuaDriverError):
-            await computer.bring_to_front(pid)
-    except CuaDriverError:
-        pass
-    await computer.wait(_FRONTING_SETTLE_MS)
-    return {"name": str(payload.get("name") or app), "pid": pid}
+            await computer.unhide_app(pid)
+        if window is None:
+            window = await _await_window(computer, pid, app)
+        await computer.wait(_BACKGROUND_SETTLE_MS)
+    return {
+        "name": str(payload.get("name") or app),
+        "pid": pid,
+        "window_id": window.get("window_id") if window else None,
+    }

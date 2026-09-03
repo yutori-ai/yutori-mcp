@@ -14,10 +14,17 @@ from urllib.request import urlopen
 from ..schemas import (
     COMPUTER_USE_DEFAULT_MAX_STEPS,
     COMPUTER_USE_DEFAULT_MINUTES,
+    COMPUTER_USE_DEFAULT_MODE,
     COMPUTER_USE_MAX_MINUTES,
     ComputerUseTaskInput,
 )
-from .constants import DRIVER_INSTALLER_SHA256, DRIVER_VERSION
+from .constants import (
+    DELIVERY_MODE_BACKGROUND,
+    DELIVERY_MODE_FOREGROUND,
+    DELIVERY_MODES,
+    DRIVER_INSTALLER_SHA256,
+    DRIVER_VERSION,
+)
 from .lock import ComputerUseBusyError, DesktopLock
 from .preflight import (
     blocker_message,
@@ -29,7 +36,7 @@ from .preflight import (
     run_checks,
 )
 from .result import format_action_line, format_result
-from .supervisor import run_task
+from .supervisor import run_task, stop_active_run
 
 
 def _doctor() -> int:
@@ -188,16 +195,31 @@ async def _smoke_live() -> int:
     return _report(result)
 
 
-async def _print_event(event: dict) -> None:
-    if event.get("type") == "ready":
-        print("runner ready; driving the desktop")
-        return
-    line = format_action_line(event)
-    if event.get("elapsed_ms") is not None:
-        line += f" [at {event['elapsed_ms']} ms]"
-    if event.get("command"):
-        line += f"\n  $ {event['command']}"
-    print(line, flush=True)
+def hands_off_notice(mode: str) -> str:
+    """What the operator must (not) do with the Mac while a run of ``mode`` is in progress."""
+    if mode == DELIVERY_MODE_BACKGROUND:
+        return "The model drives only the target app's window in the background; keep working, but leave that window alone."
+    return "The model takes over this Mac's desktop now; do not touch it during the run."
+
+
+def _event_printer(mode: str, app: str | None):
+    surface = f"the {app} window in the background" if mode == DELIVERY_MODE_BACKGROUND else "the desktop"
+
+    async def print_event(event: dict) -> None:
+        if event.get("type") == "ready":
+            print(f"runner ready; driving {surface}")
+            return
+        line = format_action_line(event)
+        if event.get("elapsed_ms") is not None:
+            line += f" [at {event['elapsed_ms']} ms]"
+        if event.get("command"):
+            line += f"\n  $ {event['command']}"
+        print(line, flush=True)
+
+    return print_event
+
+
+_print_event = _event_printer(DELIVERY_MODE_FOREGROUND, None)
 
 
 async def _run_custom(args: argparse.Namespace) -> int:
@@ -213,17 +235,19 @@ async def _run_custom(args: argparse.Namespace) -> int:
         start_url=args.start_url,
         minutes=args.minutes,
         max_steps=args.max_steps,
+        mode=args.mode,
+        allow_foreground_fallback=args.allow_foreground_fallback,
     )
     if _blocked():
         return 1
-    print("The model takes over this Mac's desktop now; do not touch it during the run.")
+    print(hands_off_notice(params.mode))
     api_key, api_base_url, platform_url = resolve_run_credentials_and_platform_url()
     result = await run_task(
         **params.model_dump(),
         api_key=api_key,
         api_base_url=api_base_url,
         platform_url=platform_url,
-        on_event=_print_event,
+        on_event=_event_printer(params.mode, params.app),
     )
     return _report(result)
 
@@ -251,7 +275,8 @@ def register_parser(
     commands.add_parser("setup", help="Install and configure the pinned CuaDriver")
     commands.add_parser("doctor", help="Run all computer-use readiness checks")
     commands.add_parser("smoke", help="Run Calculator mechanical and live checks")
-    run_parser = commands.add_parser("run", help="Run one custom task on the visible desktop")
+    commands.add_parser("stop", help="Stop the active computer-use run (the local stop for background runs)")
+    run_parser = commands.add_parser("run", help="Run one custom task on the visible desktop or in one app window")
     run_parser.add_argument("task", help="Task for the model to perform")
     run_parser.add_argument("--app", default=None, help="Application to target")
     run_parser.add_argument("--start-url", dest="start_url", default=None, help="URL to open in the app")
@@ -268,16 +293,31 @@ def register_parser(
         default=COMPUTER_USE_DEFAULT_MAX_STEPS,
         help="Maximum actions",
     )
+    run_parser.add_argument(
+        "--mode",
+        choices=DELIVERY_MODES,
+        default=COMPUTER_USE_DEFAULT_MODE,
+        help="foreground drives the visible desktop; background drives only --app's window without taking focus",
+    )
+    run_parser.add_argument(
+        "--allow-foreground-fallback",
+        dest="allow_foreground_fallback",
+        action="store_true",
+        help="Background only: retry an action that did not land with the window fronted briefly",
+    )
 
 
 def dispatch(command: str, args: argparse.Namespace | None = None) -> int:
-    if command not in {"setup", "doctor", "smoke", "run"}:
+    if command not in {"setup", "doctor", "smoke", "run", "stop"}:
         raise ValueError(f"Unknown computer-use command: {command}")
     try:
         if command == "setup":
             return _setup()
         if command == "doctor":
             return _doctor()
+        if command == "stop":
+            print(stop_active_run())
+            return 0
         if command == "run":
             if args is None:
                 raise ValueError("computer-use run needs its parsed arguments")
