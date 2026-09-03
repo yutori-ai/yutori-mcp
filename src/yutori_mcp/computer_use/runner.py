@@ -513,7 +513,7 @@ def _timings_payload(
 
 
 def _supports_background_mode() -> bool:
-    """Whether the installed SDK's MacOSComputer has window scope (yutori >= 0.9.10)."""
+    """Whether the installed SDK's MacOSComputer has window scope (yutori >= 0.9.11)."""
     try:
         return "scope" in inspect.signature(MacOSComputer.__init__).parameters
     except (TypeError, ValueError):
@@ -547,7 +547,7 @@ def _computer_kwargs(
 
 async def _bind_window_target(computer: MacOSComputer, target: dict[str, Any]) -> None:
     """Point a window-scope session at the window prepare_app resolved."""
-    from yutori.navigator.macos import MacOSWindowTarget  # window scope: yutori >= 0.9.10
+    from yutori.navigator.macos import MacOSWindowTarget  # window scope: yutori >= 0.9.11
 
     window_id = target.get("window_id")
     if not isinstance(window_id, int):
