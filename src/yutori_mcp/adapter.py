@@ -102,6 +102,18 @@ def resolve_run_credentials(environment: str | None = None) -> tuple[str | None,
     return resolve_api_key_for_environment(name), resolve_base_url(name)
 
 
+def resolve_run_credentials_and_platform_url(environment: str | None = None) -> tuple[str | None, str, str]:
+    """The (api_key, base_url, platform_url) triple a launched computer-use run needs.
+
+    Extends resolve_run_credentials() with the platform URL every run result now carries
+    as run_url, resolved from the same environment so a run's credentials and the link to
+    its own platform chat page can never come from two different environments.
+    """
+    name = environment or current_environment()
+    api_key, base_url = resolve_run_credentials(name)
+    return api_key, base_url, resolve_platform_url(name)
+
+
 class YutoriAPIError(Exception):
     """Raised when the Yutori API returns an error (MCP-facing wrapper)."""
 
