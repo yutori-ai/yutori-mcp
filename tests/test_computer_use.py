@@ -736,9 +736,9 @@ async def test_server_holds_desktop_lock_across_preflight_and_runner(monkeypatch
 
 def test_runtime_constants_select_latest_python_surface():
     assert TOOL_SET == "computer_use_tools-20260815"
-    assert SDK_VERSION == "0.9.11"
+    assert SDK_VERSION == "0.9.12"
     assert all(len(digest) == 64 for digest in (SDK_ARTIFACT_SHA256, SDK_INSTALLATION_SHA256, SDK_PROVENANCE_SHA256))
-    assert '"yutori==0.9.11"' in Path(__file__).parents[1].joinpath("pyproject.toml").read_text()
+    assert '"yutori==0.9.12"' in Path(__file__).parents[1].joinpath("pyproject.toml").read_text()
 
 
 def test_installed_sdk_matches_the_published_artifact():
@@ -2263,8 +2263,8 @@ def test_format_result_reports_skipped_retries_only_when_present():
     base = {"outcome": "completed", "delivery_mode": "background", "final_text": "done"}
     assert "Delivery: 0 foreground escalation(s), 0 background refusal(s)" in format_result(base)
     assert "skipped" not in format_result(base)
-    assert "Live view" not in format_result(base)
-    assert "Live view: 7 frame(s) streamed to the menu bar item" in format_result({**base, "preview_frames": 7})
+    assert "Activity window" not in format_result(base)
+    assert "Activity window: 7 frame(s) streamed while it was open" in format_result({**base, "preview_frames": 7})
     with_skips = format_result({**base, "fallback_skips": 2})
     assert "Delivery: 0 foreground escalation(s), 0 background refusal(s), 2 retry(ies) skipped after the window changed" in with_skips
 

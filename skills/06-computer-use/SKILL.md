@@ -97,8 +97,8 @@ uvx yutori-mcp computer-use stop
 
 ## Safety
 
-- In foreground mode, tell the user not to touch the Mac while the task runs.
-- In background mode, tell the user they can keep working but should leave the target app's window alone, and that only that window is captured. A menu bar item shows the latest frame and offers Stop (also ⇧⌘Esc). Keyboard input may not reach a minimized window.
+- In foreground mode, tell the user not to touch the Mac while the task runs; the same Show activity window is available from the menu bar item if they want to read what the agent is doing.
+- In background mode, tell the user they can keep working but should leave the target app's window alone, and that only that window is captured. A menu bar item shows the latest frame, offers Show activity (a window with the run's conversation with the model: its thinking, every action, and every shell command), and offers Stop (also ⇧⌘Esc). Keyboard input may not reach a minimized window.
 - Use `mode: "background"` only with `app`; use `allow_foreground_fallback` only with background mode, and warn that it may briefly flash the target window.
 - Background keyboard delivery is app-dependent: some apps accept background clicks but not typed keys (Calculator, for one), and the agent then reports the refusal instead of typing. For typing-heavy background tasks, suggest `allow_foreground_fallback`.
 - Use `app` for single-app tasks so the runner starts from the intended context.
