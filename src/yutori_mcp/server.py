@@ -601,11 +601,11 @@ def _progress_reporter(
     not an upper bound for it — a fabricated total would render a bar that
     overshoots. The human-readable message carries the step budget instead.
     """
-    from .computer_use.result import format_action_line
+    from .computer_use.result import describe_delivery_surface, format_action_line
 
     async def on_event(event: dict[str, Any]) -> None:
         if event.get("type") == "ready":
-            surface = f"the {app} window in the background" if mode == "background" else "the desktop"
+            surface = describe_delivery_surface(mode, app)
             message = f"Computer-use runner ready; driving {surface} (up to {max_steps} steps)."
             await ctx.report_progress(progress=0, message=message)
             await ctx.info(message)
