@@ -161,6 +161,7 @@ async def _invoke(tool_name: str, args: dict[str, Any]) -> str:
     handler = _TOOL_HANDLERS[tool_name]
     try:
         if tool_name == "run_computer_use_task":
+            from .computer_use.constants import DELIVERY_MODES
             from .computer_use.result import failure, format_result
 
             try:
@@ -173,7 +174,11 @@ async def _invoke(tool_name: str, args: dict[str, Any]) -> str:
                 logger.error(
                     "Computer-use task failed before the runner returned a result"
                 )
-                result = failure(str(error))
+                requested_mode = args.get("mode")
+                delivery_mode = (
+                    str(requested_mode) if requested_mode in DELIVERY_MODES else COMPUTER_USE_DEFAULT_MODE
+                )
+                result = failure(str(error), delivery_mode=delivery_mode)
             return format_result(result)
         client = get_adapter()
         result, context = await handler(client, args)
@@ -634,7 +639,7 @@ async def _handle_computer_use(
         with lock:
             blocker = first_blocker()
             if blocker is not None:
-                return failure(blocker_message(blocker)), {}
+                return failure(blocker_message(blocker), delivery_mode=params.mode), {}
             api_key, api_base_url, platform_url = resolve_run_credentials_and_platform_url()
             return (
                 await run_task(
@@ -652,7 +657,7 @@ async def _handle_computer_use(
                 {},
             )
     except ComputerUseBusyError as error:
-        return failure(str(error)), {}
+        return failure(str(error), delivery_mode=params.mode), {}
 
 
 # Tool-name -> handler registry, consulted by _invoke() above. Mirrors

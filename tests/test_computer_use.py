@@ -1354,6 +1354,27 @@ class _CollectStream:
         pass
 
 
+def test_runner_main_unexpected_failure_preserves_the_requested_background_mode(monkeypatch):
+    stream = _CollectStream()
+
+    async def fail(_request, _emitter, _api_key):
+        raise RuntimeError("unexpected runner failure")
+
+    monkeypatch.setattr(runner_module, "_take_api_key", lambda: "yt-key")
+    monkeypatch.setattr(runner_module, "_claim_protocol_stream", lambda: stream)
+    monkeypatch.setattr(
+        runner_module,
+        "_read_request_line",
+        lambda: json.dumps(_valid_request(app="Notes", mode="background")),
+    )
+    monkeypatch.setattr(runner_module, "_run_until_terminated", fail)
+
+    assert runner_module.main() == 1
+    terminal = json.loads(stream.lines[-1])
+    assert terminal["outcome"] == "failed"
+    assert terminal["delivery_mode"] == DELIVERY_MODE_BACKGROUND
+
+
 async def test_action_events_sanitize_commands_and_never_include_output(monkeypatch):
     secret = "private-value-1234"
     monkeypatch.setenv("SERVICE_API_KEY", secret)
@@ -1775,6 +1796,40 @@ async def test_server_forwards_mode_and_fallback_to_the_runner(monkeypatch, tmp_
     assert forwarded["platform_url"] == "https://platform.yutori.com"
 
 
+async def test_server_early_failures_preserve_the_requested_background_mode(monkeypatch, tmp_path):
+    from yutori_mcp import server
+    from yutori_mcp.computer_use import lock as lock_module
+
+    lock_path = tmp_path / "desktop.lock"
+    monkeypatch.setattr(lock_module, "DesktopLock", lambda: DesktopLock(lock_path))
+    blocker = preflight.CheckResult("driver", False, "missing", "run setup")
+    monkeypatch.setattr(preflight, "first_blocker", lambda: blocker)
+
+    arguments = {"task": "add a note", "app": "Notes", "mode": "background"}
+    blocked, _ = await server._handle_computer_use(None, arguments)
+    assert blocked["delivery_mode"] == DELIVERY_MODE_BACKGROUND
+
+    monkeypatch.setattr(preflight, "first_blocker", lambda: pytest.fail("busy run must not reach preflight"))
+    with DesktopLock(lock_path):
+        busy, _ = await server._handle_computer_use(None, arguments)
+    assert busy["delivery_mode"] == DELIVERY_MODE_BACKGROUND
+
+
+async def test_invoke_unexpected_failure_preserves_the_requested_background_mode(monkeypatch):
+    from yutori_mcp import server
+
+    async def fail_before_result(_client, _arguments):
+        raise RuntimeError("unexpected host failure")
+
+    monkeypatch.setitem(server._TOOL_HANDLERS, "run_computer_use_task", fail_before_result)
+    text = await server._invoke(
+        "run_computer_use_task",
+        {"task": "add a note", "app": "Notes", "mode": "background"},
+    )
+    assert "Outcome: failed" in text
+    assert "Delivery mode: background" in text
+
+
 def test_cli_run_parser_accepts_mode_and_fallback_flags():
     from yutori_mcp.computer_use import cli
 
@@ -2128,6 +2183,21 @@ async def test_prepare_app_background_polls_for_a_window_after_a_cold_launch():
     assert target["window_id"] == 9
     assert computer.list_windows.await_args_list == [((42,),), ((42,),)]
     assert [call.args for call in computer.wait.await_args_list] == [(250,), (300,)]
+
+
+async def test_prepare_app_background_still_resolves_a_window_when_unhide_fails():
+    computer = SimpleNamespace(
+        launch_app=AsyncMock(return_value={"pid": 42, "name": "Notes", "windows": []}),
+        unhide_app=AsyncMock(side_effect=CuaDriverToolError("unhide failed")),
+        list_windows=AsyncMock(return_value={"windows": [_background_window(9)]}),
+        wait=AsyncMock(),
+    )
+
+    target = await prepare_app(computer, "Notes", None, front=False)
+
+    assert target == {"name": "Notes", "pid": 42, "window_id": 9}
+    computer.unhide_app.assert_awaited_once_with(42)
+    computer.list_windows.assert_awaited_once_with(42)
 
 
 async def test_prepare_app_background_gives_up_when_no_window_appears(monkeypatch):

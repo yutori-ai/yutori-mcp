@@ -862,7 +862,7 @@ def main() -> int:
         message = _redacted_error_text(error, api_key)
         emitter.emit(
             {
-                **_result_event("failed", message),
+                **_result_event("failed", message, request["mode"]),
                 "steps": 0,
             }
         )

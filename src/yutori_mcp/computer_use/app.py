@@ -157,7 +157,10 @@ async def prepare_app(
             pass
         await computer.wait(_FRONTING_SETTLE_MS)
     else:
-        await computer.unhide_app(pid)
+        # Unhiding is best-effort just like foreground fronting: the window may
+        # already be usable, and window discovery below is the authoritative gate.
+        with suppress(CuaDriverError):
+            await computer.unhide_app(pid)
         if window is None:
             window = await _await_window(computer, pid, app)
         await computer.wait(_BACKGROUND_SETTLE_MS)
