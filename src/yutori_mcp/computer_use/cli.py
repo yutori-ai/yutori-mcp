@@ -35,7 +35,7 @@ from .preflight import (
     first_blocker,
     run_checks,
 )
-from .result import format_action_line, format_result
+from .result import describe_delivery_surface, format_action_line, format_result
 from .supervisor import run_task, stop_active_run
 
 
@@ -203,7 +203,7 @@ def hands_off_notice(mode: str) -> str:
 
 
 def _event_printer(mode: str, app: str | None):
-    surface = f"the {app} window in the background" if mode == DELIVERY_MODE_BACKGROUND else "the desktop"
+    surface = describe_delivery_surface(mode, app)
 
     async def print_event(event: dict) -> None:
         if event.get("type") == "ready":

@@ -73,6 +73,16 @@ def format_perf(result: dict[str, Any]) -> list[str]:
     return lines
 
 
+def describe_delivery_surface(mode: str, app: str | None) -> str:
+    """What a "ready" event is driving, phrased for the CLI and MCP progress renderers.
+
+    Both callers announce this identically ("driving the desktop" vs. "driving the {app}
+    window in the background") when a run starts, so the phrase lives here once rather than
+    as two independently-typed string literals that could drift.
+    """
+    return f"the {app} window in the background" if mode == DELIVERY_MODE_BACKGROUND else "the desktop"
+
+
 def format_action_line(event: dict[str, Any], *, index_default: Any = None) -> str:
     """The "action #N: tool -> status" prefix shared by the CLI and MCP progress renderers.
 
