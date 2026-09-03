@@ -17,6 +17,7 @@ from yutori_mcp.adapter import (
     resolve_base_url,
     resolve_platform_url,
     resolve_run_credentials,
+    resolve_run_credentials_and_platform_url,
 )
 from yutori_mcp.server import _format_api_error
 
@@ -282,6 +283,35 @@ class TestResolveRunCredentials:
         monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
         with patch("yutori_mcp.adapter.resolve_api_key_for_environment", return_value="yt-prod-key") as resolve_key:
             assert resolve_run_credentials("prod") == ("yt-prod-key", ENVIRONMENT_BASE_URLS["prod"])
+        resolve_key.assert_called_once_with("prod")
+
+
+# ---------------------------------------------------------------------------
+# resolve_run_credentials_and_platform_url
+# ---------------------------------------------------------------------------
+
+
+class TestResolveRunCredentialsAndPlatformUrl:
+    """The (api_key, base_url, platform_url) triple a launched run needs to link itself."""
+
+    def test_extends_run_credentials_with_the_matching_platform(self, monkeypatch):
+        monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
+        with patch("yutori_mcp.adapter.resolve_api_key_for_environment", return_value="yt-dev-key") as resolve_key:
+            assert resolve_run_credentials_and_platform_url() == (
+                "yt-dev-key",
+                ENVIRONMENT_BASE_URLS["dev"],
+                ENVIRONMENT_PLATFORM_URLS["dev"],
+            )
+        resolve_key.assert_called_once_with("dev")
+
+    def test_explicit_environment_overrides_the_ambient_one(self, monkeypatch):
+        monkeypatch.setenv(ENV_VAR_ENVIRONMENT, "dev")
+        with patch("yutori_mcp.adapter.resolve_api_key_for_environment", return_value="yt-prod-key") as resolve_key:
+            assert resolve_run_credentials_and_platform_url("prod") == (
+                "yt-prod-key",
+                ENVIRONMENT_BASE_URLS["prod"],
+                ENVIRONMENT_PLATFORM_URLS["prod"],
+            )
         resolve_key.assert_called_once_with("prod")
 
 
