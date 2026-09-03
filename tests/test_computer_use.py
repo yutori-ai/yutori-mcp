@@ -1208,7 +1208,7 @@ async def test_smoke_allows_two_minutes_for_live_check(monkeypatch, tmp_path):
     run = AsyncMock(return_value={"outcome": "completed"})
     _patch_smoke_preflight(monkeypatch, cli, tmp_path / "desktop.lock")
     monkeypatch.setattr(cli, "_mechanical_calculator_check", AsyncMock(return_value="42"))
-    monkeypatch.setattr(cli, "run_task", run)
+    monkeypatch.setattr(supervisor, "run_task", run)
     monkeypatch.setattr(cli, "format_result", lambda _result: "complete")
     monkeypatch.setattr(
         "yutori_mcp.adapter.resolve_run_credentials_and_platform_url",
@@ -2099,7 +2099,7 @@ async def test_cli_run_forwards_the_mode_and_prints_the_matching_notice(monkeypa
 
     run = AsyncMock(return_value={"outcome": "completed", "delivery_mode": "background", "final_text": "done"})
     monkeypatch.setattr(cli, "_blocked", lambda: False)
-    monkeypatch.setattr(cli, "run_task", run)
+    monkeypatch.setattr(supervisor, "run_task", run)
     monkeypatch.setattr(
         "yutori_mcp.adapter.resolve_run_credentials_and_platform_url",
         lambda: ("k", "https://api.yutori.com/v1", "https://platform.yutori.com"),

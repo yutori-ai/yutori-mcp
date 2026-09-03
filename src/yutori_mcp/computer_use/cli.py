@@ -36,7 +36,7 @@ from .preflight import (
     run_checks,
 )
 from .result import describe_delivery_surface, format_action_line, format_result
-from .supervisor import run_task, stop_active_run
+from .supervisor import run_task_with_resolved_credentials, stop_active_run
 
 
 def _doctor() -> int:
@@ -158,8 +158,6 @@ async def _mechanical_calculator_check() -> str:
 
 
 async def _smoke_live() -> int:
-    from ..adapter import resolve_run_credentials_and_platform_url
-
     try:
         with DesktopLock() as lock:
             if _blocked():
@@ -177,16 +175,12 @@ async def _smoke_live() -> int:
             if copied != "42":
                 print("Mechanical Calculator check failed through CuaDriver: clipboard result did not match '42'.")
                 return 1
-            api_key, api_base_url, platform_url = resolve_run_credentials_and_platform_url()
-            result = await run_task(
+            result = await run_task_with_resolved_credentials(
                 task="In Calculator, clear the display, compute 9 * 9, and report the result.",
                 app="Calculator",
                 start_url=None,
                 minutes=2,
                 max_steps=10,
-                api_key=api_key,
-                api_base_url=api_base_url,
-                platform_url=platform_url,
                 lock=lock,
             )
     except ComputerUseBusyError as error:
@@ -223,8 +217,6 @@ _print_event = _event_printer(DELIVERY_MODE_FOREGROUND, None)
 
 
 async def _run_custom(args: argparse.Namespace) -> int:
-    from ..adapter import resolve_run_credentials_and_platform_url
-
     # Reuses the MCP tool's input schema so the CLI enforces the same bounds
     # (minutes 1-60, positive steps, start_url requires app) with the same
     # messages; the resulting ValidationError is a ValueError, so dispatch's
@@ -241,12 +233,8 @@ async def _run_custom(args: argparse.Namespace) -> int:
     if _blocked():
         return 1
     print(hands_off_notice(params.mode))
-    api_key, api_base_url, platform_url = resolve_run_credentials_and_platform_url()
-    result = await run_task(
+    result = await run_task_with_resolved_credentials(
         **params.model_dump(),
-        api_key=api_key,
-        api_base_url=api_base_url,
-        platform_url=platform_url,
         on_event=_event_printer(params.mode, params.app),
     )
     return _report(result)

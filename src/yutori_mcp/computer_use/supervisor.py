@@ -479,3 +479,16 @@ async def run_task(
             return attach_run_link(result, platform_url)
     except (ComputerUseBusyError, RuntimeError, OSError, ValueError) as error:
         return failure(str(error), delivery_mode=mode)
+
+
+async def run_task_with_resolved_credentials(**kwargs: Any) -> dict[str, Any]:
+    """run_task(), resolving api_key/api_base_url/platform_url from the environment first.
+
+    Consolidates the "resolve_run_credentials_and_platform_url() then forward as kwargs"
+    boilerplate duplicated at the three places a computer-use run is launched: the MCP tool
+    handler (server.py) and both CLI entry points (computer_use/cli.py).
+    """
+    from ..adapter import resolve_run_credentials_and_platform_url
+
+    api_key, api_base_url, platform_url = resolve_run_credentials_and_platform_url()
+    return await run_task(api_key=api_key, api_base_url=api_base_url, platform_url=platform_url, **kwargs)
