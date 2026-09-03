@@ -44,22 +44,31 @@ def current_environment() -> str:
     return os.environ.get(ENV_VAR_ENVIRONMENT) or DEFAULT_ENVIRONMENT
 
 
+def _resolve_environment_url(mapping: dict[str, str], environment: str | None) -> str:
+    """Look up ``environment`` (or the ambient one) in ``mapping``.
+
+    Shared resolution order for every "environment name -> URL" mapping in this
+    module: explicit ``environment`` argument, then the ``YUTORI_ENV`` environment
+    variable, then prod. Raises ``ValueError`` for names not in ``mapping`` so a
+    typo fails loudly instead of silently targeting production.
+    """
+    name = environment or current_environment()
+    try:
+        return mapping[name]
+    except KeyError:
+        valid = ", ".join(sorted(mapping))
+        raise ValueError(
+            f"Unknown Yutori environment {name!r}; expected one of: {valid}"
+        ) from None
+
+
 def resolve_base_url(environment: str | None = None) -> str:
     """Return the API base URL for an environment name.
 
     Resolution order: explicit ``environment`` argument, then the
-    ``YUTORI_ENV`` environment variable, then prod. Raises ``ValueError``
-    for names not in ENVIRONMENT_BASE_URLS so a typo fails loudly instead
-    of silently targeting production.
+    ``YUTORI_ENV`` environment variable, then prod.
     """
-    name = environment or current_environment()
-    try:
-        return ENVIRONMENT_BASE_URLS[name]
-    except KeyError:
-        valid = ", ".join(sorted(ENVIRONMENT_BASE_URLS))
-        raise ValueError(
-            f"Unknown Yutori environment {name!r}; expected one of: {valid}"
-        ) from None
+    return _resolve_environment_url(ENVIRONMENT_BASE_URLS, environment)
 
 
 def resolve_platform_url(environment: str | None = None) -> str:
@@ -68,14 +77,7 @@ def resolve_platform_url(environment: str | None = None) -> str:
     Same resolution order as ``resolve_base_url`` so the run link a computer-use
     result carries always points at the platform that recorded the run.
     """
-    name = environment or current_environment()
-    try:
-        return ENVIRONMENT_PLATFORM_URLS[name]
-    except KeyError:
-        valid = ", ".join(sorted(ENVIRONMENT_PLATFORM_URLS))
-        raise ValueError(
-            f"Unknown Yutori environment {name!r}; expected one of: {valid}"
-        ) from None
+    return _resolve_environment_url(ENVIRONMENT_PLATFORM_URLS, environment)
 
 
 def is_scoped_environment(environment: str | None) -> bool:
