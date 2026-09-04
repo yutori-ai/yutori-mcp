@@ -759,14 +759,28 @@ def _run_task_kwargs(tmp_path, **overrides):
     return kwargs
 
 
-async def test_run_task_uses_only_python_runner_and_sdk_driver_discovery(tmp_path):
+@contextmanager
+def _patched_run_task_supervise(tmp_path, *, result=None):
+    """Patch driver discovery and `_supervise()` so `run_task()` sees a fake driver.
+
+    Shared by the tests below that call `run_task()` directly and need its two
+    module-level dependencies stubbed identically -- a driver file `find_cua_driver()`
+    can resolve, and `_supervise()` returning ``result`` (default: a bare completed
+    outcome) instead of actually spawning the runner subprocess. Yields the `_supervise`
+    AsyncMock so callers can inspect its `await_args`.
+    """
     driver = tmp_path / "cua-driver"
     driver.write_text("")
-    supervise = AsyncMock(return_value={"outcome": "completed"})
+    supervise = AsyncMock(return_value=result if result is not None else {"outcome": "completed"})
     with (
         patch.object(supervisor, "_supervise", supervise),
         patch.object(supervisor, "find_cua_driver", return_value=driver),
     ):
+        yield supervise
+
+
+async def test_run_task_uses_only_python_runner_and_sdk_driver_discovery(tmp_path):
+    with _patched_run_task_supervise(tmp_path) as supervise:
         result = await run_task(**_run_task_kwargs(tmp_path))
     assert result["outcome"] == "completed"
     assert supervise.await_args.kwargs["command"] == python_runner_command()
@@ -776,8 +790,6 @@ async def test_run_task_uses_only_python_runner_and_sdk_driver_discovery(tmp_pat
 
 
 async def test_run_task_links_the_run_to_the_platform_chat_page(tmp_path):
-    driver = tmp_path / "cua-driver"
-    driver.write_text("")
     action = {
         "index": 0,
         "tool": "screenshot",
@@ -789,10 +801,7 @@ async def test_run_task_links_the_run_to_the_platform_chat_page(tmp_path):
         "chat_id": "chat-1",
     }
     supervised = terminal_result("limit", "deadline", actions=[action])
-    with (
-        patch.object(supervisor, "_supervise", AsyncMock(return_value=supervised)),
-        patch.object(supervisor, "find_cua_driver", return_value=driver),
-    ):
+    with _patched_run_task_supervise(tmp_path, result=supervised):
         result = await run_task(**_run_task_kwargs(tmp_path, platform_url="https://platform.dev.yutori.com"))
     assert result["chat_id"] == "chat-1"
     assert result["run_url"] == "https://platform.dev.yutori.com/navigator/chats/chat-1"
@@ -2125,13 +2134,7 @@ async def test_cli_run_forwards_the_mode_and_prints_the_matching_notice(monkeypa
 
 
 async def test_run_task_request_carries_mode_and_fallback(tmp_path):
-    driver = tmp_path / "cua-driver"
-    driver.write_text("")
-    supervise = AsyncMock(return_value={"outcome": "completed"})
-    with (
-        patch.object(supervisor, "_supervise", supervise),
-        patch.object(supervisor, "find_cua_driver", return_value=driver),
-    ):
+    with _patched_run_task_supervise(tmp_path) as supervise:
         await run_task(**_run_task_kwargs(tmp_path, app="Notes", mode="background", allow_foreground_fallback=True))
     request = supervise.await_args.kwargs["request"]
     assert request["protocol_version"] == PROTOCOL_VERSION == 2
