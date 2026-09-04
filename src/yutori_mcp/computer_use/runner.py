@@ -240,6 +240,19 @@ def classify_result(outputs: list[dict[str, Any]] | None) -> str:
     return "confirmed"
 
 
+def _as_dict(response: Any) -> dict[str, Any] | None:
+    """Normalize an SDK response to a plain dict, or None if it isn't one.
+
+    SDK call sites hand back either a pydantic-like model (with a `model_dump()`
+    method) or an already-plain dict, depending on the client path exercised;
+    `ChatTracker.on_api_end` and `_completion_text` below both need "whichever
+    one this is, as a dict" before reading fields off it.
+    """
+    if hasattr(response, "model_dump"):
+        response = response.model_dump()
+    return response if isinstance(response, dict) else None
+
+
 def _status_for(raw_status: str) -> str:
     if raw_status == "confirmed":
         return "executed"
@@ -370,9 +383,8 @@ class ChatTracker:
     async def on_api_end(self, _kwargs: dict[str, Any], response: Any) -> None:
         if self.chat_id is not None:
             return
-        if hasattr(response, "model_dump"):
-            response = response.model_dump()
-        request_id = response.get("request_id") if isinstance(response, dict) else None
+        response = _as_dict(response)
+        request_id = response.get("request_id") if response is not None else None
         if isinstance(request_id, str) and request_id:
             self.chat_id = request_id
 
@@ -449,8 +461,8 @@ async def _collect_final_text(agent: Any, messages: Any) -> str | None:
 
 def _completion_text(response: Any) -> str | None:
     """Extract assistant text from a chat-completions response."""
-    response = response.model_dump() if hasattr(response, "model_dump") else response
-    if not isinstance(response, dict):
+    response = _as_dict(response)
+    if response is None:
         return None
     message = (response.get("choices") or [{}])[0].get("message") or {}
     if not isinstance(message, dict):
