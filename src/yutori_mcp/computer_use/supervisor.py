@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
@@ -38,6 +39,8 @@ logger = logging.getLogger(__name__)
 EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 EVENT_CALLBACK_TIMEOUT_SECONDS = 5.0
+EVENT_CALLBACK_FLUSH_SECONDS = 0.25
+EVENT_QUEUE_LIMIT = 32
 RUNNER_SHUTDOWN_GRACE_SECONDS = 5.0
 RUNNER_FRAME_LIMIT_BYTES = 8 * 1024 * 1024
 RUNNER_MODULE = "yutori_mcp.computer_use.runner"
@@ -126,6 +129,50 @@ async def _notify(on_event: EventCallback | None, event: dict[str, Any]) -> Even
     return on_event
 
 
+class _EventNotifier:
+    """Deliver presentation events without blocking the runner protocol reader.
+
+    The queue is deliberately bounded. If a host cannot keep up, stale progress
+    is discarded in favor of the latest state while stdout continues draining.
+    """
+
+    def __init__(self, callback: EventCallback) -> None:
+        self._callback: EventCallback | None = callback
+        self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=EVENT_QUEUE_LIMIT)
+        self._task = asyncio.create_task(self._run())
+        self._dropped = 0
+
+    def submit(self, event: dict[str, Any]) -> None:
+        if self._callback is None or self._task.done():
+            return
+        if self._queue.full():
+            with suppress(asyncio.QueueEmpty):
+                self._queue.get_nowait()
+                self._queue.task_done()
+                self._dropped += 1
+        self._queue.put_nowait(event)
+
+    async def _run(self) -> None:
+        while self._callback is not None:
+            event = await self._queue.get()
+            try:
+                self._callback = await _notify(self._callback, event)
+            finally:
+                self._queue.task_done()
+        while not self._queue.empty():
+            self._queue.get_nowait()
+            self._queue.task_done()
+
+    async def close(self) -> None:
+        if not self._task.done():
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self._queue.join(), EVENT_CALLBACK_FLUSH_SECONDS)
+            self._task.cancel()
+        await asyncio.gather(self._task, return_exceptions=True)
+        if self._dropped:
+            logger.debug("Dropped %d stale computer-use progress event(s)", self._dropped)
+
+
 def _child_environment(api_key: str) -> dict[str, str]:
     # PATH is required because the SDK resolves cua-driver by name and model-run
     # shell commands must retain the host's standard utilities.
@@ -173,10 +220,10 @@ def _remaining_seconds(deadline: float) -> float:
 
 
 async def _drain_stderr(stream: asyncio.StreamReader, secret: str) -> list[str]:
-    diagnostics: list[str] = []
+    diagnostics: deque[str] = deque(maxlen=20)
     while line := await stream.readline():
         diagnostics.append(redact(line.decode(errors="replace"), secret).rstrip())
-    return diagnostics[-20:]
+    return list(diagnostics)
 
 
 def _ready_error(event: dict[str, Any]) -> str | None:
@@ -249,8 +296,8 @@ async def _supervise(
         cwd=os.path.expanduser("~"),
     )
     assert process.stdin and process.stdout and process.stderr
-    _record_runner_pid(process.pid)
     stderr_task = asyncio.create_task(_drain_stderr(process.stderr, api_key))
+    notifier = _EventNotifier(on_event) if on_event is not None else None
     actions: list[dict[str, Any]] = []
     terminal: dict[str, Any] | None = None
     ready = False
@@ -295,14 +342,20 @@ async def _supervise(
                 if not ready:
                     return protocol_failure("emitted an action before ready.")
                 actions.append(event)
-                on_event = await _notify(on_event, event)
+                if notifier is not None:
+                    notifier.submit(event)
             elif event_type == "ready":
                 if ready:
                     return protocol_failure("emitted multiple ready events.")
                 if mismatch := _ready_error(event):
                     return protocol_failure(f"provenance mismatch: {mismatch}")
                 ready = True
-                on_event = await _notify(on_event, event)
+                # Only advertise a process that has emitted ready after installing
+                # its synchronous SIGTERM latch, so `stop` cannot hit the old
+                # startup window where default signal handling killed it abruptly.
+                _record_runner_pid(process.pid)
+                if notifier is not None:
+                    notifier.submit(event)
             elif event_type in {"result", "error"}:
                 if not ready:
                     return protocol_failure("terminated before ready.")
@@ -338,6 +391,8 @@ async def _supervise(
     finally:
         if process.returncode is None:
             await _stop_process_group(process)
+        if notifier is not None:
+            await notifier.close()
         _clear_runner_pid(process.pid)
         if not stderr_task.done():
             stderr_task.cancel()

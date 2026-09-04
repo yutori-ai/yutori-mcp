@@ -291,7 +291,7 @@ def register_parser(
         dest="max_steps",
         type=int,
         default=COMPUTER_USE_DEFAULT_MAX_STEPS,
-        help="Maximum actions",
+        help="Maximum model turns (one turn may contain multiple actions)",
     )
     run_parser.add_argument(
         "--mode",

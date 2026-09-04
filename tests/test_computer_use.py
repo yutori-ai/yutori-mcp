@@ -402,6 +402,48 @@ async def test_supervisor_forwards_ready_and_action_events():
     assert result["actions"] == [events[1]]
 
 
+async def test_supervisor_does_not_let_a_blocked_progress_callback_stall_protocol_drain(monkeypatch):
+    monkeypatch.setattr(supervisor, "EVENT_CALLBACK_FLUSH_SECONDS", 0.01)
+    started = asyncio.Event()
+
+    async def on_event(_event):
+        started.set()
+        await asyncio.Future()
+
+    action = {
+        "type": "action",
+        "index": 0,
+        "tool": "left_click",
+        "status": "executed",
+        "raw_status": "confirmed",
+        "delivery_mode": "foreground",
+        "route": "pixel",
+        "refusal_code": None,
+    }
+    process = _Process(
+        _stream(json.dumps(_ready_event()), json.dumps(action), json.dumps(_result_event())),
+        _stream(""),
+    )
+
+    result = await asyncio.wait_for(_run_supervised(process, on_event=on_event), 0.2)
+
+    assert started.is_set()
+    assert result["outcome"] == "completed"
+    assert result["actions"] == [action]
+
+
+async def test_supervisor_does_not_advertise_the_pid_before_ready(monkeypatch):
+    record = Mock()
+    monkeypatch.setattr(supervisor, "_record_runner_pid", record)
+    monkeypatch.setattr(supervisor, "_clear_runner_pid", Mock())
+    process = _Process(_stream("not-json"), _stream(""))
+
+    result = await _run_supervised(process)
+
+    assert result["outcome"] == "failed"
+    record.assert_not_called()
+
+
 async def test_supervisor_accepts_result_larger_than_default_stream_limit():
     final_text = "x" * 70_000
     stream = asyncio.StreamReader(limit=RUNNER_FRAME_LIMIT_BYTES)
@@ -539,6 +581,12 @@ def test_remaining_seconds_raises_once_deadline_has_passed():
         supervisor._remaining_seconds(time.monotonic() - 1)
 
 
+async def test_stderr_diagnostics_retain_only_the_latest_twenty_lines():
+    diagnostics = await supervisor._drain_stderr(_stream(*(f"line-{index}" for index in range(30))), "secret")
+
+    assert diagnostics == [f"line-{index}" for index in range(10, 30)]
+
+
 async def test_stop_process_group_escalates_to_kill():
     process = SimpleNamespace(pid=123, returncode=None, wait=AsyncMock(return_value=0))
 
@@ -633,6 +681,49 @@ async def test_runner_sigterm_path_cancels_the_sdk_session(monkeypatch):
     handlers[signal.SIGTERM]()
     assert await task == "aborted"
     assert cleaned.is_set()
+
+
+async def test_runner_honors_sigterm_received_before_the_async_loop(monkeypatch):
+    run = AsyncMock()
+    monkeypatch.setattr(runner_module, "run_request", run)
+    stream = _CollectStream()
+
+    outcome = await runner_module._run_until_terminated(
+        _valid_request(),
+        Emitter(stream),
+        "key",
+        lambda: True,
+    )
+
+    assert outcome == "aborted"
+    run.assert_not_awaited()
+    assert json.loads(stream.lines[-1]) == {
+        "type": "result",
+        "outcome": "aborted",
+        "delivery_mode": "foreground",
+        "final_text": "The computer-use run was stopped.",
+        "elapsed_ms": 0,
+        "steps": 0,
+    }
+
+
+async def test_runner_honors_sigterm_during_signal_handler_handoff(monkeypatch):
+    run = AsyncMock()
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(runner_module, "run_request", run)
+    monkeypatch.setattr(loop, "add_signal_handler", lambda _sig, callback: callback())
+    monkeypatch.setattr(loop, "remove_signal_handler", lambda _sig: True)
+    stream = _CollectStream()
+
+    outcome = await runner_module._run_until_terminated(
+        _valid_request(),
+        Emitter(stream),
+        "key",
+    )
+
+    assert outcome == "aborted"
+    run.assert_not_awaited()
+    assert json.loads(stream.lines[-1])["outcome"] == "aborted"
 
 
 def test_runner_removes_api_key_before_spawning_a_real_shell(monkeypatch):
@@ -1357,7 +1448,7 @@ class _CollectStream:
 def test_runner_main_unexpected_failure_preserves_the_requested_background_mode(monkeypatch):
     stream = _CollectStream()
 
-    async def fail(_request, _emitter, _api_key):
+    async def fail(_request, _emitter, _api_key, _termination_requested):
         raise RuntimeError("unexpected runner failure")
 
     monkeypatch.setattr(runner_module, "_take_api_key", lambda: "yt-key")
@@ -1430,6 +1521,13 @@ class _FakePresentation:
 
 class _FakeCancellation:
     cause = None
+    cancelled = False
+
+    async def wait(self):
+        await asyncio.Future()
+
+    def raise_if_cancelled(self):
+        return None
 
 
 class _FakeComputer:
@@ -1501,6 +1599,7 @@ class _FakeAgent:
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
+        self.computer = kwargs.get("computer")
         self.callbacks = kwargs.get("callbacks") or []
         self.timings = {"model_ms": 40}
         self.__class__.instances.append(self)
@@ -1607,20 +1706,105 @@ class _LimitAgent(_FakeAgent):
                     pass
         yield {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Partial"}]}]}
 
+    def completion_request(self, extra_messages):
+        self.summary_extra_messages = extra_messages
+        return {
+            "model": "n2",
+            "messages": [
+                {"role": "user", "content": "compacted trajectory checkpoint"},
+                *extra_messages,
+            ],
+        }
 
-async def test_run_request_gives_the_limit_summary_the_runs_system_prompt(monkeypatch):
+
+async def test_run_request_reuses_the_agent_trajectory_for_the_limit_summary(monkeypatch):
+    class SummaryCompletions:
+        def __init__(self):
+            self.requests = []
+
+        async def create(self, **kwargs):
+            self.requests.append(kwargs)
+            return {
+                "request_id": "req-summary",
+                "choices": [{"message": {"content": "Summary [DONE]"}}],
+            }
+
+    class SummaryClient:
+        instances = []
+
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.completions = SummaryCompletions()
+            self.chat = SimpleNamespace(completions=self.completions)
+            self.closed = False
+            self.__class__.instances.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            self.closed = True
+
     _FakeAgent.instances.clear()
     monkeypatch.setattr(runner_module, "MacOSComputer", _FakeComputer)
     monkeypatch.setattr(runner_module, "N2ComputerAgent", _LimitAgent)
+    monkeypatch.setattr(runner_module, "AsyncYutoriClient", SummaryClient)
     stream = _CollectStream()
     request = parse_request(_valid_request(deadline_ms=int((time.time() + 60) * 1000), max_steps=1))
 
     assert await runner_module.run_request(request, Emitter(stream), "yt-secret") == "limit"
 
-    run_agent, summary_agent = _FakeAgent.instances
-    assert summary_agent.kwargs["system_prompt"] == run_agent.kwargs["system_prompt"]
-    assert summary_agent.messages[0] == {"role": "user", "content": "open calculator"}
-    assert summary_agent.messages[-1] == {"role": "user", "content": runner_module.STOP_SUMMARY_PROMPT}
+    (run_agent,) = _FakeAgent.instances
+    (client,) = SummaryClient.instances
+    assert run_agent.kwargs["completions"] is client.completions
+    assert "api_key" not in run_agent.kwargs and "base_url" not in run_agent.kwargs
+    assert run_agent.summary_extra_messages == [
+        {"role": "user", "content": runner_module.STOP_SUMMARY_PROMPT}
+    ]
+    assert client.completions.requests[0]["messages"] == [
+        {"role": "user", "content": "compacted trajectory checkpoint"},
+        {"role": "user", "content": runner_module.STOP_SUMMARY_PROMPT},
+    ]
+    assert client.closed
+    result = json.loads(stream.lines[-1])
+    assert result["final_text"] == "Summary"
+    assert result["timings"]["model_calls"] == 1
+
+
+async def test_limit_summary_stops_with_the_computer_cancellation_latch():
+    from yutori.navigator.macos import CancellationLatch
+
+    completion_cancelled = asyncio.Event()
+
+    class BlockingCompletions:
+        async def create(self, **_kwargs):
+            try:
+                await asyncio.Future()
+            finally:
+                completion_cancelled.set()
+
+    cancellation = CancellationLatch()
+    agent = SimpleNamespace(
+        computer=SimpleNamespace(cancellation=cancellation),
+        timings={"model_ms": 0},
+        completion_request=lambda messages: {"model": "n2", "messages": messages},
+    )
+    task = asyncio.create_task(
+        runner_module._summarize_limit_run(
+            agent,
+            BlockingCompletions(),
+            runner_module.ApiCounter(),
+            runner_module.ChatTracker(),
+            time.monotonic() + 60,
+        )
+    )
+    await asyncio.sleep(0)
+
+    cancellation.request("operator_stop")
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert completion_cancelled.is_set()
 
 
 async def test_run_request_reports_limit_when_the_deadline_has_already_passed():
@@ -1819,6 +2003,33 @@ async def test_server_forwards_mode_and_fallback_to_the_runner(monkeypatch, tmp_
     assert forwarded["mode"] == "background" and forwarded["allow_foreground_fallback"] is True
     assert forwarded["app"] == "Notes"
     assert forwarded["platform_url"] == "https://platform.yutori.com"
+
+
+async def test_progress_reporter_delivers_progress_and_log_notifications_concurrently():
+    from yutori_mcp import server
+
+    progress_started = asyncio.Event()
+    info_started = asyncio.Event()
+    calls = []
+
+    async def report_progress(**kwargs):
+        calls.append(("progress", kwargs))
+        progress_started.set()
+        await info_started.wait()
+
+    async def info(message):
+        calls.append(("info", message))
+        info_started.set()
+        await progress_started.wait()
+
+    ctx = SimpleNamespace(report_progress=report_progress, info=info)
+    on_event = server._progress_reporter(ctx, 12, mode="background", app="Notes")
+
+    await asyncio.wait_for(on_event({"type": "ready"}), 0.2)
+
+    assert {call[0] for call in calls} == {"progress", "info"}
+    progress_call = next(payload for kind, payload in calls if kind == "progress")
+    assert "12 model turns" in progress_call["message"]
 
 
 async def test_server_early_failures_preserve_the_requested_background_mode(monkeypatch, tmp_path):

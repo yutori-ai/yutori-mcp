@@ -416,7 +416,9 @@ class ComputerUseTaskInput(ToolInput):
         description=f"Absolute run deadline in minutes (1-{COMPUTER_USE_MAX_MINUTES})",
     )
     max_steps: int = Field(
-        default=COMPUTER_USE_DEFAULT_MAX_STEPS, ge=1, description="Maximum actions before stopping the run"
+        default=COMPUTER_USE_DEFAULT_MAX_STEPS,
+        ge=1,
+        description="Maximum model turns before stopping the run; one turn may contain multiple actions",
     )
     mode: ComputerUseMode = Field(
         default=COMPUTER_USE_DEFAULT_MODE,
