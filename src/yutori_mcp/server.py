@@ -614,6 +614,10 @@ def _progress_reporter(
         message = format_action_line(event, index_default=0)
         if event.get("elapsed_ms") is not None:
             message += f" [{event['elapsed_ms']} ms]"
+        if event.get("details"):
+            # One line, not the CLI's indented block: a host renders each notification
+            # as a single message.
+            message += " " + "; ".join(str(detail) for detail in event["details"])
         if event.get("command"):
             message += f" $ {event['command']}"
         await asyncio.gather(ctx.report_progress(progress=index, message=message), ctx.info(message))

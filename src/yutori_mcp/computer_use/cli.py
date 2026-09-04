@@ -20,7 +20,6 @@ from ..schemas import (
 )
 from .constants import (
     DELIVERY_MODE_BACKGROUND,
-    DELIVERY_MODE_FOREGROUND,
     DELIVERY_MODES,
     DRIVER_INSTALLER_SHA256,
     DRIVER_VERSION,
@@ -35,7 +34,7 @@ from .preflight import (
     first_blocker,
     run_checks,
 )
-from .result import describe_delivery_surface, format_action_line, format_result
+from .result import Terminal, describe_delivery_surface, format_terminal_action, format_terminal_result
 from .supervisor import run_task_with_resolved_credentials, stop_active_run
 
 
@@ -108,9 +107,13 @@ def _blocked() -> bool:
     return True
 
 
-def _report(result: dict[str, Any]) -> int:
-    """Print the formatted run result and derive the process exit code from its outcome."""
-    print(format_result(result))
+def _report(result: dict[str, Any], *, include_actions: bool = True) -> int:
+    """Print the formatted run result and derive the process exit code from its outcome.
+
+    ``include_actions`` stays on for commands that streamed nothing while the run was
+    in progress; `run` turns it off, having already printed each action as it landed.
+    """
+    print(format_terminal_result(result, Terminal.detect(), include_actions=include_actions))
     return 0 if result.get("outcome") == "completed" else 1
 
 
@@ -196,24 +199,37 @@ def hands_off_notice(mode: str) -> str:
     return "The model takes over this Mac's desktop now; do not touch it during the run."
 
 
-def _event_printer(mode: str, app: str | None):
+def _event_printer(mode: str, app: str | None, paint: Terminal | None = None):
     surface = describe_delivery_surface(mode, app)
+    paint = Terminal.detect() if paint is None else paint
 
     async def print_event(event: dict) -> None:
         if event.get("type") == "ready":
-            print(f"runner ready; driving {surface}")
+            print(f"{paint(paint.glyph('bullet'), 'green')} runner ready, driving {surface}\n", flush=True)
             return
-        line = format_action_line(event)
-        if event.get("elapsed_ms") is not None:
-            line += f" [at {event['elapsed_ms']} ms]"
-        if event.get("command"):
-            line += f"\n  $ {event['command']}"
-        print(line, flush=True)
+        print("\n".join(format_terminal_action(event, paint)), flush=True)
 
     return print_event
 
 
-_print_event = _event_printer(DELIVERY_MODE_FOREGROUND, None)
+def format_run_header(params: ComputerUseTaskInput, paint: Terminal) -> str:
+    """The block a `run` opens with: what was asked, where it lands, and the limits."""
+    target = params.app or "the visible desktop"
+    if params.start_url:
+        target += f"  {params.start_url}"
+    limits = f"{params.mode}  {paint.glyph('separator')}  {params.minutes:g} min  "
+    limits += f"{paint.glyph('separator')}  {params.max_steps} model turns"
+    return "\n".join(
+        [
+            paint.rule("YUTORI COMPUTER USE"),
+            paint.row("task", params.task),
+            paint.row("target", target),
+            paint.row("limits", limits),
+            "",
+            paint(f"{paint.glyph('warn')} {hands_off_notice(params.mode)}", "yellow", "bold"),
+            "",
+        ]
+    )
 
 
 async def _run_custom(args: argparse.Namespace) -> int:
@@ -232,12 +248,13 @@ async def _run_custom(args: argparse.Namespace) -> int:
     )
     if _blocked():
         return 1
-    print(hands_off_notice(params.mode))
+    paint = Terminal.detect()
+    print(format_run_header(params, paint))
     result = await run_task_with_resolved_credentials(
         **params.model_dump(),
-        on_event=_event_printer(params.mode, params.app),
+        on_event=_event_printer(params.mode, params.app, paint),
     )
-    return _report(result)
+    return _report(result, include_actions=False)
 
 
 def apply_computer_use_environment(env: str | None) -> None:
