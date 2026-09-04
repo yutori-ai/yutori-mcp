@@ -449,18 +449,9 @@ async def _summarize_limit_run(
         {"role": "user", "content": STOP_SUMMARY_PROMPT},
     ]
     async with N2ComputerAgent(
-        computer=computer,
-        tool_set=TOOL_SET,
-        api_key=api_key,
-        base_url=request["api_base_url"],
-        model=request["model"],
+        **_agent_base_kwargs(request, api_key=api_key, computer=computer, deadline=deadline),
         callbacks=[RunGuard(1, deadline)],
-        system_prompt=system_context(request["mode"], request["app"]),
         action_confirmation_callback=deny,
-        presentation=computer.presentation,
-        supports_click_modifiers=True,
-        screenshot_delay=0,
-        execution_deadline=deadline,
     ) as agent:
         summary_items = await _collect_run(agent, messages)
     texts = _texts_from_items(summary_items)
@@ -545,6 +536,31 @@ def _computer_kwargs(
             allow_foreground_fallback=request["allow_foreground_fallback"],
         )
     return kwargs
+
+
+def _agent_base_kwargs(
+    request: dict[str, Any], *, api_key: str, computer: MacOSComputer, deadline: float
+) -> dict[str, Any]:
+    """N2ComputerAgent construction kwargs shared by a real run and its limit-run summary turn.
+
+    `run_request()`'s main agent and `_summarize_limit_run()`'s final "summarize what
+    happened" agent both drive the same computer session against the same backend, model,
+    deadline, and standing `system_prompt` for the run's mode/app, with click-modifier
+    support always on; only `callbacks` and `action_confirmation_callback` differ per call
+    site.
+    """
+    return {
+        "computer": computer,
+        "tool_set": TOOL_SET,
+        "api_key": api_key,
+        "base_url": request["api_base_url"],
+        "model": request["model"],
+        "system_prompt": system_context(request["mode"], request["app"]),
+        "presentation": computer.presentation,
+        "screenshot_delay": 0,
+        "execution_deadline": deadline,
+        "supports_click_modifiers": True,
+    }
 
 
 async def _bind_window_target(computer: MacOSComputer, target: dict[str, Any]) -> None:
@@ -729,17 +745,8 @@ async def run_request(
             computer.recover_target = recover_target
 
         async with N2ComputerAgent(
-            computer=computer,
-            tool_set=TOOL_SET,
-            api_key=api_key,
-            base_url=request["api_base_url"],
-            model=request["model"],
+            **_agent_base_kwargs(request, api_key=api_key, computer=computer, deadline=deadline),
             callbacks=[guard, reporter, api_counter, chat],
-            system_prompt=system_context(mode, request["app"]),
-            presentation=computer.presentation,
-            screenshot_delay=0,
-            execution_deadline=deadline,
-            supports_click_modifiers=True,
         ) as agent:
             items = await _collect_run(agent, request["task"])
         texts = _texts_from_items(items)
