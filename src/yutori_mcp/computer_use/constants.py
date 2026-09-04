@@ -7,7 +7,12 @@ from .. import __version__
 PROTOCOL_VERSION = 2
 MCP_VERSION = __version__
 MODEL = "n2"
-TOOL_SET = "computer_use_tools-20260815"
+# The eval-exact n2 desktop surface, and the SDK's TOOL_SET_COMPUTER_USE_LATEST:
+# computer_batch + bash + read/write/edit, with `screenshot` as a batch member
+# rather than a tool of its own. Pinned by date rather than read from the SDK
+# constant so an SDK bump can never silently move the surface the model is
+# served -- see doctor's tool_set preflight, which sends this exact string.
+TOOL_SET = "computer_use_tools-20260830"
 # The two delivery modes this runtime implements. "foreground" drives the visible desktop
 # (the model sees the whole screen and the user keeps their hands off); "background" drives
 # one target app window through the SDK's window scope without taking the user's focus.
