@@ -33,7 +33,42 @@ The optional native reasoning overlay may require Xcode Command Line Tools.
 
 ## Run a Task
 
-Prefer the MCP tool when it is available:
+In Claude Code, including Claude sessions hosted by Conductor, run the CLI through the Bash
+tool with stdout attached. This makes `runner ready`, each `action #...` line, shell-command
+previews, and the final result appear in the agent's live progress. Do not redirect the command
+to a file or call the MCP `run_computer_use_task` tool from these sessions: Claude's headless
+Agent SDK does not expose MCP progress or log notifications to its host.
+
+For a foreground run:
+
+```bash
+uvx yutori-mcp computer-use run "$ARGUMENTS" --minutes 9 --max-steps 60
+```
+
+Run that as a foreground Bash call and set the Bash tool timeout slightly longer than the CLI's
+`--minutes` limit (Claude's foreground Bash timeout is capped at 10 minutes). Pass the task as
+one safely quoted argument and do not use `eval`.
+
+For a longer run, start the same CLI command as a background Bash task without redirecting its
+output, then wait on it with `TaskOutput` in blocking intervals. Relay meaningful new action
+lines in progress updates between waits. The computer-use `--minutes` value remains the absolute
+run deadline.
+
+For an app-specific task:
+
+```bash
+uvx yutori-mcp computer-use run "$ARGUMENTS" --app Safari --start-url https://example.com --minutes 9
+```
+
+For a background window-delivery run (the CLI process itself can still be a foreground Bash
+call):
+
+```bash
+uvx yutori-mcp computer-use run "$ARGUMENTS" --app Notes --mode background --minutes 9
+```
+
+In another MCP host that visibly renders MCP progress notifications, prefer the MCP tool when it
+is available:
 
 ```json
 {
@@ -71,22 +106,10 @@ target before calling the tool. "In the foreground" or no mention means the defa
 Add `"allow_foreground_fallback": true` only if the user accepts the target window briefly
 flashing to the front when an action cannot be delivered in the background.
 
-If the MCP tool is unavailable, ask the user to run the CLI task runner:
+If neither the CLI nor the MCP tool is available, ask the user to run the CLI task runner:
 
 ```bash
 uvx yutori-mcp computer-use run "$ARGUMENTS" --minutes 30 --max-steps 60
-```
-
-For an app-specific task:
-
-```bash
-uvx yutori-mcp computer-use run "$ARGUMENTS" --app Safari --start-url https://example.com
-```
-
-For a background run:
-
-```bash
-uvx yutori-mcp computer-use run "$ARGUMENTS" --app Notes --mode background
 ```
 
 To stop the active run from the Mac (background runs have no on-screen Stop button):

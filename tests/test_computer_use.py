@@ -2544,6 +2544,17 @@ def test_docs_describe_background_mode():
     skill = " ".join((root / "skills/06-computer-use/SKILL.md").read_text().split())
     assert "--mode background" in skill
     assert '"in the background"' in skill and "ask which app to target" in skill
+    assert "Claude Code, including Claude sessions hosted by Conductor" in skill
+    assert "run the CLI through the Bash tool with stdout attached" in skill
+    assert "does not expose MCP progress or log notifications" in skill
+    assert "TaskOutput" in skill
+
+
+def test_claude_mcp_config_allows_the_full_computer_use_deadline():
+    config = json.loads((Path(__file__).parents[1] / ".mcp.json").read_text())
+    # The tool accepts a 60-minute deadline; leave one minute for startup and
+    # final result delivery so Claude does not abandon a still-running child.
+    assert config["mcpServers"]["yutori"]["request_timeout_ms"] == 61 * 60 * 1000
 
 
 # --- computer-use stop --------------------------------------------------------------------
