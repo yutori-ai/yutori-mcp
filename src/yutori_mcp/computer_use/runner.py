@@ -15,6 +15,7 @@ from dataclasses import asdict
 from importlib import metadata
 from typing import Any, TextIO
 
+from yutori import AsyncYutoriClient
 from yutori.navigator import N2ComputerAgent
 from yutori.navigator.macos import (
     MacOSComputer,
@@ -119,7 +120,9 @@ def system_context(mode: str, app: str | None = None) -> str:
 
 
 SYSTEM_CONTEXT = system_context(DELIVERY_MODE_FOREGROUND)
-STOP_SUMMARY_PROMPT = "Stop here. Briefly summarize what you accomplished and what you found."
+STOP_SUMMARY_PROMPT = (
+    "Stop here. Do not take any more actions. Briefly summarize what you accomplished and what you found."
+)
 FINAL_TEXT_MARKERS = ("[DONE]", "[INFEASIBLE]")
 _SHELL_TOOL_NAMES = frozenset({"bash", "shell_command", "run_command"})
 _BACKGROUND_TASK_PATTERN = re.compile(r"\bStarted background task ([A-Za-z0-9-]+)\b")
@@ -375,7 +378,11 @@ class ChatTracker:
 
 
 class RunGuard:
-    """Bound model turns independently of in-flight SDK cancellation."""
+    """Bound model turns independently of in-flight SDK cancellation.
+
+    ``max_steps`` is the public compatibility name. One step is one model turn;
+    a turn can contain several top-level tool calls or batched desktop actions.
+    """
 
     def __init__(self, max_steps: int, deadline: float) -> None:
         self.max_steps = max_steps
@@ -426,36 +433,101 @@ def _redacted_error_text(error: BaseException, secret: str) -> str:
     return redact(str(error), secret) or type(error).__name__
 
 
-async def _collect_run(agent: Any, messages: Any) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
+async def _collect_final_text(agent: Any, messages: Any) -> str | None:
+    """Run the agent while retaining only its latest text response.
+
+    The SDK owns and compacts the canonical trajectory. Keeping every streamed
+    item here created a second, unbounded copy of screenshot-bearing tool output.
+    """
+    final_text: str | None = None
     async for response in agent.run(messages):
-        items.extend(response.get("output") or [])
-    return items
+        texts = _texts_from_items(response.get("output") or [])
+        if texts:
+            final_text = texts[-1]
+    return _strip_final_markers(final_text)
+
+
+def _completion_text(response: Any) -> str | None:
+    """Extract assistant text from a chat-completions response."""
+    response = response.model_dump() if hasattr(response, "model_dump") else response
+    if not isinstance(response, dict):
+        return None
+    message = (response.get("choices") or [{}])[0].get("message") or {}
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    if isinstance(content, str):
+        return _strip_final_markers(content)
+    if not isinstance(content, list):
+        return None
+    texts = [
+        part["text"]
+        for part in content
+        if isinstance(part, dict)
+        and part.get("type") in {"text", "output_text"}
+        and isinstance(part.get("text"), str)
+    ]
+    return _strip_final_markers("\n".join(texts) if texts else None)
+
+
+async def _await_summary_response(agent: Any, awaitable: Any, deadline: float) -> Any:
+    """Await the wrap-up while honoring both the deadline and desktop Stop."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        if inspect.iscoroutine(awaitable):
+            awaitable.close()
+        raise asyncio.TimeoutError
+    cancellation = getattr(agent.computer, "cancellation", None)
+    if cancellation is None:
+        return await asyncio.wait_for(awaitable, remaining)
+    if cancellation.cancelled:
+        if inspect.iscoroutine(awaitable):
+            awaitable.close()
+        cancellation.raise_if_cancelled()
+    request_task = asyncio.create_task(awaitable)
+    stopped_task = asyncio.create_task(cancellation.wait())
+    try:
+        done, _ = await asyncio.wait_for(
+            asyncio.wait({request_task, stopped_task}, return_when=asyncio.FIRST_COMPLETED),
+            remaining,
+        )
+        if request_task in done:
+            return request_task.result()
+        raise asyncio.CancelledError(stopped_task.result())
+    finally:
+        for task in (request_task, stopped_task):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(request_task, stopped_task, return_exceptions=True)
 
 
 async def _summarize_limit_run(
-    request: dict[str, Any],
-    api_key: str,
-    computer: MacOSComputer,
-    items: list[dict[str, Any]],
+    agent: Any,
+    completions: Any,
+    api_counter: ApiCounter,
+    chat: ChatTracker,
     deadline: float,
 ) -> str | None:
-    async def deny(_request: dict[str, Any]) -> bool:
-        return False
+    """Request one text-only wrap-up from the current compacted trajectory.
 
-    messages = [
-        {"role": "user", "content": request["task"]},
-        *items,
-        {"role": "user", "content": STOP_SUMMARY_PROMPT},
-    ]
-    async with N2ComputerAgent(
-        **_agent_base_kwargs(request, api_key=api_key, computer=computer, deadline=deadline),
-        callbacks=[RunGuard(1, deadline)],
-        action_confirmation_callback=deny,
-    ) as agent:
-        summary_items = await _collect_run(agent, messages)
-    texts = _texts_from_items(summary_items)
-    return _strip_final_markers(texts[-1] if texts else None)
+    ``completion_request`` is the SDK's public escape hatch for harness-owned
+    turns. Calling the shared completion surface directly means no tools are
+    executed and the original agent, request chain, and timing record stay live.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise asyncio.TimeoutError
+    api_kwargs = agent.completion_request([{"role": "user", "content": STOP_SUMMARY_PROMPT}])
+    await api_counter.on_api_start(api_kwargs)
+    model_started_at = time.monotonic()
+    try:
+        response = await _await_summary_response(agent, completions.create(**api_kwargs), deadline)
+    finally:
+        agent.timings["model_ms"] = agent.timings.get("model_ms", 0) + (
+            time.monotonic() - model_started_at
+        ) * 1000
+    await chat.on_api_end(api_kwargs, response)
+    return _completion_text(response)
 
 
 def _background_counts(events: tuple[ShellPresentationEvent, ...]) -> dict[str, int]:
@@ -539,21 +611,13 @@ def _computer_kwargs(
 
 
 def _agent_base_kwargs(
-    request: dict[str, Any], *, api_key: str, computer: MacOSComputer, deadline: float
+    request: dict[str, Any], *, completions: Any, computer: MacOSComputer, deadline: float
 ) -> dict[str, Any]:
-    """N2ComputerAgent construction kwargs shared by a real run and its limit-run summary turn.
-
-    `run_request()`'s main agent and `_summarize_limit_run()`'s final "summarize what
-    happened" agent both drive the same computer session against the same backend, model,
-    deadline, and standing `system_prompt` for the run's mode/app, with click-modifier
-    support always on; only `callbacks` and `action_confirmation_callback` differ per call
-    site.
-    """
+    """N2ComputerAgent construction kwargs for the run's single agent lifecycle."""
     return {
         "computer": computer,
         "tool_set": TOOL_SET,
-        "api_key": api_key,
-        "base_url": request["api_base_url"],
+        "completions": completions,
         "model": request["model"],
         "system_prompt": system_context(request["mode"], request["app"]),
         "presentation": computer.presentation,
@@ -744,22 +808,30 @@ async def run_request(
 
             computer.recover_target = recover_target
 
-        async with N2ComputerAgent(
-            **_agent_base_kwargs(request, api_key=api_key, computer=computer, deadline=deadline),
-            callbacks=[guard, reporter, api_counter, chat],
-        ) as agent:
-            items = await _collect_run(agent, request["task"])
-        texts = _texts_from_items(items)
-        final_text = _strip_final_markers(texts[-1] if texts else None)
-        if guard.limit_reached or guard.deadline_reached:
-            outcome = "limit"
-            if guard.limit_reached:
-                try:
-                    final_text = await _summarize_limit_run(request, api_key, computer, items, deadline) or final_text
-                except Exception as error:  # noqa: BLE001 - final summary is best effort
-                    print(f"limit summary failed: {error}", file=sys.stderr)
-        else:
-            outcome = "completed"
+        async with AsyncYutoriClient(api_key=api_key, base_url=request["api_base_url"]) as client:
+            completions = client.chat.completions
+            async with N2ComputerAgent(
+                **_agent_base_kwargs(
+                    request,
+                    completions=completions,
+                    computer=computer,
+                    deadline=deadline,
+                ),
+                callbacks=[guard, reporter, api_counter, chat],
+            ) as agent:
+                final_text = await _collect_final_text(agent, request["task"])
+                if guard.limit_reached or guard.deadline_reached:
+                    outcome = "limit"
+                    if guard.limit_reached:
+                        try:
+                            final_text = (
+                                await _summarize_limit_run(agent, completions, api_counter, chat, deadline)
+                                or final_text
+                            )
+                        except Exception as error:  # noqa: BLE001 - final summary is best effort
+                            print(f"limit summary failed: {error}", file=sys.stderr)
+                else:
+                    outcome = "completed"
     except asyncio.CancelledError as error:
         cause = computer.cancellation.cause or (str(error) if str(error) else None)
         outcome, final_text = _cancelled_outcome(cause)
@@ -812,12 +884,33 @@ def _take_api_key() -> str | None:
     return os.environ.pop("YUTORI_API_KEY", None)
 
 
-async def _run_until_terminated(request: dict[str, Any], emitter: Emitter, api_key: str) -> str:
+async def _run_until_terminated(
+    request: dict[str, Any],
+    emitter: Emitter,
+    api_key: str,
+    termination_requested: Callable[[], bool] = lambda: False,
+) -> str:
     """Turn supervisor SIGTERM into SDK cancellation so teardown can reap shells."""
     cancellation = CancellationLatch()
-    task = asyncio.create_task(run_request(request, emitter, api_key, cancellation))
     loop = asyncio.get_running_loop()
     terminating = False
+    task: asyncio.Task[str] | None = None
+    task_started = False
+
+    def emit_early_abort() -> str:
+        emitter.emit(
+            {
+                **_result_event("aborted", "The computer-use run was stopped.", request["mode"]),
+                "elapsed_ms": 0,
+                "steps": 0,
+            }
+        )
+        return "aborted"
+
+    async def execute() -> str:
+        nonlocal task_started
+        task_started = True
+        return await run_request(request, emitter, api_key, cancellation)
 
     def terminate() -> None:
         nonlocal terminating
@@ -825,11 +918,26 @@ async def _run_until_terminated(request: dict[str, Any], emitter: Emitter, api_k
             return
         terminating = True
         cancellation.request("supervisor")
-        task.cancel("supervisor")
+        if task is not None:
+            task.cancel("supervisor")
 
     loop.add_signal_handler(signal.SIGTERM, terminate)
     try:
-        return await task
+        # A synchronous handler is installed before `ready` is emitted. If it
+        # observed SIGTERM while the request was being read or parsed, terminate
+        # cleanly without constructing desktop resources.
+        if termination_requested() or terminating:
+            terminate()
+            return emit_early_abort()
+        task = asyncio.create_task(execute())
+        try:
+            return await task
+        except asyncio.CancelledError:
+            # A signal callback can win the first event-loop tick and cancel the
+            # task before run_request gets a chance to emit its own terminal event.
+            if terminating and not task_started:
+                return emit_early_abort()
+            raise
     finally:
         loop.remove_signal_handler(signal.SIGTERM)
 
@@ -837,46 +945,57 @@ async def _run_until_terminated(request: dict[str, Any], emitter: Emitter, api_k
 def main() -> int:
     api_key = _take_api_key()
     emitter = Emitter(_claim_protocol_stream())
-    emitter.emit(
-        {
-            "type": "ready",
-            "protocol_version": PROTOCOL_VERSION,
-            "package_version": _package_version(),
-            "sdk_version": SDK_VERSION,
-            "sdk_artifact_sha256": SDK_ARTIFACT_SHA256,
-            "sdk_provenance_sha256": SDK_PROVENANCE_SHA256,
-            "driver_version_pinned": DRIVER_VERSION,
-            "observation_format": "webp",
-            "observation_format_fallback": True,
-            "observation_fallback_format": "jpeg",
-            # The request is not parsed yet; the result event carries the truthful value.
-            "reasoning_overlay_requested": True,
-        }
-    )
+    termination = {"requested": False}
+
+    def remember_termination(_signum: int, _frame: Any) -> None:
+        termination["requested"] = True
+
+    previous_sigterm = signal.signal(signal.SIGTERM, remember_termination)
     try:
-        try:
-            payload = json.loads(_read_request_line())
-        except json.JSONDecodeError:
-            raise RequestError("INVALID_JSON", "Request was not valid JSON.") from None
-        request = parse_request(payload)
-    except RequestError as error:
-        emitter.emit(_error_event(error.code, str(error)))
-        return 1
-    if not api_key:
-        emitter.emit(_error_event("MISSING_API_KEY", "YUTORI_API_KEY is not set in the runner environment."))
-        return 1
-    try:
-        outcome = asyncio.run(_run_until_terminated(request, emitter, api_key))
-    except Exception as error:  # noqa: BLE001 - last-resort protocol boundary
-        message = _redacted_error_text(error, api_key)
         emitter.emit(
             {
-                **_result_event("failed", message, request["mode"]),
-                "steps": 0,
+                "type": "ready",
+                "protocol_version": PROTOCOL_VERSION,
+                "package_version": _package_version(),
+                "sdk_version": SDK_VERSION,
+                "sdk_artifact_sha256": SDK_ARTIFACT_SHA256,
+                "sdk_provenance_sha256": SDK_PROVENANCE_SHA256,
+                "driver_version_pinned": DRIVER_VERSION,
+                "observation_format": "webp",
+                "observation_format_fallback": True,
+                "observation_fallback_format": "jpeg",
+                # The request is not parsed yet; the result event carries the truthful value.
+                "reasoning_overlay_requested": True,
             }
         )
-        return 1
-    return 0 if outcome in {"completed", "limit", "aborted"} else 1
+        try:
+            try:
+                payload = json.loads(_read_request_line())
+            except json.JSONDecodeError:
+                raise RequestError("INVALID_JSON", "Request was not valid JSON.") from None
+            request = parse_request(payload)
+        except RequestError as error:
+            emitter.emit(_error_event(error.code, str(error)))
+            return 1
+        if not api_key:
+            emitter.emit(_error_event("MISSING_API_KEY", "YUTORI_API_KEY is not set in the runner environment."))
+            return 1
+        try:
+            outcome = asyncio.run(
+                _run_until_terminated(request, emitter, api_key, lambda: termination["requested"])
+            )
+        except Exception as error:  # noqa: BLE001 - last-resort protocol boundary
+            message = _redacted_error_text(error, api_key)
+            emitter.emit(
+                {
+                    **_result_event("failed", message, request["mode"]),
+                    "steps": 0,
+                }
+            )
+            return 1
+        return 0 if outcome in {"completed", "limit", "aborted"} else 1
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
 
 
 if __name__ == "__main__":

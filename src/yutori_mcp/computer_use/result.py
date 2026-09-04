@@ -35,9 +35,9 @@ def format_perf(result: dict[str, Any]) -> list[str]:
     steps = result.get("steps")
     if not isinstance(elapsed_ms, (int, float)) or not isinstance(steps, int):
         return []
-    headline = f"Perf: total {_seconds(elapsed_ms)} over {steps} steps"
+    headline = f"Perf: total {_seconds(elapsed_ms)} over {steps} model turns"
     if steps > 0:
-        headline += f" ({elapsed_ms / steps / 1000:.1f}s/step)"
+        headline += f" ({elapsed_ms / steps / 1000:.1f}s/turn)"
     lines = [headline]
     timings = result.get("timings")
     if isinstance(timings, dict):

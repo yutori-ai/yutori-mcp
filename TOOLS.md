@@ -64,7 +64,7 @@ Delivery mode: foreground
 Run: https://platform.yutori.com/navigator/chats/5d90f532-6c0f-4159-8e46-2ce55e7084c9
 Final text: 17 * 23 = 391
 Elapsed: 18452 ms
-Perf: total 18.5s over 6 steps (3.1s/step)
+Perf: total 18.5s over 6 model turns (3.1s/turn)
 Actions:
 - #1 computer_batch: executed (raw: confirmed; mode: foreground; route: pixel; refusal: None) took 412 ms
 - #2 left_click: executed (raw: confirmed; mode: foreground; route: pixel; refusal: None) took 138 ms
@@ -79,7 +79,7 @@ Window target: Notes (pid 4242, window 71)
 Final text: Created the Standup note with the three agenda items.
 Elapsed: 24107 ms
 Delivery: 0 foreground escalation(s), 1 background refusal(s)
-Perf: total 24.1s over 8 steps (3.0s/step)
+Perf: total 24.1s over 8 model turns (3.0s/turn)
 Actions:
 - #1 left_click: executed (raw: confirmed; mode: background; route: accessibility; refusal: None); effect: unverifiable took 233 ms
 - #2 type: uncertain (raw: unverifiable; mode: background; route: synthetic_events; refusal: None); effect: unverifiable took 610 ms
@@ -96,12 +96,12 @@ before the model was called.
 | `app` | No | Application to target; omit for cross-app tasks |
 | `start_url` | No | URL to open before the task starts; requires `app` |
 | `minutes` | No | Wall-clock deadline in minutes (1-60). Default: 30 |
-| `max_steps` | No | Max desktop actions, 1 or more. Default: 60 |
+| `max_steps` | No | Max model turns, 1 or more. A turn may contain multiple desktop actions. Default: 60 |
 | `mode` | No | `foreground` (default) drives the visible desktop; `background` drives only `app`'s window without taking focus. Background requires `app` |
 | `allow_foreground_fallback` | No | Background only. Retry an action that did not land with the window fronted briefly. Default: false |
 
-`max_steps` has no upper bound. On long runs, compact or summarize older screenshots and tool
-results so the conversation stays within `max_context_len`.
+`max_steps` has no upper bound. The SDK automatically compacts older screenshots and tool
+results on long runs; each step is one model turn, not an individual desktop action.
 
 ## Browsing Tools
 

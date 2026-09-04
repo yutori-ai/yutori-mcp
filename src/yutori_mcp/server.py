@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import os
 import sys
@@ -597,18 +598,17 @@ def _progress_reporter(
     """Turn runner events into MCP progress + log notifications.
 
     Progress totals are deliberately omitted: an action's `index` is a monotonic
-    per-action counter and a batch step executes several actions, so max_steps is
-    not an upper bound for it — a fabricated total would render a bar that
-    overshoots. The human-readable message carries the step budget instead.
+    per-action counter and a model turn can execute several actions, so max_steps
+    is not an upper bound for it. The human-readable message carries the model-turn
+    budget instead.
     """
     from .computer_use.result import describe_delivery_surface, format_action_line
 
     async def on_event(event: dict[str, Any]) -> None:
         if event.get("type") == "ready":
             surface = describe_delivery_surface(mode, app)
-            message = f"Computer-use runner ready; driving {surface} (up to {max_steps} steps)."
-            await ctx.report_progress(progress=0, message=message)
-            await ctx.info(message)
+            message = f"Computer-use runner ready; driving {surface} (up to {max_steps} model turns)."
+            await asyncio.gather(ctx.report_progress(progress=0, message=message), ctx.info(message))
             return
         index = event.get("index", 0)
         message = format_action_line(event, index_default=0)
@@ -616,8 +616,7 @@ def _progress_reporter(
             message += f" [{event['elapsed_ms']} ms]"
         if event.get("command"):
             message += f" $ {event['command']}"
-        await ctx.report_progress(progress=index, message=message)
-        await ctx.info(message)
+        await asyncio.gather(ctx.report_progress(progress=index, message=message), ctx.info(message))
 
     return on_event
 
