@@ -134,39 +134,51 @@ class RequestError(ValueError):
         self.code = code
 
 
-def _require_string(request: dict[str, Any], field: str) -> str:
+def _require_field(request: dict[str, Any], field: str, *, valid: Callable[[Any], bool], expected: str) -> Any:
+    """Read ``field`` from ``request``, or raise ``INVALID_REQUEST`` when ``valid`` rejects it.
+
+    Single source of truth for the "get the field, check it, raise a uniform
+    `{field} must be {expected}.` message" shape every ``_require_*`` helper below shared before
+    this existed; only the predicate and the expected-type phrase differ per field.
+    """
     value = request.get(field)
-    if not isinstance(value, str) or not value:
-        raise RequestError("INVALID_REQUEST", f"{field} must be a non-empty string.")
+    if not valid(value):
+        raise RequestError("INVALID_REQUEST", f"{field} must be {expected}.")
     return value
+
+
+def _require_string(request: dict[str, Any], field: str) -> str:
+    return _require_field(
+        request, field, valid=lambda v: isinstance(v, str) and bool(v), expected="a non-empty string"
+    )
 
 
 def _require_optional_string(request: dict[str, Any], field: str) -> str | None:
-    value = request.get(field)
-    if value is not None and (not isinstance(value, str) or not value):
-        raise RequestError("INVALID_REQUEST", f"{field} must be a non-empty string or null.")
-    return value
+    return _require_field(
+        request,
+        field,
+        valid=lambda v: v is None or (isinstance(v, str) and bool(v)),
+        expected="a non-empty string or null",
+    )
 
 
 def _require_positive_int(request: dict[str, Any], field: str) -> int:
-    value = request.get(field)
-    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-        raise RequestError("INVALID_REQUEST", f"{field} must be a positive integer.")
-    return value
+    return _require_field(
+        request,
+        field,
+        valid=lambda v: isinstance(v, int) and not isinstance(v, bool) and v > 0,
+        expected="a positive integer",
+    )
 
 
 def _require_mode(request: dict[str, Any]) -> str:
-    value = request.get("mode")
-    if value not in DELIVERY_MODES:
-        raise RequestError("INVALID_REQUEST", f"mode must be one of {', '.join(DELIVERY_MODES)}.")
-    return str(value)
+    return _require_field(
+        request, "mode", valid=lambda v: v in DELIVERY_MODES, expected=f"one of {', '.join(DELIVERY_MODES)}"
+    )
 
 
 def _require_bool(request: dict[str, Any], field: str) -> bool:
-    value = request.get(field)
-    if not isinstance(value, bool):
-        raise RequestError("INVALID_REQUEST", f"{field} must be a boolean.")
-    return value
+    return _require_field(request, field, valid=lambda v: isinstance(v, bool), expected="a boolean")
 
 
 def parse_request(payload: Any) -> dict[str, Any]:
