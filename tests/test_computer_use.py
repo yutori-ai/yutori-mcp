@@ -356,6 +356,27 @@ def _patched_process_group_stop(process):
         yield stopped
 
 
+async def _run_supervised_with_stop_patched(
+    process, *, api_key="yt-key", deadline_seconds=1, **supervise_kwargs
+) -> tuple[dict[str, Any], AsyncMock]:
+    """Like `_run_supervised`, but through `_patched_process_group_stop` for its shared args.
+
+    For the tests below that also need to observe or stub the process-group stop path
+    (`stopped.assert_awaited_once_with(process)`) rather than leaving it unpatched --
+    tests whose control flow diverges further (creating and cancelling their own task)
+    keep their own inline `with _patched_process_group_stop(...)` block.
+    """
+    with _patched_process_group_stop(process) as stopped:
+        result = await _supervise(
+            command=python_runner_command(),
+            request={"type": "run"},
+            api_key=api_key,
+            deadline=time.monotonic() + deadline_seconds,
+            **supervise_kwargs,
+        )
+    return result, stopped
+
+
 async def test_supervisor_redacts_key_and_keeps_it_out_of_argv():
     secret = "yt-super-secret-value"
     process = _Process(
@@ -485,13 +506,7 @@ async def test_supervisor_rejects_runner_provenance_drift():
         _stream(""),
     )
 
-    with _patched_process_group_stop(process):
-        result = await _supervise(
-            command=python_runner_command(),
-            request={"type": "run"},
-            api_key="yt-key",
-            deadline=time.monotonic() + 1,
-        )
+    result, _ = await _run_supervised_with_stop_patched(process)
     assert result["outcome"] == "failed"
     assert "provenance mismatch" in result["final_text"]
 
@@ -609,13 +624,7 @@ async def test_stop_process_group_escalates_to_kill():
 async def test_supervisor_stdout_deadline_returns_limit_and_stops_group():
     process = _Process(asyncio.StreamReader(), asyncio.StreamReader())
 
-    with _patched_process_group_stop(process) as stopped:
-        result = await _supervise(
-            command=python_runner_command(),
-            request={"type": "run"},
-            api_key="secret",
-            deadline=time.monotonic() + 0.01,
-        )
+    result, stopped = await _run_supervised_with_stop_patched(process, api_key="secret", deadline_seconds=0.01)
     assert result["outcome"] == "limit"
     stopped.assert_awaited_once_with(process)
 
@@ -627,13 +636,7 @@ async def test_supervisor_eof_does_not_bypass_the_deadline():
         await asyncio.Future()
 
     process.wait = wait_forever
-    with _patched_process_group_stop(process) as stopped:
-        result = await _supervise(
-            command=python_runner_command(),
-            request={"type": "run"},
-            api_key="secret",
-            deadline=time.monotonic() + 0.01,
-        )
+    result, stopped = await _run_supervised_with_stop_patched(process, api_key="secret", deadline_seconds=0.01)
     assert result["outcome"] == "limit"
     stopped.assert_awaited_once_with(process)
 
