@@ -320,6 +320,21 @@ def _result_event(**overrides):
     return event
 
 
+def _action_event(**overrides):
+    event = {
+        "type": "action",
+        "index": 0,
+        "tool": "left_click",
+        "status": "executed",
+        "raw_status": "confirmed",
+        "delivery_mode": "foreground",
+        "route": "pixel",
+        "refusal_code": None,
+    }
+    event.update(overrides)
+    return event
+
+
 async def _run_supervised(process, *, api_key="yt-key", deadline_seconds=1, **supervise_kwargs):
     """Patch the child process and call `_supervise` with the shared fixed args this file's tests repeat.
 
@@ -411,17 +426,7 @@ async def test_supervisor_redacts_key_and_keeps_it_out_of_argv():
 async def test_supervisor_forwards_ready_and_action_events():
     events = [
         _ready_event(reasoning_overlay_requested=True),
-        {
-            "type": "action",
-            "index": 1,
-            "tool": "computer_batch",
-            "status": "executed",
-            "raw_status": "confirmed",
-            "delivery_mode": "foreground",
-            "route": "pixel",
-            "refusal_code": None,
-            "elapsed_ms": 42,
-        },
+        _action_event(index=1, tool="computer_batch", elapsed_ms=42),
         _result_event(),
     ]
     process = _Process(_stream(*(json.dumps(event) for event in events)), _stream(""))
@@ -560,16 +565,7 @@ async def test_supervisor_rejects_invalid_utf8_in_an_otherwise_valid_event():
 
 
 async def test_supervisor_overwrites_child_supplied_actions():
-    action = {
-        "type": "action",
-        "index": 0,
-        "tool": "left_click",
-        "status": "executed",
-        "raw_status": "confirmed",
-        "delivery_mode": "foreground",
-        "route": "pixel",
-        "refusal_code": None,
-    }
+    action = _action_event()
     process = _Process(
         _stream(
             json.dumps(_ready_event()),
@@ -2175,18 +2171,7 @@ async def test_supervisor_synthesized_results_carry_the_requested_mode():
 
 
 def test_event_shape_checks_delivery_modes_and_accepts_the_new_action_fields():
-    action = {
-        "type": "action",
-        "index": 0,
-        "tool": "left_click",
-        "status": "executed",
-        "raw_status": "confirmed",
-        "delivery_mode": "background",
-        "route": "accessibility",
-        "refusal_code": None,
-        "effect": "confirmed",
-        "escalated": True,
-    }
+    action = _action_event(delivery_mode="background", route="accessibility", effect="confirmed", escalated=True)
     assert supervisor._event_shape_error(action) is None
     assert supervisor._event_shape_error({**action, "delivery_mode": "sideways"}) == (
         "invalid or missing fields: delivery_mode"
