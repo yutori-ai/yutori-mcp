@@ -851,9 +851,9 @@ async def test_server_holds_desktop_lock_across_preflight_and_runner(monkeypatch
 
 def test_runtime_constants_select_latest_python_surface():
     assert TOOL_SET == "computer_use_tools-20260830"
-    assert SDK_VERSION == "0.9.13"
+    assert SDK_VERSION == "0.9.14"
     assert all(len(digest) == 64 for digest in (SDK_ARTIFACT_SHA256, SDK_INSTALLATION_SHA256, SDK_PROVENANCE_SHA256))
-    assert '"yutori==0.9.13"' in Path(__file__).parents[1].joinpath("pyproject.toml").read_text()
+    assert '"yutori==0.9.14"' in Path(__file__).parents[1].joinpath("pyproject.toml").read_text()
 
 
 def test_installed_sdk_matches_the_published_artifact():
