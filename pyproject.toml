@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.5.10"
+version = "0.5.11"
 description = "MCP server and workflow skills for building agents with Yutori"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,8 +30,10 @@ dependencies = [
     # breaks the install as soon as 2.x resolves.
     "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
-    # SDK 0.9.12 adds the activity window: the run's conversation with the model, in both modes.
-    "yutori==0.9.12",
+    # SDK 0.9.13 sends the whole screenshot history: a run's replay shows every
+    # step again, instead of stopping after the two frames the old client-side
+    # image window left in the request the replay is logged from.
+    "yutori==0.9.13",
 ]
 
 [project.optional-dependencies]
