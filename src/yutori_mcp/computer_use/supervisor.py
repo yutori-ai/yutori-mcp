@@ -66,6 +66,13 @@ def _clear_runner_pid(pid: int) -> None:
             path.unlink()
 
 
+def _discard_stale_pid_file(path: Path) -> str:
+    """Remove a pid file that no longer names a live runner, and report that fact."""
+    with suppress(OSError):
+        path.unlink()
+    return "No computer-use run is active (removed a stale pid file)."
+
+
 def _process_command(pid: int) -> str | None:
     try:
         listing = subprocess.run(
@@ -94,15 +101,11 @@ def stop_active_run() -> str:
         return "No computer-use run is active."
     command = _process_command(pid)
     if command is None or RUNNER_MODULE not in command:
-        with suppress(OSError):
-            path.unlink()
-        return "No computer-use run is active (removed a stale pid file)."
+        return _discard_stale_pid_file(path)
     try:
         os.killpg(pid, signal.SIGTERM)
     except ProcessLookupError:
-        with suppress(OSError):
-            path.unlink()
-        return "No computer-use run is active (removed a stale pid file)."
+        return _discard_stale_pid_file(path)
     return f"Asked the computer-use runner (pid {pid}) to stop; the run ends with outcome 'aborted'."
 
 
