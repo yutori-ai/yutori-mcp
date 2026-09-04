@@ -16,7 +16,7 @@ from importlib import metadata
 from typing import Any, TextIO
 
 from yutori import AsyncYutoriClient
-from yutori.navigator import N2ComputerAgent
+from yutori.navigator import N2ComputerAgent, flatten_batch_member
 from yutori.navigator.macos import (
     MacOSComputer,
     MacOSPresentationStatus,
@@ -125,6 +125,10 @@ STOP_SUMMARY_PROMPT = (
 )
 FINAL_TEXT_MARKERS = ("[DONE]", "[INFEASIBLE]")
 _SHELL_TOOL_NAMES = frozenset({"bash", "shell_command", "run_command"})
+BATCH_TOOL_NAME = "computer_batch"
+# Long enough to identify what was typed into which field, short enough that a typed
+# paragraph does not push the action line off the terminal (or into a host's logs).
+TYPED_TEXT_PREVIEW_CHARACTERS = 48
 _BACKGROUND_TASK_PATTERN = re.compile(r"\bStarted background task ([A-Za-z0-9-]+)\b")
 
 
@@ -290,6 +294,67 @@ def shell_command_preview(item: dict[str, Any]) -> str | None:
     return sanitize_command_preview(command) if isinstance(command, str) and command.strip() else None
 
 
+def _is_number(value: Any) -> bool:
+    """True for a real int/float. `bool` is an int subclass, so it is excluded."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _point(value: Any) -> str | None:
+    """Render a model coordinate pair, or None when the field is absent or malformed."""
+    if isinstance(value, (list, tuple)) and len(value) == 2 and all(_is_number(part) for part in value):
+        return f"({value[0]:g},{value[1]:g})"
+    return None
+
+
+def _batch_member_preview(member: dict[str, Any]) -> str:
+    """One human-readable phrase for a single flattened `computer_batch` member.
+
+    Field-driven rather than a per-action branch: every n2 action is some subset of
+    coordinates/direction/amount/key/duration/modifier/text (see the SDK's
+    `_ACTION_FIELDS`), so reading the fields that are present covers a new action
+    name without a code change here.
+    """
+    parts = [str(member.get("action") or "action")]
+    start = _point(member.get("start_coordinates"))
+    point = _point(member.get("coordinates"))
+    if start is not None and point is not None:
+        parts.append(f"{start} -> {point}")
+    elif point is not None:
+        parts.append(point)
+    if isinstance(member.get("direction"), str) and member["direction"].strip():
+        parts.append(member["direction"].strip())
+    if _is_number(member.get("amount")):
+        parts.append(f"x{member['amount']:g}")
+    if isinstance(member.get("key"), str) and member["key"].strip():
+        parts.append(member["key"].strip())
+    if _is_number(member.get("duration")):
+        parts.append(f"{member['duration']:g}s")
+    if isinstance(member.get("modifier"), str) and member["modifier"].strip():
+        parts.append(f"+{member['modifier'].strip()}")
+    if isinstance(member.get("text"), str):
+        # Typed text is the one batch field that can carry a secret the model was
+        # handed, so it goes through the same scrubbing as a shell command preview.
+        parts.append(f'"{sanitize_command_preview(member["text"], max_characters=TYPED_TEXT_PREVIEW_CHARACTERS)}"')
+    return " ".join(parts)
+
+
+def batch_action_previews(item: dict[str, Any]) -> list[str] | None:
+    """Per-member previews for a `computer_batch` call; None for every other tool.
+
+    A batch is where all the clicking, typing, and scrolling happens, so
+    "computer_batch -> executed" on its own says nothing about what the model did on
+    screen. Both progress renderers show these underneath the action line, the way
+    they already show a shell call's command.
+    """
+    if str(item.get("name") or "").lower() != BATCH_TOOL_NAME:
+        return None
+    actions = _arguments(item).get("actions")
+    if not isinstance(actions, list):
+        return None
+    previews = [_batch_member_preview(flatten_batch_member(member)) for member in actions if isinstance(member, dict)]
+    return previews or None
+
+
 def _background_task_id(outputs: list[dict[str, Any]] | None) -> str | None:
     for frame in outputs or []:
         output = frame.get("output")
@@ -362,6 +427,7 @@ class ActionReporter:
                 "elapsed_ms": max(0, round((self._clock() - self._run_start) * 1000)),
                 "duration_ms": duration_ms,
                 "command": shell_command_preview(item),
+                "details": batch_action_previews(item),
                 "run_in_background": run_in_background,
                 "background_task_id": _background_task_id(result) if run_in_background else None,
                 # Carried on every action so the supervisor can still link the run when it

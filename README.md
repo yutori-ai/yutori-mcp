@@ -348,23 +348,68 @@ uvx yutori-mcp computer-use setup    # installs CuaDriver.app, requests Screen R
 `setup` finishes by running the readiness checks and reports anything still missing. Re-run
 those checks any time with `uvx yutori-mcp computer-use doctor`.
 
-<details>
-<summary>Run a task from the terminal</summary>
+#### Prompting a task from the terminal
+
+The task is one quoted positional argument — plain English, in the imperative, as if you
+were handing the Mac to someone else:
 
 ```bash
-uvx yutori-mcp computer-use smoke
-uvx yutori-mcp computer-use run "In Calculator, compute 17 * 23 and report the result." --app Calculator
-uvx yutori-mcp computer-use run "Add a note titled Standup." --app Notes --mode background
+uvx yutori-mcp computer-use run "<what to do, and what to report back>"
 ```
 
-`smoke` is an end-to-end check: it types into Calculator to confirm the permissions took
-effect, then has the agent compute 9 * 9 in Calculator. `run` does whatever task you
-give it, printing each action as the agent takes it. `--mode background` drives only the
-target app's window without taking focus, so you can keep working; add
-`--allow-foreground-fallback` to let an action that did not land in the background briefly
-front the window. `uvx yutori-mcp computer-use stop` ends the active run from another terminal
-(background runs have no on-screen Stop button).
-</details>
+Everything else is optional. The three that matter most:
+
+```bash
+# Name the app you want driven, so the run starts in the right place
+uvx yutori-mcp computer-use run "Compute 17 * 23 and report the result." --app Calculator
+
+# Start a browser task on a specific page (--start-url requires --app)
+uvx yutori-mcp computer-use run "List every person on the team page and save them to ~/Desktop/team.txt." \
+  --app Safari --start-url https://yutori.com/company
+
+# Drive one window in the background and keep working (--mode background requires --app)
+uvx yutori-mcp computer-use run "Add a note titled Standup with today's three agenda items." \
+  --app Notes --mode background
+```
+
+Write the prompt so the run has a finish line:
+
+- **Say what "done" looks like.** "…and report the list" or "…and save it to
+  `~/Desktop/team.txt`" gives the model something to stop at; "look at the team page" does not.
+- **Name the app and the starting page** with `--app` / `--start-url` instead of describing
+  them in the prompt. The runner opens them before the model's first screenshot, which saves
+  turns and avoids the model guessing at which window to use.
+- **Spell out the constraints you care about** — which account to use, which folder to write
+  to, what to do when something is ambiguous ("if the page asks to log in, stop and say so").
+- **Keep it one task.** One run holds a machine-wide lock; chain separate runs rather than
+  packing five errands into one prompt.
+- **Don't put secrets in the prompt.** Have the model use an already-signed-in app or an
+  entry in Keychain; typed text shows up (scrubbed and truncated) in the action log.
+
+| Flag | Default | What it does |
+|------|---------|--------------|
+| `--app NAME` | none | App to target; opened and readied before the first screenshot |
+| `--start-url URL` | none | Page to open in `--app` first. Requires `--app` |
+| `--minutes N` | `30` | Absolute deadline, 1–60. The run stops here regardless of progress |
+| `--max-steps N` | `60` | Model turns before stopping; one turn can take several actions |
+| `--mode background` | `foreground` | Drives only `--app`'s window, without taking focus. Requires `--app` |
+| `--allow-foreground-fallback` | off | Background only: retry a missed action with the window briefly fronted |
+| `--env dev` | production | Runs against `platform.dev.yutori.com`. Goes before the subcommand: `yutori-mcp --env dev computer-use run "…"` |
+
+**Foreground** (the default) drives the whole visible desktop — don't touch the Mac while it
+runs. **Background** drives one app's window and captures only that window, so you can keep
+working; leave that window alone. Some apps accept background clicks but not typed keys
+(Calculator, for one), and the run reports the refusal rather than typing blind — add
+`--allow-foreground-fallback` for typing-heavy background tasks.
+
+`uvx yutori-mcp computer-use stop` ends the active run from another terminal (background runs
+have no on-screen Stop button). `uvx yutori-mcp computer-use smoke` is an end-to-end check: it
+types into Calculator to confirm the permissions took effect, then has the agent compute 9 * 9.
+
+While a task runs, `run` prints each action as the agent takes it — including the individual
+clicks, keystrokes, and scrolls inside each `computer_batch` — and closes with the model's
+answer in a labeled `FINAL OUTPUT` block. Output is colorized when stdout is a terminal; set
+`NO_COLOR=1` to turn that off, or `FORCE_COLOR=1` to keep it through a pipe.
 
 The harness in this repository is minimal: one task at a time (a machine-wide lock), either on
 the visible desktop or targeting one app window in the background, with no multiplexing. For

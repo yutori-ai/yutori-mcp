@@ -42,13 +42,25 @@ from yutori_mcp.computer_use.constants import (
     TOOL_SET,
 )
 from yutori_mcp.computer_use.lock import ComputerUseBusyError, DesktopLock
-from yutori_mcp.computer_use.result import failure, format_result, redact, terminal_result
+from yutori_mcp.computer_use.result import (
+    FINAL_OUTPUT_HEADING,
+    Terminal,
+    failure,
+    format_result,
+    format_terminal_action,
+    format_terminal_result,
+    redact,
+    supports_color,
+    supports_glyphs,
+    terminal_result,
+)
 from yutori_mcp.computer_use.supervisor import attach_run_link, run_chat_id
 from yutori_mcp.computer_use.runner import (
     ActionReporter,
     Emitter,
     RequestError,
     RunGuard,
+    batch_action_previews,
     classify_result,
     parse_request,
 )
@@ -1209,7 +1221,7 @@ async def test_smoke_allows_two_minutes_for_live_check(monkeypatch, tmp_path):
     _patch_smoke_preflight(monkeypatch, cli, tmp_path / "desktop.lock")
     monkeypatch.setattr(cli, "_mechanical_calculator_check", AsyncMock(return_value="42"))
     monkeypatch.setattr(supervisor, "run_task", run)
-    monkeypatch.setattr(cli, "format_result", lambda _result: "complete")
+    monkeypatch.setattr(cli, "format_terminal_result", lambda *_args, **_kwargs: "complete")
     monkeypatch.setattr(
         "yutori_mcp.adapter.resolve_run_credentials_and_platform_url",
         lambda: ("dev-key", "https://api.yutori.com/v1", "https://platform.yutori.com"),
@@ -2119,7 +2131,7 @@ async def test_cli_run_forwards_the_mode_and_prints_the_matching_notice(monkeypa
     assert run.await_args.kwargs["platform_url"] == "https://platform.yutori.com"
     out = capsys.readouterr().out
     assert cli.hands_off_notice("background") in out
-    assert "Delivery mode: background" in out
+    assert "completed" in out and "background" in out
     with pytest.raises(ValidationError, match="requires app"):
         await cli._run_custom(SimpleNamespace(**{**vars(args), "app": None}))
 
@@ -2588,3 +2600,198 @@ def test_cli_stop_prints_the_stop_outcome(monkeypatch, capsys):
     args = parser.parse_args(["computer-use", "stop"])
     assert cli.dispatch(args.computer_use_command, args) == 0
     assert capsys.readouterr().out == "No computer-use run is active.\n"
+
+
+def _batch(*members: dict[str, Any]) -> dict[str, Any]:
+    return {"name": "computer_batch", "arguments": {"actions": list(members)}}
+
+
+def test_batch_action_previews_describe_each_member_of_the_batch():
+    previews = batch_action_previews(
+        _batch(
+            {"action": "screenshot"},
+            {"action": "left_click", "coordinates": [412, 318], "modifier": "ctrl"},
+            {"action": "type", "text": "yutori.com/company"},
+            {"action": "key_press", "key": "cmd+l"},
+            {"action": "scroll", "coordinates": [500, 500], "direction": "down", "amount": 3},
+            {"action": "wait", "duration": 1.5},
+            # The nested envelope tool sets 20260812/20260815 advertise, which
+            # flatten_batch_member() folds into the flat shape before rendering.
+            {"name": "drag", "arguments": {"start_coordinates": [10, 20], "coordinates": [30, 40]}},
+        )
+    )
+    assert previews == [
+        "screenshot",
+        "left_click (412,318) +ctrl",
+        'type "yutori.com/company"',
+        "key_press cmd+l",
+        "scroll (500,500) down x3",
+        "wait 1.5s",
+        "drag (10,20) -> (30,40)",
+    ]
+
+
+def test_batch_action_previews_only_apply_to_batches_and_survive_junk_members():
+    assert batch_action_previews({"name": "bash", "arguments": {"command": "ls"}}) is None
+    assert batch_action_previews(_batch()) is None
+    assert batch_action_previews({"name": "computer_batch", "arguments": {"actions": "nope"}}) is None
+    # A malformed coordinate pair is dropped rather than rendered or raised on.
+    assert batch_action_previews(_batch({"action": "left_click", "coordinates": [1]}, "junk")) == ["left_click"]
+
+
+def test_batch_action_previews_redact_a_secret_the_model_typed(monkeypatch):
+    monkeypatch.setenv("DEMO_API_KEY", "super-secret-value")
+    (preview,) = batch_action_previews(_batch({"action": "type", "text": "super-secret-value"}))
+    assert "super-secret-value" not in preview
+    (long_preview,) = batch_action_previews(_batch({"action": "type", "text": "y" * 200}))
+    typed = long_preview.removeprefix('type "').removesuffix('"')
+    assert len(typed) == runner_module.TYPED_TEXT_PREVIEW_CHARACTERS and typed.endswith("\u2026")
+
+
+async def test_action_events_carry_the_batch_detail_and_no_detail_for_other_tools():
+    stream = _CollectStream()
+    reporter = ActionReporter(Emitter(stream), time.monotonic())
+    batch = _batch({"action": "left_click", "coordinates": [1, 2]})
+    await reporter.on_computer_call_start(batch)
+    await reporter.on_computer_call_end(batch, [{"output": "ok"}])
+    shell = {"name": "bash", "arguments": {"command": "ls"}}
+    await reporter.on_computer_call_start(shell)
+    await reporter.on_computer_call_end(shell, [{"output": "ok"}])
+    first, second = (json.loads(line) for line in stream.lines)
+    assert first["details"] == ["left_click (1,2)"]
+    assert second["details"] is None
+
+
+def test_supports_color_honors_the_environment_and_the_tty(monkeypatch):
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    assert supports_color(SimpleNamespace(isatty=lambda: True)) is True
+    assert supports_color(SimpleNamespace(isatty=lambda: False)) is False
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    assert supports_color(SimpleNamespace(isatty=lambda: False)) is True
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert supports_color(SimpleNamespace(isatty=lambda: True)) is False
+
+
+def test_supports_glyphs_falls_back_for_an_ascii_stream():
+    assert supports_glyphs(SimpleNamespace(encoding="utf-8")) is True
+    assert supports_glyphs(SimpleNamespace(encoding="ascii")) is False
+    ascii_only = Terminal(color=False, glyphs=False)
+    assert ascii_only.glyph("check").isascii() and ascii_only.rule("X").isascii()
+
+
+def test_terminal_paints_only_when_color_is_on():
+    assert Terminal(color=False)("ok", "green") == "ok"
+    assert Terminal(color=True)("ok", "green") == "\033[32mok\033[0m"
+
+
+def test_format_terminal_action_shows_the_batch_members_and_the_shell_command():
+    plain = Terminal(color=False, glyphs=False)
+    lines = format_terminal_action(
+        {
+            "index": 4,
+            "tool": "computer_batch",
+            "status": "executed",
+            "duration_ms": 1630,
+            "elapsed_ms": 14691,
+            "details": ["left_click (1,2)", 'type "hi"'],
+        },
+        plain,
+    )
+    assert lines[0] == "v #4 computer_batch  1.6s | at 14.7s"
+    assert [line.strip() for line in lines[1:]] == ["> left_click (1,2)", '> type "hi"']
+    refused = format_terminal_action(
+        {"index": 0, "tool": "bash", "status": "refused", "refusal_code": "driver_refused", "command": "ls"},
+        plain,
+    )
+    assert refused[0] == "x #0 bash refused (driver_refused)"
+    assert refused[1].strip() == "$ ls"
+
+
+def test_format_terminal_result_leads_with_a_labeled_final_output_block():
+    text = format_terminal_result(
+        {
+            "outcome": "completed",
+            "delivery_mode": "foreground",
+            "final_text": "  Here are the 14 employees.  ",
+            "elapsed_ms": 292147,
+            "steps": 35,
+            "run_url": "https://platform.yutori.com/navigator/chats/abc",
+        },
+        Terminal(color=False, glyphs=False),
+    )
+    lines = [line for line in text.split("\n") if line.strip()]
+    assert FINAL_OUTPUT_HEADING in lines[0]
+    assert lines[1] == "Here are the 14 employees."
+    assert lines[3].startswith("v completed") and "4m 52.1s" in lines[3] and "35 model turns" in lines[3]
+    assert lines[4].split() == ["run", "https://platform.yutori.com/navigator/chats/abc"]
+
+
+def test_format_terminal_result_omits_the_action_list_unless_asked():
+    result = {
+        "outcome": "failed",
+        "delivery_mode": "foreground",
+        "actions": [{"index": 0, "tool": "bash", "status": "executed", "command": "ls"}],
+    }
+    plain = Terminal(color=False, glyphs=False)
+    assert "bash" not in format_terminal_result(result, plain)
+    assert "bash" in format_terminal_result(result, plain, include_actions=True)
+
+
+def test_format_terminal_result_reports_the_background_surfaces():
+    text = format_terminal_result(
+        {
+            "outcome": "limit",
+            "delivery_mode": "background",
+            "window_target": {"pid": 42, "app_name": "Notes", "window_id": 7},
+            "reasoning_overlay_requested": True,
+            "reasoning_overlay_effective": True,
+            "codec": "jpeg",
+            "fallback_escalations": 1,
+            "fallback_skips": 2,
+            "preview_frames": 7,
+        },
+        Terminal(color=False, glyphs=False),
+    )
+    assert "! limit" in text
+    assert "window    Notes (pid 42, window 7)" in text
+    assert "menu bar  active; codec: jpeg" in text
+    assert "delivery  1 foreground escalation(s), 0 background refusal(s)" in text
+    assert "retry(ies) skipped after the window changed" in text
+    assert "activity  7 frame(s) streamed while the window was open" in text
+
+
+def test_cli_run_header_states_the_task_target_and_limits():
+    from yutori_mcp.computer_use import cli
+
+    params = ComputerUseTaskInput(task="list the team", app="Safari", start_url="https://yutori.com", minutes=5)
+    text = cli.format_run_header(params, Terminal(color=False, glyphs=False))
+    assert "task      list the team" in text
+    assert "target    Safari  https://yutori.com" in text
+    assert "limits    foreground  |  5 min  |  60 model turns" in text
+    assert cli.hands_off_notice("foreground") in text
+
+
+async def test_progress_reporter_folds_the_batch_detail_into_one_message():
+    from yutori_mcp import server
+
+    messages: list[str] = []
+    ctx = SimpleNamespace(
+        report_progress=AsyncMock(),
+        info=lambda message: messages.append(message) or asyncio.sleep(0),
+    )
+    on_event = server._progress_reporter(ctx, 12)
+    await on_event(
+        {
+            "type": "action",
+            "index": 3,
+            "tool": "computer_batch",
+            "status": "executed",
+            "elapsed_ms": 900,
+            "details": ["left_click (1,2)", 'type "hi"'],
+        }
+    )
+    (message,) = messages
+    assert message.count("\n") == 0
+    assert message.endswith('left_click (1,2); type "hi"')
