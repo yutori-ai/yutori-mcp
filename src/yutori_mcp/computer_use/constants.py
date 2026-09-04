@@ -22,11 +22,11 @@ TOOL_SET = "computer_use_tools-20260830"
 DELIVERY_MODE_FOREGROUND = "foreground"
 DELIVERY_MODE_BACKGROUND = "background"
 DELIVERY_MODES = (DELIVERY_MODE_FOREGROUND, DELIVERY_MODE_BACKGROUND)
-SDK_VERSION = "0.9.13"
+SDK_VERSION = "0.9.14"
 # The PyPI wheel digest and a digest derived from its stable RECORD entries.
 # Doctor compares the latter with the unpacked installation before any task runs.
-SDK_ARTIFACT_SHA256 = "d3d8b252332cfcd87d6d2e33ebb4b4c54e5ab51a07dc790f0e5e3906de628d14"
-SDK_INSTALLATION_SHA256 = "92bb44226b462858bdb1d6d39c9a33e2509813b3f6812046b0e4c213d8177666"
+SDK_ARTIFACT_SHA256 = "81f2b7e124eaba0501e23142a9a83f145ddb69d9e46ace9955e12a794b02aca7"
+SDK_INSTALLATION_SHA256 = "629893d1286a8893db1538c216d6d077c1ff20515f9e5b4b0708e9a503cbe35f"
 SDK_PROVENANCE_SHA256 = "7cab595d2f00e1a9ab5cd121204fbd6dd4c24163ead3eb76f76eef7fba495fc4"
 
 # The cua-driver release that implements this tool contract, and the checksum
