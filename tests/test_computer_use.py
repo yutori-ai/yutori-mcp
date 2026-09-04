@@ -1550,14 +1550,14 @@ async def test_run_request_wires_sdk_runtime_and_reports_effective_state(monkeyp
     assert agent.kwargs["tool_set"] == TOOL_SET
     assert agent.kwargs["presentation"] is computer.presentation
     assert agent.kwargs["supports_click_modifiers"] is True
-    assert "Shell commands run headlessly" in agent.kwargs["instructions"]
-    assert "Do not use osascript" in agent.kwargs["instructions"]
-    assert "Never inspect a GUI application's databases" in agent.kwargs["instructions"]
-    assert "use at most three shell calls for research" in agent.kwargs["instructions"]
-    assert "never inspect browser profile databases" in agent.kwargs["instructions"]
-    assert "stop immediately instead of trying alternate URLs" in agent.kwargs["instructions"]
-    assert "Never ask them to give you a password" in agent.kwargs["instructions"]
-    assert "Do not install software or packages" in agent.kwargs["instructions"]
+    assert "Shell commands run headlessly" in agent.kwargs["system_prompt"]
+    assert "Do not use osascript" in agent.kwargs["system_prompt"]
+    assert "Never inspect a GUI application's databases" in agent.kwargs["system_prompt"]
+    assert "use at most three shell calls for research" in agent.kwargs["system_prompt"]
+    assert "never inspect browser profile databases" in agent.kwargs["system_prompt"]
+    assert "stop immediately instead of trying alternate URLs" in agent.kwargs["system_prompt"]
+    assert "Never ask them to give you a password" in agent.kwargs["system_prompt"]
+    assert "Do not install software or packages" in agent.kwargs["system_prompt"]
     assert computer.closed
     result = json.loads(stream.lines[-1])
     assert result["final_text"] == "Done"
@@ -1596,6 +1596,31 @@ async def test_run_request_reports_an_action_interrupted_by_cancellation(monkeyp
     assert [event["type"] for event in events[-2:]] == ["action", "result"]
     assert events[-2]["raw_status"] == "interrupted"
     assert events[-2]["status"] == "uncertain"
+
+
+class _LimitAgent(_FakeAgent):
+    async def run(self, messages):
+        self.messages = messages
+        for callback in self.callbacks:
+            if hasattr(callback, "on_run_continue"):
+                while await callback.on_run_continue({}, [], []):
+                    pass
+        yield {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Partial"}]}]}
+
+
+async def test_run_request_gives_the_limit_summary_the_runs_system_prompt(monkeypatch):
+    _FakeAgent.instances.clear()
+    monkeypatch.setattr(runner_module, "MacOSComputer", _FakeComputer)
+    monkeypatch.setattr(runner_module, "N2ComputerAgent", _LimitAgent)
+    stream = _CollectStream()
+    request = parse_request(_valid_request(deadline_ms=int((time.time() + 60) * 1000), max_steps=1))
+
+    assert await runner_module.run_request(request, Emitter(stream), "yt-secret") == "limit"
+
+    run_agent, summary_agent = _FakeAgent.instances
+    assert summary_agent.kwargs["system_prompt"] == run_agent.kwargs["system_prompt"]
+    assert summary_agent.messages[0] == {"role": "user", "content": "open calculator"}
+    assert summary_agent.messages[-1] == {"role": "user", "content": runner_module.STOP_SUMMARY_PROMPT}
 
 
 async def test_run_request_reports_limit_when_the_deadline_has_already_passed():
@@ -2040,7 +2065,7 @@ async def test_run_request_background_binds_the_window_and_never_fronts(monkeypa
     assert prepared.await_args.args[1:] == ("Notes", None) and prepared.await_args.kwargs == {"front": False}
     assert computer.window_targets == [_FakeWindowTarget(42, 7, app_name="Notes")]
     assert computer.target_pid == 42
-    assert agent.kwargs["instructions"].startswith("You control exactly one application window: Notes.")
+    assert agent.kwargs["system_prompt"].startswith("You control exactly one application window: Notes.")
     assert agent.kwargs["presentation"] is computer.presentation
     result = json.loads(stream.lines[-1])
     assert result["delivery_mode"] == "background"
