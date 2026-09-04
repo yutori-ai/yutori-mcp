@@ -78,7 +78,7 @@ Use https://yutori.com/api/llms.txt and set up Yutori for me.
 
 2. Install MCP using [add-mcp](https://neon.com/blog/add-mcp) (requires Node.js):
    ```
-   npx add-mcp "uvx yutori-mcp"
+   npx -y add-mcp -n yutori "uvx yutori-mcp"
    ```
 
     Pick the clients you want to configure.
