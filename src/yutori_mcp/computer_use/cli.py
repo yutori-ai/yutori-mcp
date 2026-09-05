@@ -7,6 +7,7 @@ import os
 import subprocess
 import tempfile
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
@@ -272,16 +273,50 @@ def apply_computer_use_environment(env: str | None) -> None:
         os.environ.pop(ENV_VAR_ENVIRONMENT, None)
 
 
+def _dispatch_setup(_args: argparse.Namespace | None) -> int:
+    return _setup()
+
+
+def _dispatch_doctor(_args: argparse.Namespace | None) -> int:
+    return _doctor()
+
+
+def _dispatch_smoke(_args: argparse.Namespace | None) -> int:
+    return asyncio.run(_smoke_live())
+
+
+def _dispatch_stop(_args: argparse.Namespace | None) -> int:
+    print(stop_active_run())
+    return 0
+
+
+def _dispatch_run(args: argparse.Namespace | None) -> int:
+    if args is None:
+        raise ValueError("computer-use run needs its parsed arguments")
+    return asyncio.run(_run_custom(args))
+
+
+# Pairing each subcommand's help text with its handler keeps register_parser's
+# advertised commands and dispatch's implemented commands from drifting apart,
+# mirroring server.py's _AUTH_SUBCOMMANDS table.
+_COMPUTER_USE_SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.Namespace | None], int]]] = {
+    "setup": ("Install and configure the pinned CuaDriver", _dispatch_setup),
+    "doctor": ("Run all computer-use readiness checks", _dispatch_doctor),
+    "smoke": ("Run Calculator mechanical and live checks", _dispatch_smoke),
+    "stop": ("Stop the active computer-use run (the local stop for background runs)", _dispatch_stop),
+    "run": ("Run one custom task on the visible desktop or in one app window", _dispatch_run),
+}
+
+
 def register_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     parser = subparsers.add_parser("computer-use", help="Set up, diagnose, and run macOS computer use")
     commands = parser.add_subparsers(dest="computer_use_command", required=True)
-    commands.add_parser("setup", help="Install and configure the pinned CuaDriver")
-    commands.add_parser("doctor", help="Run all computer-use readiness checks")
-    commands.add_parser("smoke", help="Run Calculator mechanical and live checks")
-    commands.add_parser("stop", help="Stop the active computer-use run (the local stop for background runs)")
-    run_parser = commands.add_parser("run", help="Run one custom task on the visible desktop or in one app window")
+    for name, (help_text, _) in _COMPUTER_USE_SUBCOMMANDS.items():
+        if name != "run":
+            commands.add_parser(name, help=help_text)
+    run_parser = commands.add_parser("run", help=_COMPUTER_USE_SUBCOMMANDS["run"][0])
     run_parser.add_argument("task", help="Task for the model to perform")
     run_parser.add_argument("--app", default=None, help="Application to target")
     run_parser.add_argument("--start-url", dest="start_url", default=None, help="URL to open in the app")
@@ -313,21 +348,11 @@ def register_parser(
 
 
 def dispatch(command: str, args: argparse.Namespace | None = None) -> int:
-    if command not in {"setup", "doctor", "smoke", "run", "stop"}:
+    if command not in _COMPUTER_USE_SUBCOMMANDS:
         raise ValueError(f"Unknown computer-use command: {command}")
+    _, handler = _COMPUTER_USE_SUBCOMMANDS[command]
     try:
-        if command == "setup":
-            return _setup()
-        if command == "doctor":
-            return _doctor()
-        if command == "stop":
-            print(stop_active_run())
-            return 0
-        if command == "run":
-            if args is None:
-                raise ValueError("computer-use run needs its parsed arguments")
-            return asyncio.run(_run_custom(args))
-        return asyncio.run(_smoke_live())
+        return handler(args)
     except ValueError as error:
         # Out-of-bounds run arguments should read as a clear message,
         # not a traceback. Pydantic's ValidationError is a ValueError too.
