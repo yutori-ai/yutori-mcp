@@ -152,6 +152,33 @@ def _format_api_error(e: YutoriAPIError) -> str:
     return f"API Error ({e.status_code}): {e.message}"
 
 
+async def _invoke_computer_use(args: dict[str, Any]) -> str:
+    """Invoke the run_computer_use_task handler and return the formatted result text.
+
+    This tool follows a different error-handling contract than the rest of
+    _invoke: it always returns a terminal result dict (a failure() result
+    stands in for an unclassified error) rather than converting failures into
+    a raised RuntimeError, so it gets its own function instead of sharing
+    _invoke's outer try/except.
+    """
+    from .computer_use.constants import DELIVERY_MODES
+    from .computer_use.result import failure, format_result
+
+    handler = _TOOL_HANDLERS["run_computer_use_task"]
+    try:
+        result, _ = await handler(None, args)  # type: ignore[arg-type]
+    except ValidationError:
+        raise
+    # MCP callers need the same actionable result shape even when a
+    # platform integration raises an error we cannot classify here.
+    except Exception as error:  # noqa: BLE001
+        logger.error("Computer-use task failed before the runner returned a result")
+        requested_mode = args.get("mode")
+        delivery_mode = str(requested_mode) if requested_mode in DELIVERY_MODES else COMPUTER_USE_DEFAULT_MODE
+        result = failure(str(error), delivery_mode=delivery_mode)
+    return format_result(result)
+
+
 async def _invoke(tool_name: str, args: dict[str, Any]) -> str:
     """Invoke a tool handler and return the formatted response text.
 
@@ -159,28 +186,10 @@ async def _invoke(tool_name: str, args: dict[str, Any]) -> str:
     framework marks the result isError=True; ValidationError re-raised as-is;
     unexpected exceptions logged and re-raised.
     """
+    if tool_name == "run_computer_use_task":
+        return await _invoke_computer_use(args)
     handler = _TOOL_HANDLERS[tool_name]
     try:
-        if tool_name == "run_computer_use_task":
-            from .computer_use.constants import DELIVERY_MODES
-            from .computer_use.result import failure, format_result
-
-            try:
-                result, _ = await handler(None, args)  # type: ignore[arg-type]
-            except ValidationError:
-                raise
-            # MCP callers need the same actionable result shape even when a
-            # platform integration raises an error we cannot classify here.
-            except Exception as error:  # noqa: BLE001
-                logger.error(
-                    "Computer-use task failed before the runner returned a result"
-                )
-                requested_mode = args.get("mode")
-                delivery_mode = (
-                    str(requested_mode) if requested_mode in DELIVERY_MODES else COMPUTER_USE_DEFAULT_MODE
-                )
-                result = failure(str(error), delivery_mode=delivery_mode)
-            return format_result(result)
         client = get_adapter()
         result, context = await handler(client, args)
         return format_response(tool_name, result, **context)
