@@ -448,16 +448,7 @@ async def test_supervisor_does_not_let_a_blocked_progress_callback_stall_protoco
         started.set()
         await asyncio.Future()
 
-    action = {
-        "type": "action",
-        "index": 0,
-        "tool": "left_click",
-        "status": "executed",
-        "raw_status": "confirmed",
-        "delivery_mode": "foreground",
-        "route": "pixel",
-        "refusal_code": None,
-    }
+    action = _action_event()
     process = _Process(
         _stream(json.dumps(_ready_event()), json.dumps(action), json.dumps(_result_event())),
         _stream(""),
@@ -798,16 +789,7 @@ async def test_run_task_uses_only_python_runner_and_sdk_driver_discovery(tmp_pat
 
 
 async def test_run_task_links_the_run_to_the_platform_chat_page(tmp_path):
-    action = {
-        "index": 0,
-        "tool": "screenshot",
-        "status": "executed",
-        "raw_status": "confirmed",
-        "delivery_mode": "foreground",
-        "route": "pixel",
-        "refusal_code": None,
-        "chat_id": "chat-1",
-    }
+    action = _action_event(tool="screenshot", chat_id="chat-1")
     supervised = terminal_result("limit", "deadline", actions=[action])
     with _patched_run_task_supervise(tmp_path, result=supervised):
         result = await run_task(**_run_task_kwargs(tmp_path, platform_url="https://platform.dev.yutori.com"))
@@ -1905,20 +1887,14 @@ def test_format_result_handles_python_runtime_action_fields():
         {
             "outcome": "completed",
             "actions": [
-                {
-                    "index": 0,
-                    "tool": "bash",
-                    "status": "executed",
-                    "raw_status": "confirmed",
-                    "delivery_mode": "foreground",
-                    "route": "pixel",
-                    "refusal_code": None,
-                    "elapsed_ms": 10,
-                    "duration_ms": 5,
-                    "command": "echo safe",
-                    "run_in_background": True,
-                    "background_task_id": "bash-1",
-                }
+                _action_event(
+                    tool="bash",
+                    elapsed_ms=10,
+                    duration_ms=5,
+                    command="echo safe",
+                    run_in_background=True,
+                    background_task_id="bash-1",
+                )
             ],
         }
     )
@@ -2475,18 +2451,7 @@ def test_format_result_renders_background_fields():
             "background_refusals": 2,
             "window_target": {"pid": 42, "window_id": 7, "app_name": "Notes"},
             "actions": [
-                {
-                    "index": 0,
-                    "tool": "left_click",
-                    "status": "executed",
-                    "raw_status": "confirmed",
-                    "delivery_mode": "foreground",
-                    "route": "accessibility",
-                    "refusal_code": None,
-                    "effect": "confirmed",
-                    "escalated": True,
-                    "duration_ms": 5,
-                }
+                _action_event(route="accessibility", effect="confirmed", escalated=True, duration_ms=5)
             ],
         }
     )
