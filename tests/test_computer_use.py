@@ -2638,11 +2638,15 @@ def test_supports_color_honors_the_environment_and_the_tty(monkeypatch):
     assert supports_color(SimpleNamespace(isatty=lambda: True)) is False
 
 
+# The Terminal every rendering test below wants: no ANSI codes and no non-ASCII glyphs, so
+# assertions can pin exact byte-for-byte output instead of the color/glyph-detecting default.
+_PLAIN_TERMINAL = Terminal(color=False, glyphs=False)
+
+
 def test_supports_glyphs_falls_back_for_an_ascii_stream():
     assert supports_glyphs(SimpleNamespace(encoding="utf-8")) is True
     assert supports_glyphs(SimpleNamespace(encoding="ascii")) is False
-    ascii_only = Terminal(color=False, glyphs=False)
-    assert ascii_only.glyph("check").isascii() and ascii_only.rule("X").isascii()
+    assert _PLAIN_TERMINAL.glyph("check").isascii() and _PLAIN_TERMINAL.rule("X").isascii()
 
 
 def test_terminal_paints_only_when_color_is_on():
@@ -2651,7 +2655,6 @@ def test_terminal_paints_only_when_color_is_on():
 
 
 def test_format_terminal_action_shows_the_batch_members_and_the_shell_command():
-    plain = Terminal(color=False, glyphs=False)
     lines = format_terminal_action(
         {
             "index": 4,
@@ -2661,13 +2664,13 @@ def test_format_terminal_action_shows_the_batch_members_and_the_shell_command():
             "elapsed_ms": 14691,
             "details": ["left_click (1,2)", 'type "hi"'],
         },
-        plain,
+        _PLAIN_TERMINAL,
     )
     assert lines[0] == "v #4 computer_batch  1.6s | at 14.7s"
     assert [line.strip() for line in lines[1:]] == ["> left_click (1,2)", '> type "hi"']
     refused = format_terminal_action(
         {"index": 0, "tool": "bash", "status": "refused", "refusal_code": "driver_refused", "command": "ls"},
-        plain,
+        _PLAIN_TERMINAL,
     )
     assert refused[0] == "x #0 bash refused (driver_refused)"
     assert refused[1].strip() == "$ ls"
@@ -2683,7 +2686,7 @@ def test_format_terminal_result_leads_with_a_labeled_final_output_block():
             "steps": 35,
             "run_url": "https://platform.yutori.com/navigator/chats/abc",
         },
-        Terminal(color=False, glyphs=False),
+        _PLAIN_TERMINAL,
     )
     lines = [line for line in text.split("\n") if line.strip()]
     assert FINAL_OUTPUT_HEADING in lines[0]
@@ -2698,9 +2701,8 @@ def test_format_terminal_result_omits_the_action_list_unless_asked():
         "delivery_mode": "foreground",
         "actions": [{"index": 0, "tool": "bash", "status": "executed", "command": "ls"}],
     }
-    plain = Terminal(color=False, glyphs=False)
-    assert "bash" not in format_terminal_result(result, plain)
-    assert "bash" in format_terminal_result(result, plain, include_actions=True)
+    assert "bash" not in format_terminal_result(result, _PLAIN_TERMINAL)
+    assert "bash" in format_terminal_result(result, _PLAIN_TERMINAL, include_actions=True)
 
 
 def test_format_terminal_result_reports_the_background_surfaces():
@@ -2716,7 +2718,7 @@ def test_format_terminal_result_reports_the_background_surfaces():
             "fallback_skips": 2,
             "preview_frames": 7,
         },
-        Terminal(color=False, glyphs=False),
+        _PLAIN_TERMINAL,
     )
     assert "! limit" in text
     assert "window    Notes (pid 42, window 7)" in text
@@ -2730,7 +2732,7 @@ def test_cli_run_header_states_the_task_target_and_limits():
     from yutori_mcp.computer_use import cli
 
     params = ComputerUseTaskInput(task="list the team", app="Safari", start_url="https://yutori.com", minutes=5)
-    text = cli.format_run_header(params, Terminal(color=False, glyphs=False))
+    text = cli.format_run_header(params, _PLAIN_TERMINAL)
     assert "task      list the team" in text
     assert "target    Safari  https://yutori.com" in text
     assert "limits    foreground  |  5 min  |  60 model turns" in text
