@@ -167,22 +167,31 @@ class TestFormatUsage:
         assert "Active Scouts: 3" in result
 
 
+def _scout_list_response(scouts=None, total=0, summary=None, **overrides):
+    """Build a list_scouts response payload for tests, following the _ready_event/_action_event convention."""
+    if summary is None:
+        summary = {"active": 0, "paused": 0, "done": 0}
+    response = {
+        "scouts": scouts if scouts is not None else [],
+        "total": total,
+        "summary": summary,
+    }
+    response.update(overrides)
+    return response
+
+
 class TestFormatListScouts:
     def test_empty_list(self):
         """Empty scouts list shows appropriate message."""
-        response = {
-            "scouts": [],
-            "total": 0,
-            "summary": {"active": 0, "paused": 0, "done": 0},
-        }
+        response = _scout_list_response()
         result = format_list_scouts(response)
         assert "Found 0 scouts" in result
         assert "No scouts to display" in result
 
     def test_with_scouts(self):
         """Scouts are listed with key details."""
-        response = {
-            "scouts": [
+        response = _scout_list_response(
+            scouts=[
                 {
                     "id": "abc-123",
                     "display_name": "Test Scout",
@@ -192,10 +201,10 @@ class TestFormatListScouts:
                     "next_output_timestamp": "2026-01-21T05:00:00Z",
                 }
             ],
-            "total": 1,
-            "summary": {"active": 1, "paused": 0, "done": 0},
-            "has_more": False,
-        }
+            total=1,
+            summary={"active": 1, "paused": 0, "done": 0},
+            has_more=False,
+        )
         result = format_list_scouts(response)
         assert "Found 1 scouts" in result
         assert "Test Scout" in result
@@ -204,11 +213,11 @@ class TestFormatListScouts:
 
     def test_summary_breakdown_line_exact(self):
         """Pin the exact 'Found N scouts: a active, b paused, c done.' summary line."""
-        response = {
-            "scouts": [{"id": "abc", "query": "test", "status": "active"}],
-            "total": 6,
-            "summary": {"active": 3, "paused": 2, "done": 1},
-        }
+        response = _scout_list_response(
+            scouts=[{"id": "abc", "query": "test", "status": "active"}],
+            total=6,
+            summary={"active": 3, "paused": 2, "done": 1},
+        )
         result = format_list_scouts(response)
         assert "Found 6 scouts: 3 active, 2 paused, 1 done." in result
 
@@ -223,31 +232,31 @@ class TestFormatListScouts:
 
     def test_has_more_hint(self):
         """When has_more is true, shows hint to increase limit."""
-        response = {
-            "scouts": [{"id": "abc", "query": "test", "status": "active"}],
-            "total": 50,
-            "summary": {"active": 50, "paused": 0, "done": 0},
-            "has_more": True,
-        }
+        response = _scout_list_response(
+            scouts=[{"id": "abc", "query": "test", "status": "active"}],
+            total=50,
+            summary={"active": 50, "paused": 0, "done": 0},
+            has_more=True,
+        )
         result = format_list_scouts(response)
         assert "limit=50" in result
 
     def test_cursor_hint_when_next_cursor_present(self):
         """has_more with a next_cursor surfaces a cursor-pagination hint."""
-        response = {
-            "scouts": [{"id": "abc", "query": "test", "status": "active"}],
-            "total": 50,
-            "summary": {"active": 50, "paused": 0, "done": 0},
-            "has_more": True,
-            "next_cursor": "scout-cur-2",
-        }
+        response = _scout_list_response(
+            scouts=[{"id": "abc", "query": "test", "status": "active"}],
+            total=50,
+            summary={"active": 50, "paused": 0, "done": 0},
+            has_more=True,
+            next_cursor="scout-cur-2",
+        )
         result = format_list_scouts(response)
         assert 'list_scouts(cursor="scout-cur-2")' in result
 
     def test_shows_rejection_reason(self):
         """Scout list includes rejection reason when present."""
-        response = {
-            "scouts": [
+        response = _scout_list_response(
+            scouts=[
                 {
                     "id": "abc-123",
                     "query": "monitor something",
@@ -255,9 +264,9 @@ class TestFormatListScouts:
                     "rejection_reason": "invalid_query",
                 }
             ],
-            "total": 1,
-            "summary": {"active": 0, "paused": 1, "done": 0},
-        }
+            total=1,
+            summary={"active": 0, "paused": 1, "done": 0},
+        )
         result = format_list_scouts(response)
         assert "Rejection reason: invalid_query" in result
 
@@ -620,11 +629,7 @@ class TestFormatResponse:
     def test_routes_to_correct_formatter(self):
         """format_response routes to the right formatter."""
         # Test list_scouts routing
-        response = {
-            "scouts": [],
-            "total": 0,
-            "summary": {"active": 0, "paused": 0, "done": 0},
-        }
+        response = _scout_list_response()
         result = format_response("list_scouts", response)
         assert "Found 0 scouts" in result
 
@@ -750,11 +755,11 @@ class TestFormatterNullSafety:
     """Regression tests for present-but-null fields in API responses."""
 
     def test_list_scouts_with_explicit_null_query(self):
-        response = {
-            "scouts": [{"id": "abc", "query": None, "status": "active"}],
-            "total": 1,
-            "summary": {"active": 1, "paused": 0, "done": 0},
-        }
+        response = _scout_list_response(
+            scouts=[{"id": "abc", "query": None, "status": "active"}],
+            total=1,
+            summary={"active": 1, "paused": 0, "done": 0},
+        )
         result = format_list_scouts(response)
         assert "Untitled" in result
 
@@ -769,8 +774,8 @@ class TestTimestampFormatting:
 
     def test_list_scouts_with_unix_ms_next_run(self):
         assert _format_date(1769997854699) == "2026-02-02"
-        response = {
-            "scouts": [
+        response = _scout_list_response(
+            scouts=[
                 {
                     "id": "abc",
                     "query": "q",
@@ -778,9 +783,9 @@ class TestTimestampFormatting:
                     "next_output_timestamp": 1769997854699,
                 }
             ],
-            "total": 1,
-            "summary": {"active": 1, "paused": 0, "done": 0},
-        }
+            total=1,
+            summary={"active": 1, "paused": 0, "done": 0},
+        )
         result = format_list_scouts(response)
         assert "Next: 2026-02-02" in result
 
