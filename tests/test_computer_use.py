@@ -811,6 +811,17 @@ async def test_run_task_links_the_run_to_the_platform_chat_page(tmp_path):
     assert "Run: https://platform.dev.yutori.com/navigator/chats/chat-1" in format_result(result)
 
 
+def _patch_server_lock(monkeypatch, lock_module, lock, first_blocker=lambda: None) -> None:
+    """Patch DesktopLock and first_blocker() for tests driving server._handle_computer_use directly.
+
+    Mirrors _patch_smoke_preflight's convention for the CLI's DesktopLock/first_blocker pair;
+    every caller here reserves the desktop at a test-owned lock and stubs the preflight gate
+    before exercising the server handler, and only the lock instance and blocker differ.
+    """
+    monkeypatch.setattr(lock_module, "DesktopLock", lambda: lock)
+    monkeypatch.setattr(preflight, "first_blocker", first_blocker)
+
+
 async def test_server_holds_desktop_lock_across_preflight_and_runner(monkeypatch, tmp_path):
     from yutori_mcp import server
     from yutori_mcp.computer_use import lock as lock_module
@@ -826,8 +837,7 @@ async def test_server_holds_desktop_lock_across_preflight_and_runner(monkeypatch
         assert lock._file is not None
         return {"outcome": "completed"}
 
-    monkeypatch.setattr(lock_module, "DesktopLock", lambda: lock)
-    monkeypatch.setattr(preflight, "first_blocker", first_blocker)
+    _patch_server_lock(monkeypatch, lock_module, lock, first_blocker)
     monkeypatch.setattr(supervisor, "run_task", run_with_lock)
     _patch_run_credentials(monkeypatch, api_key="api-key")
 
@@ -1998,8 +2008,7 @@ async def test_server_forwards_mode_and_fallback_to_the_runner(monkeypatch, tmp_
         forwarded.update(kwargs)
         return {"outcome": "completed", "delivery_mode": "background"}
 
-    monkeypatch.setattr(lock_module, "DesktopLock", lambda: DesktopLock(tmp_path / "desktop.lock"))
-    monkeypatch.setattr(preflight, "first_blocker", lambda: None)
+    _patch_server_lock(monkeypatch, lock_module, DesktopLock(tmp_path / "desktop.lock"))
     monkeypatch.setattr(supervisor, "run_task", run_with_lock)
     _patch_run_credentials(monkeypatch)
 
@@ -2044,9 +2053,8 @@ async def test_server_early_failures_preserve_the_requested_background_mode(monk
     from yutori_mcp.computer_use import lock as lock_module
 
     lock_path = tmp_path / "desktop.lock"
-    monkeypatch.setattr(lock_module, "DesktopLock", lambda: DesktopLock(lock_path))
     blocker = preflight.CheckResult("driver", False, "missing", "run setup")
-    monkeypatch.setattr(preflight, "first_blocker", lambda: blocker)
+    _patch_server_lock(monkeypatch, lock_module, DesktopLock(lock_path), lambda: blocker)
 
     arguments = {"task": "add a note", "app": "Notes", "mode": "background"}
     blocked, _ = await server._handle_computer_use(None, arguments)
