@@ -1637,11 +1637,21 @@ class _FakeAgent:
         yield {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Done [DONE]"}]}]}
 
 
+def _patch_runner_sdk(monkeypatch, *, agent_cls: type = _FakeAgent) -> None:
+    """Point runner_module's SDK imports at the fakes it drives run_request() with.
+
+    Six run_request() tests each independently set both `MacOSComputer` (always
+    `_FakeComputer`) and `N2ComputerAgent`, differing only in which `_FakeAgent`
+    subclass scripts the run's tool calls.
+    """
+    monkeypatch.setattr(runner_module, "MacOSComputer", _FakeComputer)
+    monkeypatch.setattr(runner_module, "N2ComputerAgent", agent_cls)
+
+
 async def test_run_request_wires_sdk_runtime_and_reports_effective_state(monkeypatch):
     _FakeComputer.instances.clear()
     _FakeAgent.instances.clear()
-    monkeypatch.setattr(runner_module, "MacOSComputer", _FakeComputer)
-    monkeypatch.setattr(runner_module, "N2ComputerAgent", _FakeAgent)
+    _patch_runner_sdk(monkeypatch)
     stream = _CollectStream()
     request = parse_request(_valid_request(deadline_ms=int((time.time() + 60) * 1000)))
     outcome = await runner_module.run_request(request, Emitter(stream), "yt-secret")
@@ -1693,8 +1703,7 @@ class _CancelledAgent(_FakeAgent):
 
 
 async def test_run_request_reports_an_action_interrupted_by_cancellation(monkeypatch):
-    monkeypatch.setattr(runner_module, "MacOSComputer", _FakeComputer)
-    monkeypatch.setattr(runner_module, "N2ComputerAgent", _CancelledAgent)
+    _patch_runner_sdk(monkeypatch, agent_cls=_CancelledAgent)
     stream = _CollectStream()
     request = parse_request(_valid_request(deadline_ms=int((time.time() + 60) * 1000)))
 
@@ -1755,8 +1764,7 @@ async def test_run_request_reuses_the_agent_trajectory_for_the_limit_summary(mon
             self.closed = True
 
     _FakeAgent.instances.clear()
-    monkeypatch.setattr(runner_module, "MacOSComputer", _FakeComputer)
-    monkeypatch.setattr(runner_module, "N2ComputerAgent", _LimitAgent)
+    _patch_runner_sdk(monkeypatch, agent_cls=_LimitAgent)
     monkeypatch.setattr(runner_module, "AsyncYutoriClient", SummaryClient)
     stream = _CollectStream()
     request = parse_request(_valid_request(deadline_ms=int((time.time() + 60) * 1000), max_steps=1))
@@ -1851,8 +1859,7 @@ async def test_chat_tracker_keeps_the_first_request_id_from_dict_or_model_respon
 
 
 async def test_run_request_carries_the_chat_id_on_actions_and_the_result(monkeypatch):
-    monkeypatch.setattr(runner_module, "MacOSComputer", _FakeComputer)
-    monkeypatch.setattr(runner_module, "N2ComputerAgent", _FakeAgent)
+    _patch_runner_sdk(monkeypatch)
     stream = _CollectStream()
     request = parse_request(_valid_request(deadline_ms=int((time.time() + 60) * 1000)))
 
@@ -2224,8 +2231,7 @@ async def test_run_request_background_binds_the_window_and_never_fronts(monkeypa
     _FakeComputer.instances.clear()
     _FakeAgent.instances.clear()
     prepared = AsyncMock(return_value={"name": "Notes", "pid": 42, "window_id": 7})
-    monkeypatch.setattr(runner_module, "MacOSComputer", _FakeComputer)
-    monkeypatch.setattr(runner_module, "N2ComputerAgent", _FakeAgent)
+    _patch_runner_sdk(monkeypatch)
     monkeypatch.setattr(runner_module, "prepare_app", prepared)
     monkeypatch.setattr(runner_module, "_supports_background_mode", lambda: True)
     monkeypatch.setattr("yutori.navigator.macos.MacOSWindowTarget", _FakeWindowTarget, raising=False)
@@ -2279,8 +2285,7 @@ async def test_run_request_background_binds_the_window_and_never_fronts(monkeypa
 async def test_run_request_foreground_still_consumes_the_prelaunch_frame_and_fronts(monkeypatch):
     _FakeComputer.instances.clear()
     prepared = AsyncMock(return_value={"name": "Notes", "pid": 42, "window_id": 7})
-    monkeypatch.setattr(runner_module, "MacOSComputer", _FakeComputer)
-    monkeypatch.setattr(runner_module, "N2ComputerAgent", _FakeAgent)
+    _patch_runner_sdk(monkeypatch)
     monkeypatch.setattr(runner_module, "prepare_app", prepared)
     stream = _CollectStream()
     request = parse_request(_valid_request(app="Notes", deadline_ms=int((time.time() + 60) * 1000)))
