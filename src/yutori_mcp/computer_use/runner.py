@@ -38,7 +38,7 @@ from .constants import (
     SDK_VERSION,
     TOOL_SET,
 )
-from .result import redact
+from .result import redact, remaining_seconds
 
 _FOREGROUND_OPENING = "You control the entire macOS screen. "
 _SHARED_CONTEXT = (
@@ -567,11 +567,12 @@ def _completion_text(response: Any) -> str | None:
 
 async def _await_summary_response(agent: Any, awaitable: Any, deadline: float) -> Any:
     """Await the wrap-up while honoring both the deadline and desktop Stop."""
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
+    try:
+        remaining = remaining_seconds(deadline)
+    except asyncio.TimeoutError:
         if inspect.iscoroutine(awaitable):
             awaitable.close()
-        raise asyncio.TimeoutError
+        raise
     cancellation = getattr(agent.computer, "cancellation", None)
     if cancellation is None:
         return await asyncio.wait_for(awaitable, remaining)
@@ -609,9 +610,7 @@ async def _summarize_limit_run(
     turns. Calling the shared completion surface directly means no tools are
     executed and the original agent, request chain, and timing record stay live.
     """
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        raise asyncio.TimeoutError
+    remaining_seconds(deadline)  # raises asyncio.TimeoutError once the deadline has passed
     api_kwargs = agent.completion_request([{"role": "user", "content": STOP_SUMMARY_PROMPT}])
     await api_counter.on_api_start(api_kwargs)
     model_started_at = time.monotonic()

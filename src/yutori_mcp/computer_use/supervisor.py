@@ -27,7 +27,9 @@ from .constants import (
 )
 from .lock import ComputerUseBusyError, DesktopLock
 from .preflight import child_search_path, find_cua_driver
-from .result import failure, redact, terminal_result
+from .result import failure, redact
+from .result import remaining_seconds as _remaining_seconds
+from .result import terminal_result
 
 logger = logging.getLogger(__name__)
 
@@ -203,20 +205,6 @@ async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
         except ProcessLookupError:
             pass
         await process.wait()
-
-
-def _remaining_seconds(deadline: float) -> float:
-    """Seconds left before ``deadline``, or raise ``asyncio.TimeoutError`` if none remain.
-
-    ``_supervise`` checks this before both of its waits on the child process -- the
-    per-line read loop and the final ``process.wait()`` after EOF -- so an expired
-    absolute deadline is caught the same way in both places instead of one of them
-    risking a zero/negative timeout reaching ``asyncio.wait_for``.
-    """
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        raise asyncio.TimeoutError
-    return remaining
 
 
 async def _drain_stderr(stream: asyncio.StreamReader, secret: str) -> list[str]:
