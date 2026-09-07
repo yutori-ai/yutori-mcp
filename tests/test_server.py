@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from mcp.types import CallToolRequest, CallToolRequestParams
 
+from tests.conftest import _scout_list_response
 from yutori.auth.types import AuthStatus, LoginResult
 from yutori_mcp import __version__
 from yutori_mcp.adapter import YutoriAPIError
@@ -392,11 +393,7 @@ class TestCallToolErrorContract:
 
     async def test_success_returns_formatted_text_without_error_flag(self):
         with _patched_adapter() as client:
-            client.list_scouts.return_value = {
-                "scouts": [],
-                "total": 0,
-                "summary": {"active": 0, "paused": 0, "done": 0},
-            }
+            client.list_scouts.return_value = _scout_list_response()
             result = await _call_tool("list_scouts", {})
 
         assert result.root.isError is False
@@ -463,11 +460,7 @@ class TestCallToolErrorContract:
 
     async def test_known_arguments_still_accepted(self):
         with _patched_adapter() as client:
-            client.list_scouts.return_value = {
-                "scouts": [],
-                "total": 0,
-                "summary": {"active": 0, "paused": 0, "done": 0},
-            }
+            client.list_scouts.return_value = _scout_list_response()
             result = await _call_tool("list_scouts", {"limit": 5})
 
         assert result.root.isError is False

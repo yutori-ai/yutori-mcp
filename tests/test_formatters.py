@@ -2,6 +2,7 @@
 
 import pytest
 
+from tests.conftest import _scout_list_response
 from yutori_mcp.formatters import (
     _EXTERNAL_CONTENT_END,
     _EXTERNAL_CONTENT_START,
@@ -165,19 +166,6 @@ class TestFormatUsage:
         """format_response correctly routes list_api_usage."""
         result = format_response("list_api_usage", self.USAGE_RESPONSE)
         assert "Active Scouts: 3" in result
-
-
-def _scout_list_response(scouts=None, total=0, summary=None, **overrides):
-    """Build a list_scouts response payload for tests, following the _ready_event/_action_event convention."""
-    if summary is None:
-        summary = {"active": 0, "paused": 0, "done": 0}
-    response = {
-        "scouts": scouts if scouts is not None else [],
-        "total": total,
-        "summary": summary,
-    }
-    response.update(overrides)
-    return response
 
 
 class TestFormatListScouts:
