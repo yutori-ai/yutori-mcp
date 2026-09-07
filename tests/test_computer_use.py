@@ -778,6 +778,19 @@ def _patched_run_task_supervise(tmp_path, *, result=None):
         yield supervise
 
 
+def _patch_run_credentials(monkeypatch, *, api_key: str = "k") -> None:
+    """Patch resolve_run_credentials_and_platform_url() with a fixed key/base_url/platform_url triple.
+
+    Every test that drives a full run path (server._handle_computer_use, cli._smoke_live,
+    cli._run_custom) needs this resolved identically; only the api_key literal varies by
+    call site, and nothing asserts on that value.
+    """
+    monkeypatch.setattr(
+        "yutori_mcp.adapter.resolve_run_credentials_and_platform_url",
+        lambda: (api_key, "https://api.yutori.com/v1", "https://platform.yutori.com"),
+    )
+
+
 async def test_run_task_uses_only_python_runner_and_sdk_driver_discovery(tmp_path):
     with _patched_run_task_supervise(tmp_path) as supervise:
         result = await run_task(**_run_task_kwargs(tmp_path))
@@ -816,10 +829,7 @@ async def test_server_holds_desktop_lock_across_preflight_and_runner(monkeypatch
     monkeypatch.setattr(lock_module, "DesktopLock", lambda: lock)
     monkeypatch.setattr(preflight, "first_blocker", first_blocker)
     monkeypatch.setattr(supervisor, "run_task", run_with_lock)
-    monkeypatch.setattr(
-        "yutori_mcp.adapter.resolve_run_credentials_and_platform_url",
-        lambda: ("api-key", "https://api.yutori.com/v1", "https://platform.yutori.com"),
-    )
+    _patch_run_credentials(monkeypatch, api_key="api-key")
 
     result, raw = await server._handle_computer_use(None, {"task": "open calculator"})
     assert result["outcome"] == "completed"
@@ -1209,10 +1219,7 @@ async def test_smoke_allows_two_minutes_for_live_check(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_mechanical_calculator_check", AsyncMock(return_value="42"))
     monkeypatch.setattr(supervisor, "run_task", run)
     monkeypatch.setattr(cli, "format_terminal_result", lambda *_args, **_kwargs: "complete")
-    monkeypatch.setattr(
-        "yutori_mcp.adapter.resolve_run_credentials_and_platform_url",
-        lambda: ("dev-key", "https://api.yutori.com/v1", "https://platform.yutori.com"),
-    )
+    _patch_run_credentials(monkeypatch, api_key="dev-key")
 
     assert await cli._smoke_live() == 0
 
@@ -1987,10 +1994,7 @@ async def test_server_forwards_mode_and_fallback_to_the_runner(monkeypatch, tmp_
     monkeypatch.setattr(lock_module, "DesktopLock", lambda: DesktopLock(tmp_path / "desktop.lock"))
     monkeypatch.setattr(preflight, "first_blocker", lambda: None)
     monkeypatch.setattr(supervisor, "run_task", run_with_lock)
-    monkeypatch.setattr(
-        "yutori_mcp.adapter.resolve_run_credentials_and_platform_url",
-        lambda: ("k", "https://api.yutori.com/v1", "https://platform.yutori.com"),
-    )
+    _patch_run_credentials(monkeypatch)
 
     result, _ = await server._handle_computer_use(
         None, {"task": "add a note", "app": "Notes", "mode": "background", "allow_foreground_fallback": True}
@@ -2093,10 +2097,7 @@ async def test_cli_run_forwards_the_mode_and_prints_the_matching_notice(monkeypa
     run = AsyncMock(return_value={"outcome": "completed", "delivery_mode": "background", "final_text": "done"})
     monkeypatch.setattr(cli, "_blocked", lambda: False)
     monkeypatch.setattr(supervisor, "run_task", run)
-    monkeypatch.setattr(
-        "yutori_mcp.adapter.resolve_run_credentials_and_platform_url",
-        lambda: ("k", "https://api.yutori.com/v1", "https://platform.yutori.com"),
-    )
+    _patch_run_credentials(monkeypatch)
     args = SimpleNamespace(
         task="add a note",
         app="Notes",
