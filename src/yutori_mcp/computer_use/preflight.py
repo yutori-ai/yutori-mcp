@@ -53,6 +53,14 @@ TOOL_SEARCH_DIRECTORIES = (
 _EDITABLE_SDK_OVERRIDE = "YUTORI_MCP_ALLOW_EDITABLE_SDK"
 _INSTALLER_GENERATED_FILES = {"INSTALLER", "RECORD", "REQUESTED", "direct_url.json"}
 _SDK_PROVENANCE_PATH = Path("yutori/navigator/macos/assets/provenance.json")
+# Shared remediation text for checks whose fix is "(re)install the pinned CuaDriver setup":
+# check_driver_app, check_driver_binary, check_driver_contract, check_overlay, and
+# check_capture's driver-not-found branch all point here, so the wording can't drift
+# across five call sites if it's ever revised.
+_SETUP_REMEDIATION = "Run: yutori-mcp computer-use setup"
+# Shared remediation text for checks whose fix is granting the driver's TCC permissions:
+# check_permissions and check_capture's driver-capture-failed branch both point here.
+_PERMISSIONS_GRANT_REMEDIATION = "Run: cua-driver permissions grant"
 
 
 def _login_remediation(environment: str) -> str:
@@ -260,7 +268,7 @@ def check_overlay() -> CheckResult:
         "reasoning overlay",
         ok,
         detail,
-        "Run: yutori-mcp computer-use setup",
+        _SETUP_REMEDIATION,
         blocking=False,
     )
 
@@ -270,7 +278,7 @@ def check_driver_app() -> CheckResult:
         "driver app",
         DRIVER_APP.is_dir(),
         str(DRIVER_APP),
-        "Run: yutori-mcp computer-use setup",
+        _SETUP_REMEDIATION,
     )
 
 
@@ -280,7 +288,7 @@ def check_driver_binary() -> CheckResult:
         "cua-driver binary",
         driver is not None,
         str(driver or "not found"),
-        "Run: yutori-mcp computer-use setup",
+        _SETUP_REMEDIATION,
     )
 
 
@@ -323,7 +331,7 @@ def check_driver_contract() -> CheckResult:
             "driver contract",
             False,
             "driver did not report a version",
-            "Run: yutori-mcp computer-use setup",
+            _SETUP_REMEDIATION,
         )
     return _result(
         "driver contract",
@@ -353,7 +361,7 @@ def check_permissions() -> CheckResult:
         "permissions",
         ok,
         "Accessibility and Screen Recording",
-        "Run: cua-driver permissions grant",
+        _PERMISSIONS_GRANT_REMEDIATION,
     )
 
 
@@ -414,7 +422,7 @@ def check_capture() -> CheckResult:
             "desktop capture",
             False,
             "cua-driver not found",
-            "Run: yutori-mcp computer-use setup",
+            _SETUP_REMEDIATION,
             blocking=False,
         )
     with tempfile.TemporaryDirectory(prefix="cua-capture-check-") as directory:
@@ -431,7 +439,7 @@ def check_capture() -> CheckResult:
                 "desktop capture",
                 False,
                 "driver capture failed",
-                "Run: cua-driver permissions grant",
+                _PERMISSIONS_GRANT_REMEDIATION,
                 blocking=False,
             )
         ok = target.is_file() and target.stat().st_size > 0
