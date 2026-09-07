@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import sys
+import time
 from typing import Any, TextIO
 
 from .constants import DELIVERY_MODE_BACKGROUND, DELIVERY_MODE_FOREGROUND
@@ -17,6 +19,24 @@ def redact(text: str, secret: str) -> str:
     protocol stdout lines) so the child's API key never survives past this one point.
     """
     return text.replace(secret, REDACTED)
+
+
+def remaining_seconds(deadline: float) -> float:
+    """Seconds left before ``deadline`` (a ``time.monotonic()`` value).
+
+    Raises ``asyncio.TimeoutError`` if none remain, rather than returning a
+    zero/negative value a caller could pass straight into ``asyncio.wait_for``.
+    Shared by the supervisor (guarding both its child-process read loop and the
+    final ``process.wait()`` after EOF) and the runner (guarding the
+    deadline-aware summary request it makes when a run hits its step limit),
+    so an expired absolute deadline is caught the same way on both sides of
+    the runner/supervisor protocol boundary instead of two independently
+    hand-rolled checks.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise asyncio.TimeoutError
+    return remaining
 
 
 def _seconds(ms: Any) -> str:
