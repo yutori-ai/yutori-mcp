@@ -1659,6 +1659,16 @@ def _patch_runner_sdk(monkeypatch, *, agent_cls: type = _FakeAgent) -> None:
     monkeypatch.setattr(runner_module, "N2ComputerAgent", agent_cls)
 
 
+def test_presentation_payload_distinguishes_capture_codec_from_n2_request_format():
+    computer = _FakeComputer()
+    status = MacOSPresentationStatus(True, True, "active", "yutori", codec="jpeg")
+    payload = runner_module._presentation_payload(computer, status)
+    assert payload["codec"] == payload["capture_codec"] == "jpeg"
+    assert payload["capture_codec_fallback"] is True
+    assert payload["observation_format"] == OBSERVATION_FORMAT == "webp"
+    assert payload["observation_format_fallback"] is False
+
+
 async def test_run_request_wires_sdk_runtime_and_reports_effective_state(monkeypatch):
     _FakeComputer.instances.clear()
     _FakeAgent.instances.clear()
@@ -1694,6 +1704,10 @@ async def test_run_request_wires_sdk_runtime_and_reports_effective_state(monkeyp
     assert result["reasoning_overlay_requested"] is True
     assert result["reasoning_overlay_effective"] is True
     assert result["codec"] == "webp"
+    assert result["capture_codec"] == "webp"
+    assert result["capture_codec_fallback"] is False
+    assert result["observation_format"] == "webp"
+    assert result["observation_format_fallback"] is False
     assert result["background_command_counts"] == {
         "started": 1,
         "completed": 1,
@@ -2463,6 +2477,7 @@ def test_format_result_renders_background_fields():
             "reasoning_overlay_requested": True,
             "reasoning_overlay_effective": True,
             "codec": "jpeg",
+            "observation_format": "webp",
             "fallback_escalations": 1,
             "background_refusals": 2,
             "window_target": {"pid": 42, "window_id": 7, "app_name": "Notes"},
@@ -2475,7 +2490,7 @@ def test_format_result_renders_background_fields():
     assert "Window target: Notes (pid 42, window 7)" in text
     assert "Delivery: 1 foreground escalation(s), 2 background refusal(s)" in text
     assert "mode: foreground; route: accessibility; refusal: None); effect: confirmed [fronted] took 5 ms" in text
-    assert "Menu bar status: active; codec: jpeg" in text
+    assert "Menu bar status: active; capture: jpeg; N2 request: webp" in text
     assert "Reasoning overlay" not in text
 
 
@@ -2708,7 +2723,8 @@ def test_format_terminal_result_leads_with_a_labeled_final_output_block():
     assert FINAL_OUTPUT_HEADING in lines[0]
     assert lines[1] == "Here are the 14 employees."
     assert lines[3].startswith("v completed") and "4m 52.1s" in lines[3] and "35 model turns" in lines[3]
-    assert lines[4].split() == ["run", "https://platform.yutori.com/navigator/chats/abc"]
+    assert lines[4].strip() == f"version   yutori-mcp {MCP_VERSION}  |  yutori {SDK_VERSION}"
+    assert lines[5].split() == ["run", "https://platform.yutori.com/navigator/chats/abc"]
 
 
 def test_format_terminal_result_omits_the_action_list_unless_asked():
@@ -2730,6 +2746,7 @@ def test_format_terminal_result_reports_the_background_surfaces():
             "reasoning_overlay_requested": True,
             "reasoning_overlay_effective": True,
             "codec": "jpeg",
+            "observation_format": "webp",
             "fallback_escalations": 1,
             "fallback_skips": 2,
             "preview_frames": 7,
@@ -2738,7 +2755,7 @@ def test_format_terminal_result_reports_the_background_surfaces():
     )
     assert "! limit" in text
     assert "window    Notes (pid 42, window 7)" in text
-    assert "menu bar  active; codec: jpeg" in text
+    assert "menu bar  active; capture: jpeg; N2 request: webp" in text
     assert "delivery  1 foreground escalation(s), 0 background refusal(s)" in text
     assert "retry(ies) skipped after the window changed" in text
     assert "activity  7 frame(s) streamed while the window was open" in text
@@ -2751,6 +2768,7 @@ def test_cli_run_header_states_the_task_target_and_limits():
     text = cli.format_run_header(params, _PLAIN_TERMINAL)
     assert "task      list the team" in text
     assert "target    Safari  https://yutori.com" in text
+    assert f"version   yutori-mcp {MCP_VERSION}  |  yutori {SDK_VERSION}" in text
     assert "limits    foreground  |  5 min  |  60 model turns" in text
     assert cli.hands_off_notice("foreground") in text
 

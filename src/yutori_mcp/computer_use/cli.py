@@ -35,7 +35,13 @@ from .preflight import (
     first_blocker,
     run_checks,
 )
-from .result import Terminal, describe_delivery_surface, format_terminal_action, format_terminal_result
+from .result import (
+    Terminal,
+    describe_delivery_surface,
+    format_runtime_version,
+    format_terminal_action,
+    format_terminal_result,
+)
 from .supervisor import run_task_with_resolved_credentials, stop_active_run
 
 
@@ -225,6 +231,7 @@ def format_run_header(params: ComputerUseTaskInput, paint: Terminal) -> str:
             paint.rule("YUTORI COMPUTER USE"),
             paint.row("task", params.task),
             paint.row("target", target),
+            paint.row("version", format_runtime_version(paint)),
             paint.row("limits", limits),
             "",
             paint(f"{paint.glyph('warn')} {hands_off_notice(params.mode)}", "yellow", "bold"),
