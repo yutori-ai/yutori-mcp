@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.5.15"
+version = "0.5.16"
 description = "MCP server and workflow skills for building agents with Yutori"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,8 +30,10 @@ dependencies = [
     # breaks the install as soon as 2.x resolves.
     "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
-    # SDK 0.9.15 keeps terminal commands legible in the native activity dialog.
-    "yutori==0.9.15",
+    # SDK 0.9.16 keeps the activity dialog's run-command panels at their text's
+    # height instead of letting the transcript squeeze them flat, and stands the
+    # desktop shell rail down while that dialog is open.
+    "yutori==0.9.16",
 ]
 
 [project.optional-dependencies]
