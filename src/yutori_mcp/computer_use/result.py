@@ -7,9 +7,14 @@ import sys
 import time
 from typing import Any, TextIO
 
-from .constants import DELIVERY_MODE_BACKGROUND, DELIVERY_MODE_FOREGROUND
+from .constants import DELIVERY_MODE_BACKGROUND, DELIVERY_MODE_FOREGROUND, MCP_VERSION, SDK_VERSION
 
 REDACTED = "[REDACTED]"
+
+
+def format_runtime_version(paint: "Terminal") -> str:
+    """The exact MCP and SDK packages executing a computer-use run."""
+    return f"yutori-mcp {MCP_VERSION}  {paint.glyph('separator')}  yutori {SDK_VERSION}"
 
 
 def redact(text: str, secret: str) -> str:
@@ -322,6 +327,7 @@ def format_terminal_result(
         + paint(outcome, color, "bold")
         + paint(separator + separator.join(facts), "dim")
     )
+    lines.append(paint.row("version", format_runtime_version(paint)))
     if result.get("run_url"):
         lines.append(paint.row("run", str(result["run_url"])))
     if (window_target := _window_target(result.get("window_target"))) is not None:
@@ -353,7 +359,9 @@ def _presentation_state(result: dict[str, Any]) -> str | None:
     if not result.get("reasoning_overlay_requested"):
         return None
     state = "active" if result.get("reasoning_overlay_effective") else "unavailable"
-    return f"{state}; codec: {result.get('codec') or 'unknown'}"
+    capture_codec = result.get("capture_codec") or result.get("codec") or "unknown"
+    request_codec = result.get("observation_format") or "unknown"
+    return f"{state}; capture: {capture_codec}; N2 request: {request_codec}"
 
 
 def _delivery_counts(result: dict[str, Any]) -> str | None:

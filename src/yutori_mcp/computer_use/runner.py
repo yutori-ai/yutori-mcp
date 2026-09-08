@@ -775,18 +775,23 @@ def _window_telemetry(computer: MacOSComputer) -> dict[str, Any]:
 
 
 def _presentation_payload(computer: MacOSComputer, status: MacOSPresentationStatus) -> dict[str, Any]:
-    codec = status.codec
-    if codec is None and computer.current_observation is not None:
-        codec = computer.current_observation.media_type.rsplit("/", 1)[-1]
+    capture_codec = status.codec
+    if capture_codec is None and computer.current_observation is not None:
+        capture_codec = computer.current_observation.media_type.rsplit("/", 1)[-1]
     telemetry = list(computer.presentation.telemetry) if computer.presentation is not None else []
     return {
         "reasoning_overlay_requested": bool(getattr(computer, "presentation_requested", True)),
         "reasoning_overlay_effective": status.available,
         "presentation": asdict(status),
         "presentation_telemetry": telemetry,
-        "codec": codec,
-        "observation_format": codec,
-        "observation_format_fallback": codec == "jpeg",
+        # ``codec`` is retained for protocol compatibility, but it describes the
+        # Mac capture. N2ComputerAgent independently re-encodes every request image
+        # to OBSERVATION_FORMAT immediately before the API call.
+        "codec": capture_codec,
+        "capture_codec": capture_codec,
+        "capture_codec_fallback": capture_codec == "jpeg",
+        "observation_format": OBSERVATION_FORMAT,
+        "observation_format_fallback": False,
         "target_recovery_attempts": computer.target_recovery_attempts,
         "no_progress_triggers": computer.no_progress_triggers,
         "shell_events": [asdict(event) for event in computer.shell_events],
