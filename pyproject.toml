@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.5.13"
+version = "0.5.14"
 description = "MCP server and workflow skills for building agents with Yutori"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,9 +30,8 @@ dependencies = [
     # breaks the install as soon as 2.x resolves.
     "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
-    # SDK 0.9.14 makes the native reasoning overlay compile across supported
-    # Swift/CoreFoundation combinations by disambiguating CGFloat arithmetic.
-    "yutori==0.9.14",
+    # SDK 0.9.15 keeps terminal commands legible in the native activity dialog.
+    "yutori==0.9.15",
 ]
 
 [project.optional-dependencies]
