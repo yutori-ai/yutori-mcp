@@ -34,6 +34,7 @@ from yutori_mcp.computer_use.constants import (
     DELIVERY_MODES,
     DRIVER_VERSION,
     MCP_VERSION,
+    OBSERVATION_FORMAT,
     PROTOCOL_VERSION,
     SDK_ARTIFACT_SHA256,
     SDK_INSTALLATION_SHA256,
@@ -1677,6 +1678,7 @@ async def test_run_request_wires_sdk_runtime_and_reports_effective_state(monkeyp
     }
     assert agent.kwargs["tool_set"] == TOOL_SET
     assert agent.kwargs["presentation"] is computer.presentation
+    assert agent.kwargs["image_format"] == OBSERVATION_FORMAT == "webp"
     assert agent.kwargs["supports_click_modifiers"] is True
     assert "Shell commands run headlessly" in agent.kwargs["system_prompt"]
     assert "Do not use osascript" in agent.kwargs["system_prompt"]
