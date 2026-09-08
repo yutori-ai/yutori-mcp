@@ -69,7 +69,7 @@ struct ContentView: View {
 
                 HStack {
                     ShortcutChip(keys: "⌘ K", label: "Command")
-                    ShortcutChip(keys: "⌘ ⇧ K", label: "Shift")
+                    ShortcutChip(keys: "⌘ ⇧ U", label: "Shift")
                     ShortcutChip(keys: "⌃ K", label: "Control")
                     ShortcutChip(keys: "⌥ K", label: "Option")
                 }

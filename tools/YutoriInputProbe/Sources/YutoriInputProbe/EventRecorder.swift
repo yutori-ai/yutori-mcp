@@ -266,14 +266,14 @@ final class EventRecorder: NSObject, ObservableObject {
     }
 
     private static func recognizedCommand(_ event: NSEvent) -> String? {
-        guard event.type == .keyDown, event.charactersIgnoringModifiers?.lowercased() == "k" else {
+        guard event.type == .keyDown, let key = event.charactersIgnoringModifiers?.lowercased() else {
             return nil
         }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if flags == [.command] { return "cmd+k" }
-        if flags == [.command, .shift] { return "cmd+shift+k" }
-        if flags == [.control] { return "ctrl+k" }
-        if flags == [.option] { return "option+k" }
+        if key == "k", flags == [.command] { return "cmd+k" }
+        if key == "u", flags == [.command, .shift] { return "cmd+shift+u" }
+        if key == "k", flags == [.control] { return "ctrl+k" }
+        if key == "k", flags == [.option] { return "option+k" }
         return nil
     }
 }

@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+from unittest.mock import AsyncMock
 
 
 def _load_probe_runner():
@@ -71,3 +72,65 @@ def test_clean_refusal_rejects_partial_or_misdirected_input():
     assert probe.is_clean_refusal("delivery failed", [_event(1, "layout")], delivery) is True
     assert probe.is_clean_refusal("delivery failed", [_event(1, "text")], delivery) is False
     assert probe.is_clean_refusal(None, [], delivery) is False
+
+
+def test_key_down_sequence_requires_exact_order_without_duplicates():
+    events = []
+    for sequence, key_code in enumerate(("123", "124", "53", "36"), start=1):
+        event = _event(sequence, "nsevent", keyCode=key_code)
+        event["name"] = "keyDown"
+        events.append(event)
+
+    assert probe.has_key_down_sequence(events, ["123", "124", "53", "36"]) is True
+    assert probe.has_key_down_sequence(events, ["124", "123", "53", "36"]) is False
+    assert probe.has_key_down_sequence(events + [events[-1]], ["123", "124", "53", "36"]) is False
+
+
+def test_modified_click_requires_the_modifier_and_active_delivery():
+    events = []
+    for sequence, name in enumerate(("leftMouseDown", "leftMouseUp"), start=1):
+        event = _event(
+            sequence,
+            "nsevent",
+            active=True,
+            modifierFlags="shift+cmd",
+            clickCount="1",
+        )
+        event["name"] = name
+        events.append(event)
+
+    assert probe.has_modified_click(events, "cmd") is True
+    assert probe.has_modified_click(events, "option") is False
+    assert probe.has_modified_click(events[:1], "cmd") is False
+    events[-1]["state"]["appActive"] = False
+    assert probe.has_modified_click(events, "cmd") is False
+
+
+async def test_dispatch_n2_paces_a_multi_key_sequence():
+    computer = type(
+        "FakeComputer",
+        (),
+        {
+            "keypress": AsyncMock(),
+            "wait": AsyncMock(),
+        },
+    )()
+
+    await probe.dispatch_n2(
+        computer,
+        "key_press",
+        {"key": "left right escape return"},
+        (100, 100),
+    )
+
+    assert [call.kwargs["keys"] for call in computer.keypress.await_args_list] == [
+        ["left"],
+        ["right"],
+        ["esc"],
+        ["enter"],
+    ]
+    assert [call.args for call in computer.wait.await_args_list] == [
+        (probe.KEY_SEQUENCE_SETTLE_MS,),
+        (probe.KEY_SEQUENCE_SETTLE_MS,),
+        (probe.KEY_SEQUENCE_SETTLE_MS,),
+    ]
