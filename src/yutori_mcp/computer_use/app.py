@@ -73,7 +73,21 @@ def _best_content_window(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     if not titled:
         return frontmost
     largest_titled = max(titled, key=_area)
-    return largest_titled if _area(frontmost) * 4 < _area(largest_titled) else frontmost
+    if _area(frontmost) * 4 >= _area(largest_titled):
+        return frontmost
+    return max(titled, key=lambda window: (window.get("z_index") or 0, _area(window)))
+
+
+def _best_fallback_window(
+    windows: list[dict[str, Any]], min_edge_points: float = 100
+) -> dict[str, Any] | None:
+    """Choose eventual background fallback content without favoring a visible helper host."""
+    if not windows:
+        return None
+    content = [
+        window for window in windows if min(window["bounds"]["width"], window["bounds"]["height"]) >= min_edge_points
+    ]
+    return _best_content_window(content) if content else max(windows, key=_area)
 
 
 def pick_best_window(windows: list[dict[str, Any]], min_edge_points: float = 100) -> dict[str, Any] | None:
@@ -125,9 +139,13 @@ async def _running_app(computer: MacOSComputer, requested: str) -> dict[str, Any
 async def _await_window(computer: MacOSComputer, pid: int, app: str) -> dict[str, Any]:
     fallback: dict[str, Any] | None = None
     for _ in range(_WINDOW_POLL_ATTEMPTS):
-        window = pick_best_window(_windows(await computer.list_windows(pid)))
+        windows = _windows(await computer.list_windows(pid))
+        window = pick_best_window(windows)
         if window is not None:
-            fallback = window
+            # The immediate choice prefers visible windows. For the eventual fallback,
+            # compare every content window so a visible lightweight SwiftUI host cannot
+            # mask the app's legitimate titled window while it remains off screen.
+            fallback = _best_fallback_window(windows)
             # A cold launch can briefly expose a stale offscreen UI-host record before
             # the application's real window reaches WindowServer. Give unhide time to
             # produce an on-screen target, but retain the best offscreen content window

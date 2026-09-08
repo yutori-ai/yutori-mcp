@@ -1272,6 +1272,35 @@ def test_pick_best_window_ignores_tiny_untitled_swiftui_host_above_main_window()
     assert pick_best_window([main, ui_host])["window_id"] == 10
 
 
+def test_pick_best_window_uses_frontmost_titled_window_when_skipping_host():
+    back_document = {
+        "window_id": 10,
+        "title": "Back document",
+        "bounds": {"width": 1200, "height": 900},
+        "is_on_screen": True,
+        "on_current_space": True,
+        "z_index": 10,
+    }
+    front_document = {
+        "window_id": 11,
+        "title": "Front document",
+        "bounds": {"width": 650, "height": 500},
+        "is_on_screen": True,
+        "on_current_space": True,
+        "z_index": 20,
+    }
+    ui_host = {
+        "window_id": 12,
+        "title": "",
+        "bounds": {"width": 200, "height": 120},
+        "is_on_screen": True,
+        "on_current_space": True,
+        "z_index": 30,
+    }
+
+    assert pick_best_window([back_document, front_document, ui_host])["window_id"] == 11
+
+
 def test_pick_best_window_keeps_a_substantial_untitled_frontmost_sheet():
     main = {
         "window_id": 10,
@@ -2572,6 +2601,37 @@ async def test_prepare_app_background_refreshes_a_transient_launch_window():
     target = await prepare_app(computer, "Yutori Input Probe", None, front=False)
 
     assert target["window_id"] == 9
+
+
+async def test_prepare_app_background_fallback_skips_visible_host_for_offscreen_content(monkeypatch):
+    from yutori_mcp.computer_use import app as app_module
+
+    monkeypatch.setattr(app_module, "_WINDOW_POLL_ATTEMPTS", 2)
+    helper = _background_window(
+        8,
+        title="",
+        bounds={"width": 280, "height": 168},
+        is_on_screen=True,
+        on_current_space=True,
+        z_index=20,
+    )
+    main = _background_window(
+        9,
+        title="Yutori Input Probe",
+        bounds={"width": 1120, "height": 780},
+        z_index=10,
+    )
+    computer = SimpleNamespace(
+        launch_app=AsyncMock(return_value={"pid": 42, "name": "Yutori Input Probe"}),
+        unhide_app=AsyncMock(return_value=True),
+        list_windows=AsyncMock(return_value={"windows": [helper, main]}),
+        wait=AsyncMock(),
+    )
+
+    target = await prepare_app(computer, "Yutori Input Probe", None, front=False)
+
+    assert target["window_id"] == 9
+    assert computer.list_windows.await_count == 2
 
 
 async def test_prepare_app_background_polls_for_a_window_after_a_cold_launch():
