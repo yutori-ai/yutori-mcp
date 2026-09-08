@@ -415,6 +415,42 @@ The harness in this repository is minimal: one task at a time (a machine-wide lo
 the visible desktop or targeting one app window in the background, with no multiplexing. For
 scalable sandbox runs, see [n2 on Daytona](https://docs.yutori.com/reference/n2-daytona).
 
+#### Input delivery probe
+
+This repository includes a small native macOS app that records exactly what AppKit receives from
+the local driver. It shows raw key codes and modifiers, interpreted commands, inserted text,
+pointer events, the current first responder, and whether the app and target window were active at
+the moment of delivery. Its JSON Lines log makes the app-side evidence easy to compare with the
+runner's delivery route, effect, refusal, and foreground-escalation telemetry.
+
+Build and open the app for manual testing:
+
+```bash
+./scripts/run-input-probe.sh
+```
+
+The launcher prints the session log under `.context/input-probe/`. The probe needs no permissions
+of its own because it observes only events delivered to its process; CuaDriver still needs Screen
+Recording and Accessibility as described above.
+
+For an exact, model-independent mapping test, quit any existing copy of Yutori Input Probe and run:
+
+```bash
+./scripts/build-input-probe.sh
+uv run python scripts/run-input-probe.py --mode both
+```
+
+The deterministic runner exercises ASCII and Unicode typing, command/control/option/shift aliases,
+navigation keys, window-relative clicks, and modified-click refusal. It writes `driver-report.json`
+beside the app log and exits nonzero when observed AppKit behavior does not match the expected
+delivery. `--mode background` avoids foreground control; `--allow-foreground-fallback` explicitly
+tests brief foreground escalation, and `--keep-open` leaves the probe visible afterward.
+
+Foreground mode takes over the visible desktop during its part of the test. Do not interact with
+the Mac until the command finishes. The runner aborts instead of sending input if the probe loses
+foreground ownership. Background mode leaves the current app focused, but leave the probe window
+alone while it runs.
+
 ## Tools
 
 See [TOOLS.md](TOOLS.md) for the full tool reference — computer use, Browsing, Research, and Scout tools with parameters, examples, and response formats.

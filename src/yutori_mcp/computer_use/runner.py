@@ -18,7 +18,6 @@ from typing import Any, TextIO
 from yutori import AsyncYutoriClient
 from yutori.navigator import N2ComputerAgent, flatten_batch_member
 from yutori.navigator.macos import (
-    MacOSComputer,
     MacOSPresentationStatus,
     MacOSTargetCrashedError,
     CancellationLatch,
@@ -40,6 +39,7 @@ from .constants import (
     TOOL_SET,
 )
 from .result import redact, remaining_seconds
+from .targeting import TargetGuardedMacOSComputer as MacOSComputer
 
 _FOREGROUND_OPENING = "You control the entire macOS screen. "
 _SHARED_CONTEXT = (
