@@ -125,17 +125,17 @@ def _report(result: dict[str, Any], *, include_actions: bool = True) -> int:
 
 
 async def _mechanical_calculator_check() -> str:
-    from yutori.navigator.macos import MacOSComputer
     from yutori.navigator.macos.transport import CuaDriverTransport
 
     from .app import prepare_app, structured_content
+    from .targeting import TargetGuardedMacOSComputer
 
     driver = find_cua_driver()
     if driver is None:
         raise RuntimeError(check_driver_binary().remediation)
     transport = CuaDriverTransport(binary=driver)
     sentinel = f"yutori-smoke-{uuid.uuid4().hex[:12]}"
-    async with MacOSComputer(
+    async with TargetGuardedMacOSComputer(
         transport=transport,
         owns_transport=True,
         presentation=False,

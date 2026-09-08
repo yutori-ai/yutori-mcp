@@ -23,7 +23,12 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from pydantic import ValidationError
-from yutori.navigator.macos import MacOSPresentationStatus, ShellPresentationEvent
+from yutori.navigator.macos import (
+    FrontmostApp,
+    MacOSFocusChangedError,
+    MacOSPresentationStatus,
+    ShellPresentationEvent,
+)
 from yutori.navigator.macos.transport import CuaDriverToolError, CuaDriverUncertainActionError
 
 from yutori_mcp.computer_use import preflight, runner as runner_module, supervisor
@@ -56,6 +61,7 @@ from yutori_mcp.computer_use.result import (
     terminal_result,
 )
 from yutori_mcp.computer_use.supervisor import attach_run_link, run_chat_id
+from yutori_mcp.computer_use.targeting import TargetGuardedMacOSComputer, require_frontmost_target
 from yutori_mcp.computer_use.runner import (
     ActionReporter,
     Emitter,
@@ -1163,7 +1169,7 @@ async def test_mechanical_calculator_check_uses_cua_driver(monkeypatch, tmp_path
 
     prepare = AsyncMock()
     monkeypatch.setattr(cli, "find_cua_driver", lambda: driver)
-    monkeypatch.setattr("yutori.navigator.macos.MacOSComputer", FakeComputer)
+    monkeypatch.setattr("yutori_mcp.computer_use.targeting.TargetGuardedMacOSComputer", FakeComputer)
     monkeypatch.setattr("yutori.navigator.macos.transport.CuaDriverTransport", FakeTransport)
     monkeypatch.setattr(app, "prepare_app", prepare)
 
@@ -1245,6 +1251,77 @@ def test_pick_best_window_excludes_helper_strips():
     assert pick_best_window(strips)["window_id"] == 0
 
 
+def test_pick_best_window_ignores_tiny_untitled_swiftui_host_above_main_window():
+    main = {
+        "window_id": 10,
+        "title": "Yutori Input Probe",
+        "bounds": {"width": 1120, "height": 780},
+        "is_on_screen": True,
+        "on_current_space": True,
+        "z_index": 17,
+    }
+    ui_host = {
+        "window_id": 11,
+        "title": "",
+        "bounds": {"width": 280, "height": 168},
+        "is_on_screen": True,
+        "on_current_space": True,
+        "z_index": 26,
+    }
+
+    assert pick_best_window([main, ui_host])["window_id"] == 10
+
+
+def test_pick_best_window_uses_frontmost_titled_window_when_skipping_host():
+    back_document = {
+        "window_id": 10,
+        "title": "Back document",
+        "bounds": {"width": 1200, "height": 900},
+        "is_on_screen": True,
+        "on_current_space": True,
+        "z_index": 10,
+    }
+    front_document = {
+        "window_id": 11,
+        "title": "Front document",
+        "bounds": {"width": 650, "height": 500},
+        "is_on_screen": True,
+        "on_current_space": True,
+        "z_index": 20,
+    }
+    ui_host = {
+        "window_id": 12,
+        "title": "",
+        "bounds": {"width": 200, "height": 120},
+        "is_on_screen": True,
+        "on_current_space": True,
+        "z_index": 30,
+    }
+
+    assert pick_best_window([back_document, front_document, ui_host])["window_id"] == 11
+
+
+def test_pick_best_window_keeps_a_substantial_untitled_frontmost_sheet():
+    main = {
+        "window_id": 10,
+        "title": "Document",
+        "bounds": {"width": 800, "height": 600},
+        "is_on_screen": True,
+        "on_current_space": True,
+        "z_index": 1,
+    }
+    sheet = {
+        "window_id": 11,
+        "title": "",
+        "bounds": {"width": 500, "height": 400},
+        "is_on_screen": True,
+        "on_current_space": True,
+        "z_index": 2,
+    }
+
+    assert pick_best_window([main, sheet])["window_id"] == 11
+
+
 async def test_prepare_app_retries_bundle_as_name_and_fronts_best_window():
     computer = SimpleNamespace(
         launch_app=AsyncMock(
@@ -1258,6 +1335,7 @@ async def test_prepare_app_retries_bundle_as_name_and_fronts_best_window():
             ]
         ),
         bring_to_front=AsyncMock(),
+        _probe_frontmost=AsyncMock(return_value=FrontmostApp(42, "Calculator")),
         wait=AsyncMock(),
     )
     target = await prepare_app(computer, "com.apple.calculator", "https://example.com")
@@ -1274,6 +1352,7 @@ async def test_prepare_app_launches_finder_by_bundle_id():
     computer = SimpleNamespace(
         launch_app=AsyncMock(return_value={"pid": 42, "name": "Finder"}),
         bring_to_front=AsyncMock(),
+        _probe_frontmost=AsyncMock(return_value=FrontmostApp(42, "Finder")),
         wait=AsyncMock(),
     )
 
@@ -1306,6 +1385,7 @@ async def test_prepare_app_fronts_running_persistent_app_after_launch_failure():
             }
         ),
         bring_to_front=AsyncMock(),
+        _probe_frontmost=AsyncMock(return_value=FrontmostApp(42, "Finder")),
         wait=AsyncMock(),
     )
     target = await prepare_app(computer, "Finder", None)
@@ -1318,12 +1398,84 @@ async def test_prepare_app_does_not_retry_uncertain_fronting():
     computer = SimpleNamespace(
         launch_app=AsyncMock(return_value={"pid": 42, "name": "Calculator"}),
         bring_to_front=AsyncMock(side_effect=CuaDriverUncertainActionError("acknowledgement lost")),
+        _probe_frontmost=AsyncMock(return_value=FrontmostApp(42, "Calculator")),
         wait=AsyncMock(),
     )
     target = await prepare_app(computer, "Calculator", None)
     assert target == {"name": "Calculator", "pid": 42, "window_id": None}
     computer.bring_to_front.assert_awaited_once_with(42, None)
     computer.wait.assert_awaited_once_with(800)
+
+
+async def test_prepare_app_refuses_to_return_when_another_app_is_frontmost():
+    computer = SimpleNamespace(
+        launch_app=AsyncMock(return_value={"pid": 42, "name": "Notes"}),
+        bring_to_front=AsyncMock(),
+        _probe_frontmost=AsyncMock(return_value=FrontmostApp(99, "Conductor")),
+        current_observation=None,
+        wait=AsyncMock(),
+    )
+
+    with pytest.raises(
+        MacOSFocusChangedError,
+        match=r"foreground setup was not sent: 'Notes' \(pid 42\).*Conductor \(pid 99\) is frontmost",
+    ):
+        await prepare_app(computer, "Notes", None)
+
+
+async def test_require_frontmost_target_fails_closed_when_the_probe_is_unavailable():
+    computer = SimpleNamespace(
+        _probe_frontmost=AsyncMock(return_value=None),
+        current_observation="current frame",
+    )
+
+    with pytest.raises(MacOSFocusChangedError, match="could not verify") as caught:
+        await require_frontmost_target(computer, 42, tool="type_text", target_name="Notes")
+
+    assert caught.value.observation == "current frame"
+
+
+async def test_target_guarded_computer_allows_the_requested_foreground_pid():
+    computer = object.__new__(TargetGuardedMacOSComputer)
+    computer.scope = "desktop"
+    computer.verify_focus = True
+    computer.target_pid = 42
+    computer._focus_guard_trips = 0
+    computer._probe_frontmost = AsyncMock(return_value=FrontmostApp(42, "Notes"))
+    computer.screenshot = AsyncMock()
+
+    await computer._guard_frontmost("type_text")
+
+    assert computer.focus_guard_trips == 0
+    computer.screenshot.assert_not_awaited()
+
+
+async def test_target_guarded_computer_refuses_keyboard_for_another_foreground_pid():
+    computer = object.__new__(TargetGuardedMacOSComputer)
+    computer.scope = "desktop"
+    computer.verify_focus = True
+    computer.target_pid = 42
+    computer._focus_guard_trips = 0
+    computer._probe_frontmost = AsyncMock(return_value=FrontmostApp(99, "Conductor"))
+    computer.screenshot = AsyncMock(return_value="fresh frame")
+
+    with pytest.raises(MacOSFocusChangedError, match=r"pid 42.*Conductor \(pid 99\) is frontmost") as caught:
+        await computer._guard_frontmost("hotkey")
+
+    assert caught.value.observation == "fresh frame"
+    assert computer.focus_guard_trips == 1
+
+
+async def test_target_guarded_computer_leaves_window_scope_unchanged():
+    computer = object.__new__(TargetGuardedMacOSComputer)
+    computer.scope = "window"
+    computer.verify_focus = True
+    computer.target_pid = 42
+    computer._probe_frontmost = AsyncMock()
+
+    await computer._guard_frontmost("hotkey")
+
+    computer._probe_frontmost.assert_not_awaited()
 
 
 async def test_smoke_reports_preflight_detail_and_fix(monkeypatch, tmp_path, capsys):
@@ -2406,35 +2558,107 @@ async def test_prepare_app_background_unhides_and_returns_the_window_without_fro
         launch_app=AsyncMock(return_value={"pid": 42, "name": "Notes", "windows": [_background_window()]}),
         unhide_app=AsyncMock(return_value=True),
         bring_to_front=AsyncMock(side_effect=AssertionError("background runs must never front the app")),
-        list_windows=AsyncMock(),
+        list_windows=AsyncMock(
+            return_value={"windows": [_background_window(is_on_screen=True, on_current_space=True)]}
+        ),
         wait=AsyncMock(),
     )
     target = await prepare_app(computer, "Notes", None, front=False)
     assert target == {"name": "Notes", "pid": 42, "window_id": 7}
     computer.unhide_app.assert_awaited_once_with(42)
     computer.bring_to_front.assert_not_awaited()
-    computer.list_windows.assert_not_awaited()
+    computer.list_windows.assert_awaited_once_with(42)
     computer.wait.assert_awaited_once_with(300)
+
+
+async def test_prepare_app_background_refreshes_a_transient_launch_window():
+    helper = _background_window(
+        8,
+        title="",
+        bounds={"width": 280, "height": 168},
+        z_index=20,
+    )
+    main = _background_window(
+        9,
+        title="Yutori Input Probe",
+        bounds={"width": 1120, "height": 780},
+        z_index=10,
+    )
+    computer = SimpleNamespace(
+        launch_app=AsyncMock(return_value={"pid": 42, "name": "Yutori Input Probe", "windows": [helper]}),
+        unhide_app=AsyncMock(return_value=True),
+        list_windows=AsyncMock(
+            return_value={
+                "windows": [
+                    {**helper, "is_on_screen": True, "on_current_space": True},
+                    {**main, "is_on_screen": True, "on_current_space": True},
+                ]
+            }
+        ),
+        wait=AsyncMock(),
+    )
+
+    target = await prepare_app(computer, "Yutori Input Probe", None, front=False)
+
+    assert target["window_id"] == 9
+
+
+async def test_prepare_app_background_fallback_skips_visible_host_for_offscreen_content(monkeypatch):
+    from yutori_mcp.computer_use import app as app_module
+
+    monkeypatch.setattr(app_module, "_WINDOW_POLL_ATTEMPTS", 2)
+    helper = _background_window(
+        8,
+        title="",
+        bounds={"width": 280, "height": 168},
+        is_on_screen=True,
+        on_current_space=True,
+        z_index=20,
+    )
+    main = _background_window(
+        9,
+        title="Yutori Input Probe",
+        bounds={"width": 1120, "height": 780},
+        z_index=10,
+    )
+    computer = SimpleNamespace(
+        launch_app=AsyncMock(return_value={"pid": 42, "name": "Yutori Input Probe"}),
+        unhide_app=AsyncMock(return_value=True),
+        list_windows=AsyncMock(return_value={"windows": [helper, main]}),
+        wait=AsyncMock(),
+    )
+
+    target = await prepare_app(computer, "Yutori Input Probe", None, front=False)
+
+    assert target["window_id"] == 9
+    assert computer.list_windows.await_count == 2
 
 
 async def test_prepare_app_background_polls_for_a_window_after_a_cold_launch():
     computer = SimpleNamespace(
         launch_app=AsyncMock(return_value={"pid": 42, "name": "Notes", "windows": []}),
         unhide_app=AsyncMock(return_value=True),
-        list_windows=AsyncMock(side_effect=[{"windows": []}, {"windows": [_background_window(9)]}]),
+        list_windows=AsyncMock(
+            side_effect=[
+                {"windows": []},
+                {"windows": [_background_window(9, is_on_screen=True, on_current_space=True)]},
+            ]
+        ),
         wait=AsyncMock(),
     )
     target = await prepare_app(computer, "Notes", None, front=False)
     assert target["window_id"] == 9
     assert computer.list_windows.await_args_list == [((42,),), ((42,),)]
-    assert [call.args for call in computer.wait.await_args_list] == [(250,), (300,)]
+    assert [call.args for call in computer.wait.await_args_list] == [(300,), (250,)]
 
 
 async def test_prepare_app_background_still_resolves_a_window_when_unhide_fails():
     computer = SimpleNamespace(
         launch_app=AsyncMock(return_value={"pid": 42, "name": "Notes", "windows": []}),
         unhide_app=AsyncMock(side_effect=CuaDriverToolError("unhide failed")),
-        list_windows=AsyncMock(return_value={"windows": [_background_window(9)]}),
+        list_windows=AsyncMock(
+            return_value={"windows": [_background_window(9, is_on_screen=True, on_current_space=True)]}
+        ),
         wait=AsyncMock(),
     )
 

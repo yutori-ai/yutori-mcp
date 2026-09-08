@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+from pathlib import Path
+import sys
+
+
+def _load_probe_runner():
+    path = Path(__file__).resolve().parents[1] / "scripts" / "run-input-probe.py"
+    spec = importlib.util.spec_from_file_location("run_input_probe", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+probe = _load_probe_runner()
+
+
+def _event(sequence: int, category: str, *, active: bool = False, **details: str) -> dict:
+    return {
+        "sequence": sequence,
+        "category": category,
+        "name": "event",
+        "details": details,
+        "state": {"appActive": active},
+    }
+
+
+def test_read_events_ignores_an_incomplete_trailing_line(tmp_path):
+    path = tmp_path / "events.jsonl"
+    path.write_text(json.dumps(_event(1, "session")) + "\n{", encoding="utf-8")
+
+    assert probe.read_events(path) == [_event(1, "session")]
+
+
+def test_target_center_scales_appkit_points_to_capture_pixels():
+    frame = _event(
+        1,
+        "layout",
+        target="target-1",
+        windowX="10",
+        windowY="20",
+        width="30",
+        height="40",
+        windowWidth="100",
+        windowHeight="200",
+    )
+    frame["name"] = "targetFrame"
+
+    assert probe.target_center([frame], "target-1", (200, 400)) == (50, 80)
+
+
+def test_background_assertion_checks_only_input_evidence():
+    events = [
+        _event(1, "layout", active=True),
+        _event(2, "nsevent", active=False),
+        _event(3, "text", active=False),
+    ]
+
+    assert probe.stayed_in_background(events) is True
+    assert probe.stayed_in_background(events + [_event(4, "command", active=True)]) is False
+    assert probe.stayed_in_background([_event(1, "layout")]) is False
+
+
+def test_clean_refusal_rejects_partial_or_misdirected_input():
+    delivery = {"effect": "unverifiable", "recommended": "foreground"}
+
+    assert probe.is_clean_refusal("delivery failed", [_event(1, "layout")], delivery) is True
+    assert probe.is_clean_refusal("delivery failed", [_event(1, "text")], delivery) is False
+    assert probe.is_clean_refusal(None, [], delivery) is False
