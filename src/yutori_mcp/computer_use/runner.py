@@ -32,6 +32,7 @@ from .constants import (
     DELIVERY_MODE_FOREGROUND,
     DELIVERY_MODES,
     DRIVER_VERSION,
+    OBSERVATION_FORMAT,
     PROTOCOL_VERSION,
     SDK_ARTIFACT_SHA256,
     SDK_PROVENANCE_SHA256,
@@ -716,6 +717,7 @@ def _agent_base_kwargs(
         "system_prompt": system_context(request["mode"], request["app"]),
         "presentation": computer.presentation,
         "screenshot_delay": 0,
+        "image_format": OBSERVATION_FORMAT,
         "execution_deadline": deadline,
         "supports_click_modifiers": True,
     }
@@ -1055,7 +1057,7 @@ def main() -> int:
                 "sdk_artifact_sha256": SDK_ARTIFACT_SHA256,
                 "sdk_provenance_sha256": SDK_PROVENANCE_SHA256,
                 "driver_version_pinned": DRIVER_VERSION,
-                "observation_format": "webp",
+                "observation_format": OBSERVATION_FORMAT,
                 "observation_format_fallback": True,
                 "observation_fallback_format": "jpeg",
                 # The request is not parsed yet; the result event carries the truthful value.

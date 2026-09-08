@@ -13,6 +13,10 @@ MODEL = "n2"
 # constant so an SDK bump can never silently move the surface the model is
 # served -- see doctor's tool_set preflight, which sends this exact string.
 TOOL_SET = "computer_use_tools-20260830"
+# Request frames are always sent as WebP. Keep this explicit instead of relying on
+# N2ComputerAgent's default so an SDK upgrade cannot silently move high-resolution
+# macOS screenshots back to a larger wire encoding.
+OBSERVATION_FORMAT = "webp"
 # The two delivery modes this runtime implements. "foreground" drives the visible desktop
 # (the model sees the whole screen and the user keeps their hands off); "background" drives
 # one target app window through the SDK's window scope without taking the user's focus.
