@@ -26,11 +26,11 @@ OBSERVATION_FORMAT = "webp"
 DELIVERY_MODE_FOREGROUND = "foreground"
 DELIVERY_MODE_BACKGROUND = "background"
 DELIVERY_MODES = (DELIVERY_MODE_FOREGROUND, DELIVERY_MODE_BACKGROUND)
-SDK_VERSION = "0.9.14"
+SDK_VERSION = "0.9.15"
 # The PyPI wheel digest and a digest derived from its stable RECORD entries.
 # Doctor compares the latter with the unpacked installation before any task runs.
-SDK_ARTIFACT_SHA256 = "81f2b7e124eaba0501e23142a9a83f145ddb69d9e46ace9955e12a794b02aca7"
-SDK_INSTALLATION_SHA256 = "629893d1286a8893db1538c216d6d077c1ff20515f9e5b4b0708e9a503cbe35f"
+SDK_ARTIFACT_SHA256 = "e4e4ea2fd0bf9715e60b08442a452f72c44a8ee63c0d3323f483e492a328d04f"
+SDK_INSTALLATION_SHA256 = "5ea4aca7de1f169b90bf3f9faa43deed8f20e5736cd21f8f923e16b1fdd11b79"
 SDK_PROVENANCE_SHA256 = "7cab595d2f00e1a9ab5cd121204fbd6dd4c24163ead3eb76f76eef7fba495fc4"
 
 # The cua-driver release that implements this tool contract, and the checksum
