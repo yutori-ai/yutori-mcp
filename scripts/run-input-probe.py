@@ -33,6 +33,7 @@ BUNDLE_ID = "ai.yutori.input-probe"
 EXECUTABLE_NAME = "YutoriInputProbe"
 DEFAULT_APP = REPOSITORY / "tools" / "YutoriInputProbe" / ".build" / "YutoriInputProbe.app"
 INPUT_EVENT_CATEGORIES = {"nsevent", "text", "command", "control", "responder"}
+KEY_SEQUENCE_SETTLE_MS = 75
 
 
 @dataclass
@@ -186,11 +187,16 @@ async def run_case(
 
 
 async def dispatch_n2(computer: MacOSComputer, action: str, arguments: dict[str, Any], size: tuple[int, int]) -> None:
-    for translated in translate_n2_action(action, arguments, *size):
+    translated_actions = translate_n2_action(action, arguments, *size)
+    for index, translated in enumerate(translated_actions):
         translated = dict(translated)
         method_name = translated.pop("type")
         method = getattr(computer, method_name)
         await method(**translated)
+        if action == "key_press" and index + 1 < len(translated_actions):
+            # CuaDriver returns once the native key-down is accepted; its key-up can still
+            # be in flight. Keep translated key sequences from overlapping one another.
+            await computer.wait(KEY_SEQUENCE_SETTLE_MS)
 
 
 def has_event(events: list[dict[str, Any]], category: str, name: str | None = None) -> bool:
@@ -205,6 +211,28 @@ def has_text(events: list[dict[str, Any]], text: str) -> bool:
         event.get("category") == "text" and text in details(event).get("value", "")
         for event in events
     )
+
+
+def has_key_down_sequence(events: list[dict[str, Any]], key_codes: list[str]) -> bool:
+    observed = [
+        details(event).get("keyCode")
+        for event in events
+        if event.get("category") == "nsevent" and event.get("name") == "keyDown"
+    ]
+    return observed == key_codes
+
+
+def has_modified_click(events: list[dict[str, Any]], modifier: str) -> bool:
+    observed = {
+        event.get("name")
+        for event in events
+        if event.get("category") == "nsevent"
+        and event.get("name") in {"leftMouseDown", "leftMouseUp"}
+        and details(event).get("clickCount") == "1"
+        and modifier in details(event).get("modifierFlags", "").split("+")
+        and event.get("state", {}).get("appActive") is True
+    }
+    return observed == {"leftMouseDown", "leftMouseUp"}
 
 
 def stayed_in_background(events: list[dict[str, Any]]) -> bool:
@@ -246,6 +274,18 @@ async def run_mode(mode: str, log_path: Path, allow_fallback: bool) -> tuple[dic
             )
         size = await computer.get_dimensions()
 
+        async def restore_foreground_keyboard_target(tool: str) -> None:
+            if background:
+                return
+            await computer.bring_to_front(target_pid, target.get("window_id"))
+            await computer.wait(KEY_SEQUENCE_SETTLE_MS)
+            await require_frontmost_target(
+                computer,
+                target_pid,
+                tool=tool,
+                target_name="Yutori Input Probe",
+            )
+
         marker = f"{mode}-Aa0-é-中-🙂"
         cases.append(
             await run_case(
@@ -262,11 +302,12 @@ async def run_mode(mode: str, log_path: Path, allow_fallback: bool) -> tuple[dic
 
         command_cases = [
             ("meta alias", "meta+k", "cmd+k"),
-            ("command + shift alias", "command+shift+k", "cmd+shift+k"),
             ("control alias", "control+k", "ctrl+k"),
             ("option alias", "option+k", "option+k"),
+            ("command + shift alias", "command+shift+u", "cmd+shift+u"),
         ]
         for case_name, expression, expected_command in command_cases:
+            await restore_foreground_keyboard_target(f"{case_name} probe setup")
             cases.append(
                 await run_case(
                     computer,
@@ -277,11 +318,13 @@ async def run_mode(mode: str, log_path: Path, allow_fallback: bool) -> tuple[dic
                         computer, "key_press", {"key": expression}, size
                     ),
                     lambda values, expected_command=expected_command: has_event(values, "command", expected_command)
+                    and has_event(values, "nsevent", "keyUp")
                     and (not requires_background_receipt or stayed_in_background(values)),
                     allow_explicit_refusal=background and not allow_fallback,
                 )
             )
 
+        await restore_foreground_keyboard_target("navigation probe setup")
         cases.append(
             await run_case(
                 computer,
@@ -294,7 +337,7 @@ async def run_mode(mode: str, log_path: Path, allow_fallback: bool) -> tuple[dic
                     {"key": "left right escape return"},
                     size,
                 ),
-                lambda values: sum(event.get("category") == "nsevent" for event in values) >= 4
+                lambda values: has_key_down_sequence(values, ["123", "124", "53", "36"])
                 and (not requires_background_receipt or stayed_in_background(values)),
                 allow_explicit_refusal=background and not allow_fallback,
             )
@@ -332,11 +375,12 @@ async def run_mode(mode: str, log_path: Path, allow_fallback: bool) -> tuple[dic
             ]
             modified_delivery = delivery_dict(computer, starting_outcomes)
             if allow_fallback:
-                passed = modified_error is None and any(
-                    event.get("category") == "control" and details(event).get("target") == "target-1"
-                    for event in modified_events
-                ) and bool(modified_delivery and modified_delivery.get("escalated_in_case"))
-                expected = "The modified click is foreground-delivered and reported as escalated."
+                passed = (
+                    modified_error is None
+                    and has_modified_click(modified_events, "cmd")
+                    and bool(modified_delivery and modified_delivery.get("escalated_in_case"))
+                )
+                expected = "An active cmd-click NSEvent is foreground-delivered and reported as escalated."
             else:
                 passed = modified_error is not None and not any(
                     event.get("category") == "control" for event in modified_events

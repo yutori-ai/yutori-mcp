@@ -30,7 +30,7 @@ struct ProbeModelTests {
     @Test("Chord formatter uses macOS modifier vocabulary")
     func chordFormatting() {
         let flags: NSEvent.ModifierFlags = [.command, .shift]
-        #expect(ProbeKeyFormatter.chord(charactersIgnoringModifiers: "k", flags: flags) == "shift+cmd+k")
+        #expect(ProbeKeyFormatter.chord(charactersIgnoringModifiers: "u", flags: flags) == "shift+cmd+u")
         #expect(ProbeKeyFormatter.displayKey("\r") == "enter")
         #expect(ProbeKeyFormatter.displayKey("\t") == "tab")
         #expect(ProbeKeyFormatter.displayKey("\u{1B}") == "escape")
