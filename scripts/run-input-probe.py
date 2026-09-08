@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -392,7 +392,7 @@ async def async_main(args: argparse.Namespace) -> int:
     ensure_probe_is_not_running()
     os.environ["PATH"] = child_search_path()
 
-    session_id = "driver-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    session_id = "driver-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     output_directory = REPOSITORY / ".context" / "input-probe" / session_id
     output_directory.mkdir(parents=True, exist_ok=False)
     log_path = output_directory / "app-events.jsonl"
