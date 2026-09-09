@@ -8,12 +8,14 @@ You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and 
 
 **Capabilities:**
 - **Computer use** — Operate apps on your Mac (macOS 15+)
+- **iPhone Mirroring (experimental)** — Experimentally control a nearby iPhone through Apple's iPhone Mirroring app
 - **Browsing** — Automate websites with an AI navigator
 - **Research** — Run one-time deep web research tasks
 - **Scouting** — Monitor the web continuously for anything you care about at a desired frequency
 
 **Workflow skills** (for clients that support slash commands):
 - [`/yutori-computer-use`](skills/06-computer-use/SKILL.md) — Local Mac desktop automation
+- [`/yutori-iphone-mirroring`](skills/07-iphone-mirroring/SKILL.md) — Experimental control of a nearby iPhone through Apple's iPhone Mirroring app
 - [`/yutori-browse`](skills/03-browse/SKILL.md) — Browser automation
 - [`/yutori-research`](skills/02-research/SKILL.md) — Deep web research (async, 5–10 min)
 - [`/yutori-scout`](skills/01-scout/SKILL.md) — Set up continuous web monitoring
@@ -122,6 +124,7 @@ Use https://yutori.com/api/llms.txt and set up Yutori for me.
    | Skill | Description |
    |-------|-------------|
    | `/yutori-computer-use` | Local Mac desktop automation |
+   | `/yutori-iphone-mirroring` | Experimental control of a nearby iPhone through Apple's iPhone Mirroring app |
    | `/yutori-browse` | Browser automation tasks |
    | `/yutori-research` | Deep web research workflow (async, 5-10 min) |
    | `/yutori-scout` | Set up continuous web monitoring with comprehensive queries |
@@ -258,6 +261,7 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
 
    ```
    $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-computer-use
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-iphone-mirroring
    $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-browse
    $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-research
    $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-scout
@@ -279,6 +283,7 @@ For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/m
    | Skill | Command | Description |
    |-------|---------|-------------|
    | Computer Use | `$yutori-computer-use` | Local Mac desktop automation |
+   | iPhone Mirroring (experimental) | `$yutori-iphone-mirroring` | Experimental control of a nearby iPhone through Apple's iPhone Mirroring app |
    | Browse | `$yutori-browse` | Browser automation with AI navigator |
    | Research | `$yutori-research` | Deep web research (async, 5-10 min) |
    | Scout | `$yutori-scout` | Set up continuous web monitoring |
@@ -450,6 +455,22 @@ Foreground mode takes over the visible desktop during its part of the test. Do n
 the Mac until the command finishes. The runner aborts instead of sending input if the probe loses
 foreground ownership. Background mode leaves the current app focused, but leave the probe window
 alone while it runs.
+
+### iPhone Mirroring (experimental)
+
+> **This capability is purely experimental.** It is intended for evaluation and low-risk
+> testing only. Background typing, scrolling, app switching, and reconnection may fail; do not
+> rely on it for production workflows or sensitive tasks.
+
+On a Mac with Apple's iPhone Mirroring already paired, the same computer-use tool can operate
+the mirrored phone. Install the workflow skills and invoke `/yutori-iphone-mirroring` (or
+`$yutori-iphone-mirroring`) with the iPhone task. The skill scopes screenshots to the iPhone
+Mirroring window, uses iPhone navigation shortcuts, and applies phone-specific privacy guidance.
+
+The iPhone must stay nearby and locked. Mirrored Home screens, widgets, notifications, and app
+content are visible to the model during the run, so close sensitive content first. This is a
+local Mac-to-iPhone bridge, not remote or standalone iPhone automation. See the initial
+[benchmark results](benchmarks/iphone-mirroring/2026-09-04.md).
 
 ## Tools
 

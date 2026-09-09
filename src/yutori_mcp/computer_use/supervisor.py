@@ -435,6 +435,7 @@ async def run_task(
     platform_url: str | None = None,
     mode: str = DELIVERY_MODE_FOREGROUND,
     allow_foreground_fallback: bool = False,
+    allow_local_shell: bool = True,
     lock: DesktopLock | None = None,
     on_event: EventCallback | None = None,
 ) -> dict[str, Any]:
@@ -452,6 +453,7 @@ async def run_task(
                 "max_steps": max_steps,
                 "mode": mode,
                 "allow_foreground_fallback": allow_foreground_fallback,
+                "allow_local_shell": allow_local_shell,
                 "model": MODEL,
                 "api_base_url": api_base_url,
             }

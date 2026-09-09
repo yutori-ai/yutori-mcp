@@ -1,0 +1,1 @@
+../../../skills/07-iphone-mirroring/SKILL.md

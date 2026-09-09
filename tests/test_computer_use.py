@@ -1507,6 +1507,7 @@ def _valid_request(**overrides):
         "max_steps": 10,
         "mode": "foreground",
         "allow_foreground_fallback": False,
+        "allow_local_shell": True,
         "model": "n2",
         "api_base_url": "https://api.dev.yutori.com/v1",
     }
@@ -2136,6 +2137,7 @@ def _background_request(**overrides):
 def test_computer_use_mode_defaults_and_validators():
     params = ComputerUseTaskInput(task="t")
     assert params.mode == "foreground" and params.allow_foreground_fallback is False
+    assert params.allow_local_shell is True
     with pytest.raises(ValidationError, match="mode='background' requires app"):
         ComputerUseTaskInput(task="t", mode="background")
     with pytest.raises(ValidationError, match="allow_foreground_fallback requires mode='background'"):
@@ -2163,6 +2165,7 @@ def test_run_computer_use_task_signature_mirrors_the_schema_defaults():
     fields = ComputerUseTaskInput.model_fields
     assert parameters["mode"].default == fields["mode"].default == COMPUTER_USE_DEFAULT_MODE
     assert parameters["allow_foreground_fallback"].default is fields["allow_foreground_fallback"].default is False
+    assert parameters["allow_local_shell"].default is fields["allow_local_shell"].default is True
     assert list(parameters)[-1] == "ctx"
 
 
@@ -2181,10 +2184,18 @@ async def test_server_forwards_mode_and_fallback_to_the_runner(monkeypatch, tmp_
     _patch_run_credentials(monkeypatch)
 
     result, _ = await server._handle_computer_use(
-        None, {"task": "add a note", "app": "Notes", "mode": "background", "allow_foreground_fallback": True}
+        None,
+        {
+            "task": "add a note",
+            "app": "Notes",
+            "mode": "background",
+            "allow_foreground_fallback": True,
+            "allow_local_shell": False,
+        },
     )
     assert result["delivery_mode"] == "background"
     assert forwarded["mode"] == "background" and forwarded["allow_foreground_fallback"] is True
+    assert forwarded["allow_local_shell"] is False
     assert forwarded["app"] == "Notes"
     assert forwarded["platform_url"] == "https://platform.yutori.com"
 
@@ -2255,11 +2266,13 @@ def test_cli_run_parser_accepts_mode_and_fallback_flags():
     parser = argparse.ArgumentParser()
     cli.register_parser(parser.add_subparsers(dest="command"))
     args = parser.parse_args(
-        ["computer-use", "run", "add a note", "--app", "Notes", "--mode", "background", "--allow-foreground-fallback"]
+        ["computer-use", "run", "add a note", "--app", "Notes", "--mode", "background", "--allow-foreground-fallback", "--no-local-shell"]
     )
     assert args.mode == "background" and args.allow_foreground_fallback is True
+    assert args.allow_local_shell is False
     default = parser.parse_args(["computer-use", "run", "add a note"])
     assert default.mode == COMPUTER_USE_DEFAULT_MODE and default.allow_foreground_fallback is False
+    assert default.allow_local_shell is True
     with pytest.raises(SystemExit):
         parser.parse_args(["computer-use", "run", "x", "--mode", "sideways"])
 
@@ -2289,10 +2302,12 @@ async def test_cli_run_forwards_the_mode_and_prints_the_matching_notice(monkeypa
         max_steps=60,
         mode="background",
         allow_foreground_fallback=True,
+        allow_local_shell=False,
     )
     assert await cli._run_custom(args) == 0
     assert run.await_args.kwargs["mode"] == "background"
     assert run.await_args.kwargs["allow_foreground_fallback"] is True
+    assert run.await_args.kwargs["allow_local_shell"] is False
     assert run.await_args.kwargs["platform_url"] == "https://platform.yutori.com"
     out = capsys.readouterr().out
     assert cli.hands_off_notice("background") in out
@@ -2301,12 +2316,21 @@ async def test_cli_run_forwards_the_mode_and_prints_the_matching_notice(monkeypa
         await cli._run_custom(SimpleNamespace(**{**vars(args), "app": None}))
 
 
-async def test_run_task_request_carries_mode_and_fallback(tmp_path):
+async def test_run_task_request_carries_mode_fallback_and_shell_policy(tmp_path):
     with _patched_run_task_supervise(tmp_path) as supervise:
-        await run_task(**_run_task_kwargs(tmp_path, app="Notes", mode="background", allow_foreground_fallback=True))
+        await run_task(
+            **_run_task_kwargs(
+                tmp_path,
+                app="Notes",
+                mode="background",
+                allow_foreground_fallback=True,
+                allow_local_shell=False,
+            )
+        )
     request = supervise.await_args.kwargs["request"]
     assert request["protocol_version"] == PROTOCOL_VERSION == 2
     assert request["mode"] == "background" and request["allow_foreground_fallback"] is True
+    assert request["allow_local_shell"] is False
 
 
 async def test_run_task_defaults_to_foreground_and_reports_failures_in_the_requested_mode(tmp_path):
@@ -2345,6 +2369,7 @@ def test_event_shape_checks_delivery_modes_and_accepts_the_new_action_fields():
 def test_parse_request_accepts_background_with_app():
     parsed = parse_request(_valid_request(app="Notes", mode="background", allow_foreground_fallback=True))
     assert parsed["mode"] == "background" and parsed["allow_foreground_fallback"] is True
+    assert parsed["allow_local_shell"] is True
     assert parse_request(_valid_request())["mode"] == "foreground"
 
 
@@ -2371,6 +2396,15 @@ def test_computer_kwargs_keep_the_foreground_shape_and_add_window_scope_for_back
         "scope": "window",
         "allow_foreground_fallback": True,
     }
+
+
+def test_computer_kwargs_can_disable_local_shell():
+    request = parse_request(_valid_request(app="iPhone Mirroring", mode="background", allow_local_shell=False))
+    kwargs = runner_module._computer_kwargs(request, deadline=1.0, cancellation=object(), api_key="k")
+    assert kwargs["allow_local_shell"] is False
+    assert "Local shell and filesystem tools are disabled" in runner_module.system_context(
+        "background", "iPhone Mirroring", False
+    )
 
 
 def test_system_context_varies_only_in_the_mode_specific_parts():
@@ -2760,6 +2794,28 @@ def test_claude_mcp_config_allows_the_full_computer_use_deadline():
     # The tool accepts a 60-minute deadline; leave one minute for startup and
     # final result delivery so Claude does not abandon a still-running child.
     assert config["mcpServers"]["yutori"]["request_timeout_ms"] == 61 * 60 * 1000
+
+
+def test_iphone_mirroring_skill_uses_the_scoped_safe_route():
+    root = Path(__file__).parents[1]
+    skill_path = root / "skills/07-iphone-mirroring/SKILL.md"
+    skill = skill_path.read_text()
+    compact = " ".join(skill.split())
+    assert "name: yutori-iphone-mirroring" in skill
+    assert "This capability is purely experimental" in skill
+    assert '"app": "iPhone Mirroring"' in skill
+    assert '"mode": "background"' in skill
+    assert '"allow_local_shell": false' in skill
+    assert "--no-local-shell" in skill
+    assert '"allow_foreground_fallback": true' not in skill
+    assert "--allow-foreground-fallback" not in skill
+    assert "Never enable foreground fallback" in skill
+    assert '"max_steps": 100' in skill
+    assert "Command-3" in skill and "Command-1" in skill and "Command-2" in skill
+    assert "stop and report the blocked action" in compact
+    assert "Do not repeat an action reported as uncertain" in compact
+    assert "passcode, passkey, biometric, one-time-code" in compact
+    assert "This capability is purely experimental" in (root / "README.md").read_text()
 
 
 # --- computer-use stop --------------------------------------------------------------------

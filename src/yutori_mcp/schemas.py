@@ -394,8 +394,8 @@ COMPUTER_USE_MAX_MINUTES = 60
 # Shared with computer_use/cli.py's `--max-steps` argparse default and server.py's
 # run_computer_use_task signature default, mirroring COMPUTER_USE_DEFAULT_MINUTES above so the
 # three call sites cannot drift apart if the default ever changes. The same holds for
-# COMPUTER_USE_DEFAULT_MODE and the `mode` / `allow_foreground_fallback` fields below, which
-# cli.py's `--mode` / `--allow-foreground-fallback` and server.py's signature mirror.
+# COMPUTER_USE_DEFAULT_MODE and the `mode` / `allow_foreground_fallback` / `allow_local_shell`
+# fields below, which cli.py's flags and server.py's signature mirror.
 COMPUTER_USE_DEFAULT_MAX_STEPS = 60
 # Mirrors computer_use/constants.py DELIVERY_MODES (this module stays free of computer_use
 # imports so the schema can load without the runtime); a test pins the two together.
@@ -433,6 +433,13 @@ class ComputerUseTaskInput(ToolInput):
         description=(
             "Background mode only. When true, an action the driver reports as not landing in the "
             "background is retried once with the target window fronted briefly and the prior app restored."
+        ),
+    )
+    allow_local_shell: bool = Field(
+        default=True,
+        description=(
+            "Whether the agent may use local shell and filesystem tools. Set false when the task "
+            "must be completed exclusively through the visible desktop or target app window."
         ),
     )
 
