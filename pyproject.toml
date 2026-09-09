@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.5.18"
+version = "0.5.19"
 description = "MCP server and workflow skills for building agents with Yutori"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,11 +30,11 @@ dependencies = [
     # breaks the install as soon as 2.x resolves.
     "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
-    # SDK 0.9.17 keeps the overlay on screen through a capture (the compositor
-    # excludes it instead of the driver hiding and re-showing it around every
-    # screenshot), marks a background run with an activity dot beside the menu
-    # bar icon, and folds a batch's consecutive waits into one pause.
-    "yutori==0.9.17",
+    # SDK 0.9.18 lets clicks through the activity window: its body ignores the
+    # mouse, so a click there reaches the app behind it instead of the
+    # transcript, and only the grip strip (drag, close) takes the mouse; model
+    # input on that grip is refused the way input on the Stop item is.
+    "yutori==0.9.18",
 ]
 
 [project.optional-dependencies]
