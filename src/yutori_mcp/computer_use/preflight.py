@@ -560,6 +560,26 @@ _ENVIRONMENT_CHECKS: tuple[Callable[[], CheckResult], ...] = (
     check_api_access,
 )
 
+# The latency-sensitive gate before every real run. Keep checks that prevent a
+# session from starting safely, but leave diagnostic-only probes to ``doctor``:
+# desktop capture, compiler, and overlay failures are explicitly non-blocking,
+# while ``check_api_access`` makes a synthetic model request that the run's first
+# real completion immediately supersedes. On a healthy development Mac those
+# four probes accounted for most of the pre-run wall time.
+_RUN_BLOCKING_CHECKS: tuple[Callable[[], CheckResult], ...] = (
+    check_macos,
+    check_architecture,
+    check_runtime,
+    # Resolve credentials before touching the driver so a missing login fails fast.
+    check_api_key,
+    check_driver_app,
+    check_driver_binary,
+    check_driver_contract,
+    check_daemon_identity,
+    check_permissions,
+    check_gui_session,
+)
+
 
 def checks_for() -> tuple[Callable[[], CheckResult], ...]:
     return _PLATFORM_CHECKS + _ENVIRONMENT_CHECKS
@@ -574,9 +594,16 @@ def run_checks() -> list[CheckResult]:
 
 
 def first_blocker() -> CheckResult | None:
-    for check in checks_for():
+    """Return the first safety blocker without running diagnostic-only probes.
+
+    ``run_checks()`` remains the exhaustive readiness audit used by
+    ``computer-use doctor``, including capture/overlay warnings and the synthetic
+    API completion. A real run needs only the cheap local gates here; its first
+    model request is the authoritative API-access check.
+    """
+    for check in _RUN_BLOCKING_CHECKS:
         result = check()
-        if not result.ok and result.blocking:
+        if not result.ok:
             return result
     return None
 

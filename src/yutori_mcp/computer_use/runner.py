@@ -462,6 +462,45 @@ class ApiCounter:
         self.calls += 1
 
 
+class StartupReporter:
+    """Emit the milestones before the run's first model request.
+
+    Durations are per phase and ``elapsed_ms`` is cumulative from
+    ``run_request()``. The first API callback closes startup; limit summaries
+    and later model turns therefore do not emit duplicate milestones.
+    """
+
+    def __init__(
+        self,
+        emitter: Emitter,
+        run_start: float,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._emitter = emitter
+        self._run_start = run_start
+        self._phase_start = run_start
+        self._clock = clock
+        self._model_started = False
+
+    def mark(self, phase: str) -> None:
+        now = self._clock()
+        self._emitter.emit(
+            {
+                "type": "startup",
+                "phase": phase,
+                "duration_ms": max(0, round((now - self._phase_start) * 1000)),
+                "elapsed_ms": max(0, round((now - self._run_start) * 1000)),
+            }
+        )
+        self._phase_start = now
+
+    async def on_api_start(self, _kwargs: dict[str, Any]) -> None:
+        if not self._model_started:
+            self._model_started = True
+            self.mark("model")
+
+
 class ChatTracker:
     """Remember the platform's identity for this run: the first model call's request_id.
 
@@ -881,6 +920,7 @@ async def run_request(
     guard = RunGuard(request["max_steps"], deadline)
     chat = ChatTracker()
     api_counter = ApiCounter()
+    startup = StartupReporter(emitter, run_start)
     computer = MacOSComputer(
         **_computer_kwargs(
             request,
@@ -900,28 +940,42 @@ async def run_request(
     outcome = "failed"
     final_text: str | None = None
     try:
-        await computer.__aenter__()
-        if request["app"]:
-            if not background:
-                # Consume the pre-launch frame captured during session startup so
-                # the first model observation is guaranteed to show the target.
-                # (Window scope captures nothing until a window is bound.)
-                await computer.screenshot()
-            target = await prepare_app(computer, request["app"], request["start_url"], front=not background)
-            computer.target_pid = target["pid"]
-            if background:
-                await _bind_window_target(computer, target)
-
-            async def recover_target() -> int | None:
-                recovered = await prepare_app(computer, request["app"], request["start_url"], front=not background)
-                if background:
-                    await _bind_window_target(computer, recovered)
-                return recovered["pid"]
-
-            computer.recover_target = recover_target
-
         async with AsyncYutoriClient(api_key=api_key, base_url=request["api_base_url"]) as client:
             completions = client.chat.completions
+            # AsyncOpenAI constructs its HTTP/SSL client synchronously. Do that
+            # before the desktop session and overlay take control rather than
+            # making the user wait for it after the target app is ready.
+            startup.mark("api_client")
+            await computer.__aenter__()
+            startup.mark("computer")
+            if request["app"]:
+                # A mutating launch/front call invalidates MacOSComputer's cached
+                # pre-launch frame, so there is no need to encode and discard it
+                # before preparing the target.
+                target = await prepare_app(
+                    computer,
+                    request["app"],
+                    request["start_url"],
+                    front=not background,
+                )
+                computer.target_pid = target["pid"]
+                if background:
+                    await _bind_window_target(computer, target)
+                startup.mark("target")
+
+                async def recover_target() -> int | None:
+                    recovered = await prepare_app(
+                        computer,
+                        request["app"],
+                        request["start_url"],
+                        front=not background,
+                    )
+                    if background:
+                        await _bind_window_target(computer, recovered)
+                    return recovered["pid"]
+
+                computer.recover_target = recover_target
+
             async with N2ComputerAgent(
                 **_agent_base_kwargs(
                     request,
@@ -929,7 +983,7 @@ async def run_request(
                     computer=computer,
                     deadline=deadline,
                 ),
-                callbacks=[guard, reporter, api_counter, chat],
+                callbacks=[guard, reporter, api_counter, chat, startup],
             ) as agent:
                 final_text = await _collect_final_text(agent, request["task"])
                 if guard.limit_reached or guard.deadline_reached:

@@ -243,6 +243,12 @@ def _event_shape_error(event: dict[str, Any]) -> str | None:
             "route": str,
             "refusal_code": (str, type(None)),
         }
+    elif event_type == "startup":
+        required = {
+            "phase": str,
+            "duration_ms": int,
+            "elapsed_ms": int,
+        }
     elif event_type == "result":
         required = {
             "outcome": str,
@@ -326,10 +332,11 @@ async def _supervise(
             event_type = event.get("type")
             if shape_error := _event_shape_error(event):
                 return protocol_failure(f"emitted malformed {event_type!r} event: {shape_error}.")
-            if event_type == "action":
+            if event_type in {"action", "startup"}:
                 if not ready:
-                    return protocol_failure("emitted an action before ready.")
-                actions.append(event)
+                    return protocol_failure(f"emitted {event_type} before ready.")
+                if event_type == "action":
+                    actions.append(event)
                 if notifier is not None:
                     notifier.submit(event)
             elif event_type == "ready":

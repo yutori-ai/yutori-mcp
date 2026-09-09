@@ -413,8 +413,10 @@ types into Calculator to confirm the permissions took effect, then has the agent
 
 While a task runs, `run` prints each action as the agent takes it — including the individual
 clicks, keystrokes, and scrolls inside each `computer_batch` — and closes with the model's
-answer in a labeled `FINAL OUTPUT` block. Output is colorized when stdout is a terminal; set
-`NO_COLOR=1` to turn that off, or `FORCE_COLOR=1` to keep it through a pipe.
+answer in a labeled `FINAL OUTPUT` block. Before the first model request it also prints elapsed
+timers for preflight, runner startup, API-client setup, the computer session, and target-app
+preparation. Output is colorized when stdout is a terminal; set `NO_COLOR=1` to turn that off,
+or `FORCE_COLOR=1` to keep it through a pipe.
 
 The harness in this repository is minimal: one task at a time (a machine-wide lock), either on
 the visible desktop or targeting one app window in the background, with no multiplexing. For

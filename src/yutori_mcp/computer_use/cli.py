@@ -6,6 +6,7 @@ import hashlib
 import os
 import subprocess
 import tempfile
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -38,6 +39,8 @@ from .preflight import (
 from .result import (
     Terminal,
     describe_delivery_surface,
+    format_duration,
+    format_startup_line,
     format_runtime_version,
     format_terminal_action,
     format_terminal_result,
@@ -206,13 +209,33 @@ def hands_off_notice(mode: str) -> str:
     return "The model takes over this Mac's desktop now; do not touch it during the run."
 
 
-def _event_printer(mode: str, app: str | None, paint: Terminal | None = None):
+def _event_printer(
+    mode: str,
+    app: str | None,
+    paint: Terminal | None = None,
+    *,
+    started_at: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
+):
     surface = describe_delivery_surface(mode, app)
     paint = Terminal.detect() if paint is None else paint
+    started_at = clock() if started_at is None else started_at
 
     async def print_event(event: dict) -> None:
         if event.get("type") == "ready":
-            print(f"{paint(paint.glyph('bullet'), 'green')} runner ready, driving {surface}\n", flush=True)
+            elapsed_ms = max(0, round((clock() - started_at) * 1000))
+            print(
+                f"{paint(paint.glyph('bullet'), 'green')} runner process ready"
+                f"  {paint(format_duration(elapsed_ms), 'dim')}",
+                flush=True,
+            )
+            return
+        if event.get("type") == "startup":
+            observed = {**event, "elapsed_ms": max(0, round((clock() - started_at) * 1000))}
+            line = format_startup_line(observed, app=app)
+            if event.get("phase") == "computer" and app is None:
+                line = line.replace("computer session ready", f"ready to drive {surface}", 1)
+            print(f"{paint(paint.glyph('bullet'), 'green')} {line}", flush=True)
             return
         print("\n".join(format_terminal_action(event, paint)), flush=True)
 
@@ -255,13 +278,21 @@ async def _run_custom(args: argparse.Namespace) -> int:
         allow_foreground_fallback=args.allow_foreground_fallback,
         allow_local_shell=args.allow_local_shell,
     )
+    paint = Terminal.detect()
+    preflight_started = time.monotonic()
     if _blocked():
         return 1
-    paint = Terminal.detect()
+    preflight_ms = max(0, round((time.monotonic() - preflight_started) * 1000))
+    print(
+        f"{paint(paint.glyph('bullet'), 'green')} preflight ready"
+        f"  {paint(format_duration(preflight_ms), 'dim')}",
+        flush=True,
+    )
     print(format_run_header(params, paint))
+    runner_started = time.monotonic()
     result = await run_task_with_resolved_credentials(
         **params.model_dump(),
-        on_event=_event_printer(params.mode, params.app, paint),
+        on_event=_event_printer(params.mode, params.app, paint, started_at=runner_started),
     )
     return _report(result, include_actions=False)
 
