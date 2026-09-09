@@ -78,15 +78,24 @@ def _best_content_window(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     return max(titled, key=lambda window: (window.get("z_index") or 0, _area(window)))
 
 
+def _content_windows(windows: list[dict[str, Any]], min_edge_points: float) -> list[dict[str, Any]]:
+    """Windows whose shorter edge clears ``min_edge_points``, excluding menu-bar-strip-sized helpers.
+
+    Shared by :func:`pick_best_window` and :func:`_best_fallback_window`, which both need the
+    same "is this big enough to be real content" cut before picking among the survivors.
+    """
+    return [
+        window for window in windows if min(window["bounds"]["width"], window["bounds"]["height"]) >= min_edge_points
+    ]
+
+
 def _best_fallback_window(
     windows: list[dict[str, Any]], min_edge_points: float = 100
 ) -> dict[str, Any] | None:
     """Choose eventual background fallback content without favoring a visible helper host."""
     if not windows:
         return None
-    content = [
-        window for window in windows if min(window["bounds"]["width"], window["bounds"]["height"]) >= min_edge_points
-    ]
+    content = _content_windows(windows, min_edge_points)
     return _best_content_window(content) if content else max(windows, key=_area)
 
 
@@ -99,9 +108,7 @@ def pick_best_window(windows: list[dict[str, Any]], min_edge_points: float = 100
     """
     if not windows:
         return None
-    content = [
-        window for window in windows if min(window["bounds"]["width"], window["bounds"]["height"]) >= min_edge_points
-    ]
+    content = _content_windows(windows, min_edge_points)
     visible = [
         window
         for window in content
