@@ -30,6 +30,24 @@ def _event(sequence: int, category: str, *, active: bool = False, **details: str
     }
 
 
+def test_capture_baseline_reads_latest_sequence_and_outcome_count(tmp_path):
+    path = tmp_path / "events.jsonl"
+    path.write_text(
+        "\n".join(json.dumps(_event(sequence, "nsevent")) for sequence in (1, 3, 2)) + "\n",
+        encoding="utf-8",
+    )
+    computer = type("FakeComputer", (), {"action_outcomes": ("a", "b")})()
+
+    assert probe.capture_baseline(path, computer) == (3, 2)
+
+
+def test_capture_baseline_defaults_to_no_prior_sequence(tmp_path):
+    path = tmp_path / "events.jsonl"
+    computer = type("FakeComputer", (), {"action_outcomes": ()})()
+
+    assert probe.capture_baseline(path, computer) == (-1, 0)
+
+
 def test_read_events_ignores_an_incomplete_trailing_line(tmp_path):
     path = tmp_path / "events.jsonl"
     path.write_text(json.dumps(_event(1, "session")) + "\n{", encoding="utf-8")
