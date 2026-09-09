@@ -26,11 +26,12 @@ OBSERVATION_FORMAT = "webp"
 DELIVERY_MODE_FOREGROUND = "foreground"
 DELIVERY_MODE_BACKGROUND = "background"
 DELIVERY_MODES = (DELIVERY_MODE_FOREGROUND, DELIVERY_MODE_BACKGROUND)
-# Set to "1" to keep the overlay in screen recordings and screen shares of a foreground run
-# (demos). The SDK then takes the model's frames through the overlay host with its own windows
-# filtered out (`exclude_overlay_from_capture=False`); by default the overlay opts out of screen
-# capture altogether, which also hides it from recorders. Read by the runner; the supervisor
-# forwards it to the runner's environment.
+# Foreground runs keep the overlay in screen recordings and screen shares by default: the SDK
+# takes the model's frames through the overlay host with its own windows filtered out
+# (`exclude_overlay_from_capture=False`), so the model never sees it and nothing fades around a
+# capture. Set to "0" to make the overlay opt out of screen capture altogether instead, which
+# also hides it from recorders. Read by the runner; the supervisor forwards it to the runner's
+# environment.
 ENV_RECORDABLE_OVERLAY = "YUTORI_RECORDABLE_OVERLAY"
 SDK_VERSION = "0.9.19"
 # The PyPI wheel digest and a digest derived from its stable RECORD entries.

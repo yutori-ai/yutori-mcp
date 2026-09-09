@@ -1886,6 +1886,7 @@ async def test_run_request_wires_sdk_runtime_and_reports_effective_state(monkeyp
         "execution_deadline": pytest.approx(computer.kwargs["execution_deadline"]),
         "cancellation": computer.kwargs["cancellation"],
         "known_secrets": ("yt-secret",),
+        "exclude_overlay_from_capture": False,
     }
     assert agent.kwargs["tool_set"] == TOOL_SET
     assert agent.kwargs["presentation"] is computer.presentation
@@ -2439,18 +2440,22 @@ def test_parse_request_accepts_background_with_app():
     assert parse_request(_valid_request())["mode"] == "foreground"
 
 
-def test_computer_kwargs_keep_the_foreground_shape_and_add_window_scope_for_background():
+def test_computer_kwargs_keep_the_foreground_shape_and_add_window_scope_for_background(monkeypatch):
+    monkeypatch.delenv(runner_module.ENV_RECORDABLE_OVERLAY, raising=False)
     cancellation = object()
-    foreground = runner_module._computer_kwargs(
-        parse_request(_valid_request()), deadline=1.0, cancellation=cancellation, api_key="k"
-    )
-    assert foreground == {
+    shared = {
         "presentation": True,
         "allow_local_shell": True,
         "execution_deadline": 1.0,
         "cancellation": cancellation,
         "known_secrets": ("k",),
     }
+    foreground = runner_module._computer_kwargs(
+        parse_request(_valid_request()), deadline=1.0, cancellation=cancellation, api_key="k"
+    )
+    # Recordable by default: the overlay stays in screen recordings, the SDK keeps it out of the
+    # model's frames on the capturer's side.
+    assert foreground == {**shared, "exclude_overlay_from_capture": False}
     background = runner_module._computer_kwargs(
         parse_request(_valid_request(app="Notes", mode="background", allow_foreground_fallback=True)),
         deadline=1.0,
@@ -2458,34 +2463,37 @@ def test_computer_kwargs_keep_the_foreground_shape_and_add_window_scope_for_back
         api_key="k",
     )
     assert background == {
-        **foreground,
+        **shared,
         "scope": "window",
         "allow_foreground_fallback": True,
     }
 
 
-def test_computer_kwargs_keep_a_recordable_overlay_only_for_foreground_runs(monkeypatch):
-    monkeypatch.setenv(runner_module.ENV_RECORDABLE_OVERLAY, "1")
-    foreground = runner_module._computer_kwargs(
-        parse_request(_valid_request()), deadline=1.0, cancellation=object(), api_key="k"
-    )
-    assert foreground["exclude_overlay_from_capture"] is False
-    # Window scope shows no full-screen overlay; nothing to keep in a recording.
+def test_computer_kwargs_recordable_overlay_switch(monkeypatch):
+    def foreground():
+        return runner_module._computer_kwargs(
+            parse_request(_valid_request()), deadline=1.0, cancellation=object(), api_key="k"
+        )
+
+    # "0" opts out: the overlay leaves screen capture altogether (and recordings with it).
+    monkeypatch.setenv(runner_module.ENV_RECORDABLE_OVERLAY, "0")
+    assert foreground()["exclude_overlay_from_capture"] is True
+    # Anything else keeps the default.
+    for value in ("1", "true", ""):
+        monkeypatch.setenv(runner_module.ENV_RECORDABLE_OVERLAY, value)
+        assert foreground()["exclude_overlay_from_capture"] is False
+    # Window scope shows no full-screen overlay; the switch does not apply.
     background = runner_module._computer_kwargs(
         parse_request(_valid_request(app="Notes", mode="background")), deadline=1.0, cancellation=object(), api_key="k"
     )
     assert "exclude_overlay_from_capture" not in background
-    monkeypatch.setenv(runner_module.ENV_RECORDABLE_OVERLAY, "true")
-    assert "exclude_overlay_from_capture" not in runner_module._computer_kwargs(
-        parse_request(_valid_request()), deadline=1.0, cancellation=object(), api_key="k"
-    )
 
 
 def test_child_environment_forwards_the_recordable_overlay_switch(monkeypatch):
     monkeypatch.delenv(runner_module.ENV_RECORDABLE_OVERLAY, raising=False)
     assert runner_module.ENV_RECORDABLE_OVERLAY not in supervisor._child_environment("k")
-    monkeypatch.setenv(runner_module.ENV_RECORDABLE_OVERLAY, "1")
-    assert supervisor._child_environment("k")[runner_module.ENV_RECORDABLE_OVERLAY] == "1"
+    monkeypatch.setenv(runner_module.ENV_RECORDABLE_OVERLAY, "0")
+    assert supervisor._child_environment("k")[runner_module.ENV_RECORDABLE_OVERLAY] == "0"
 
 
 def test_computer_kwargs_can_disable_local_shell():
