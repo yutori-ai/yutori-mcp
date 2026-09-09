@@ -39,6 +39,7 @@ from .preflight import (
 from .result import (
     Terminal,
     describe_delivery_surface,
+    elapsed_ms_since,
     format_duration,
     format_startup_line,
     format_runtime_version,
@@ -209,6 +210,14 @@ def hands_off_notice(mode: str) -> str:
     return "The model takes over this Mac's desktop now; do not touch it during the run."
 
 
+def _print_milestone(
+    paint: Terminal, label: str, start: float, *, clock: Callable[[], float] = time.monotonic
+) -> None:
+    """One green "<label>  <duration since start>" line, this file's style for a reached milestone."""
+    duration = paint(format_duration(elapsed_ms_since(start, clock=clock)), "dim")
+    print(f"{paint(paint.glyph('bullet'), 'green')} {label}  {duration}", flush=True)
+
+
 def _event_printer(
     mode: str,
     app: str | None,
@@ -223,12 +232,7 @@ def _event_printer(
 
     async def print_event(event: dict) -> None:
         if event.get("type") == "ready":
-            elapsed_ms = max(0, round((clock() - started_at) * 1000))
-            print(
-                f"{paint(paint.glyph('bullet'), 'green')} runner process ready"
-                f"  {paint(format_duration(elapsed_ms), 'dim')}",
-                flush=True,
-            )
+            _print_milestone(paint, "runner process ready", started_at, clock=clock)
             return
         if event.get("type") == "startup":
             observed = {**event, "elapsed_ms": max(0, round((clock() - started_at) * 1000))}
@@ -282,12 +286,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
     preflight_started = time.monotonic()
     if _blocked():
         return 1
-    preflight_ms = max(0, round((time.monotonic() - preflight_started) * 1000))
-    print(
-        f"{paint(paint.glyph('bullet'), 'green')} preflight ready"
-        f"  {paint(format_duration(preflight_ms), 'dim')}",
-        flush=True,
-    )
+    _print_milestone(paint, "preflight ready", preflight_started)
     print(format_run_header(params, paint))
     runner_started = time.monotonic()
     result = await run_task_with_resolved_credentials(

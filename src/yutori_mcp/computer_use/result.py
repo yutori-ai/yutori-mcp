@@ -5,6 +5,7 @@ import os
 import shutil
 import sys
 import time
+from collections.abc import Callable
 from typing import Any, TextIO
 
 from .constants import DELIVERY_MODE_BACKGROUND, DELIVERY_MODE_FOREGROUND, MCP_VERSION, SDK_VERSION
@@ -42,6 +43,17 @@ def remaining_seconds(deadline: float) -> float:
     if remaining <= 0:
         raise asyncio.TimeoutError
     return remaining
+
+
+def elapsed_ms_since(start: float, *, clock: Callable[[], float] = time.monotonic) -> int:
+    """Milliseconds elapsed since ``start`` (a ``time.monotonic()`` value), floor-clamped at zero.
+
+    Shared by the runner's per-action and per-run timing (``ActionReporter``, the final
+    ``elapsed_ms`` in ``run_request``) and the CLI's own "ready" milestone prints, so both
+    sides of the runner/CLI boundary compute a duration the same way. Named to avoid
+    colliding with the ``elapsed_ms`` variable/dict-key name most callers use for its result.
+    """
+    return max(0, round((clock() - start) * 1000))
 
 
 def _seconds(ms: Any) -> str:
