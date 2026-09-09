@@ -38,7 +38,7 @@ from .constants import (
     SDK_VERSION,
     TOOL_SET,
 )
-from .result import redact, remaining_seconds
+from .result import elapsed_ms_since, redact, remaining_seconds
 from .targeting import TargetGuardedMacOSComputer as MacOSComputer
 
 _FOREGROUND_OPENING = "You control the entire macOS screen. "
@@ -374,11 +374,6 @@ def _background_task_id(outputs: list[dict[str, Any]] | None) -> str | None:
     return None
 
 
-def _elapsed_ms(start: float, *, clock: Callable[[], float] = time.monotonic) -> int:
-    """Milliseconds elapsed since `start`, floor-clamped at zero."""
-    return max(0, round((clock() - start) * 1000))
-
-
 class ActionReporter:
     """Emit one privacy-safe action event for each attempted top-level tool call."""
 
@@ -419,7 +414,7 @@ class ActionReporter:
     def _emit(self, item: dict[str, Any], raw_status: str, result: list[dict[str, Any]]) -> None:
         duration_ms = None
         if self._call_start is not None:
-            duration_ms = _elapsed_ms(self._call_start, clock=self._clock)
+            duration_ms = elapsed_ms_since(self._call_start, clock=self._clock)
         self._call_start = None
         self._pending_item = None
         arguments = _arguments(item)
@@ -439,7 +434,7 @@ class ActionReporter:
                 "refusal_code": delivery.get("refusal_code") or ("driver_refused" if raw_status == "refused" else None),
                 "effect": delivery.get("effect"),
                 "escalated": bool(delivery.get("escalated")),
-                "elapsed_ms": _elapsed_ms(self._run_start, clock=self._clock),
+                "elapsed_ms": elapsed_ms_since(self._run_start, clock=self._clock),
                 "duration_ms": duration_ms,
                 "command": shell_command_preview(item),
                 "details": batch_action_previews(item),
@@ -1016,7 +1011,7 @@ async def run_request(
                 final_text = _redacted_error_text(error, api_key)
 
     reporter.flush_interrupted()
-    elapsed_ms = _elapsed_ms(run_start)
+    elapsed_ms = elapsed_ms_since(run_start)
     emitter.emit(
         {
             **_result_event(outcome, final_text, mode),
