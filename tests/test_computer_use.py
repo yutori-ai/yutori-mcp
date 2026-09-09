@@ -52,7 +52,9 @@ from yutori_mcp.computer_use.result import (
     FINAL_OUTPUT_HEADING,
     Terminal,
     failure,
+    format_duration,
     format_result,
+    format_startup_line,
     format_terminal_action,
     format_terminal_result,
     redact,
@@ -342,6 +344,17 @@ def _action_event(**overrides):
     return event
 
 
+def _startup_event(**overrides):
+    event = {
+        "type": "startup",
+        "phase": "computer",
+        "duration_ms": 250,
+        "elapsed_ms": 300,
+    }
+    event.update(overrides)
+    return event
+
+
 async def _run_supervised(process, *, api_key="yt-key", deadline_seconds=1, **supervise_kwargs):
     """Patch the child process and call `_supervise` with the shared fixed args this file's tests repeat.
 
@@ -433,6 +446,7 @@ async def test_supervisor_redacts_key_and_keeps_it_out_of_argv():
 async def test_supervisor_forwards_ready_and_action_events():
     events = [
         _ready_event(reasoning_overlay_requested=True),
+        _startup_event(),
         _action_event(index=1, tool="computer_batch", elapsed_ms=42),
         _result_event(),
     ]
@@ -443,8 +457,8 @@ async def test_supervisor_forwards_ready_and_action_events():
         seen.append(event)
 
     result = await _run_supervised(process, on_event=on_event)
-    assert [event["type"] for event in seen] == ["ready", "action"]
-    assert result["actions"] == [events[1]]
+    assert [event["type"] for event in seen] == ["ready", "startup", "action"]
+    assert result["actions"] == [events[2]]
 
 
 async def test_supervisor_does_not_let_a_blocked_progress_callback_stall_protocol_drain(monkeypatch):
@@ -539,6 +553,7 @@ async def test_supervisor_rejects_runner_provenance_drift():
             "delivery_mode": "foreground",
             "route": "pixel",
         },
+        {"type": "startup", "phase": "computer"},
         {"type": "result", "outcome": "completed"},
     ],
 )
@@ -1053,15 +1068,32 @@ def test_gui_session_checks_machine_lock_state(monkeypatch, lock_value, ok, deta
     assert result.detail == detail
 
 
-def test_first_blocker_skips_warnings(monkeypatch):
-    def warning():
-        return preflight.CheckResult("overlay", False, "missing", "setup", blocking=False)
+def test_first_blocker_uses_only_the_live_run_safety_checks(monkeypatch):
+    calls = []
+
+    def ok():
+        calls.append("ok")
+        return preflight.CheckResult("runtime", True, "ready")
 
     def blocker():
+        calls.append("blocker")
         return preflight.CheckResult("driver", False, "missing", "setup")
 
-    monkeypatch.setattr(preflight, "checks_for", lambda: (warning, blocker))
+    def never():
+        raise AssertionError("checks after the first blocker must not run")
+
+    monkeypatch.setattr(preflight, "_RUN_BLOCKING_CHECKS", (ok, blocker, never))
     assert preflight.first_blocker().name == "driver"
+    assert calls == ["ok", "blocker"]
+
+
+def test_live_run_preflight_leaves_diagnostic_and_synthetic_api_probes_to_doctor():
+    live_checks = set(preflight._RUN_BLOCKING_CHECKS)
+    assert preflight.check_capture not in live_checks
+    assert preflight.check_compiler not in live_checks
+    assert preflight.check_overlay not in live_checks
+    assert preflight.check_api_access not in live_checks
+    assert live_checks.issubset(set(preflight.checks_for()))
 
 
 def test_doctor_labels_nonblocking_failures_as_warnings(monkeypatch, capsys):
@@ -1618,6 +1650,22 @@ class _CollectStream:
         pass
 
 
+async def test_startup_reporter_emits_each_phase_and_only_the_first_model_request():
+    stream = _CollectStream()
+    clock = iter((10.1, 10.5, 11.0)).__next__
+    reporter = runner_module.StartupReporter(Emitter(stream), 10.0, clock=clock)
+
+    reporter.mark("api_client")
+    reporter.mark("computer")
+    await reporter.on_api_start({})
+    await reporter.on_api_start({})
+
+    events = [json.loads(line) for line in stream.lines]
+    assert [event["phase"] for event in events] == ["api_client", "computer", "model"]
+    assert [event["duration_ms"] for event in events] == [100, 400, 500]
+    assert [event["elapsed_ms"] for event in events] == [100, 500, 1000]
+
+
 def test_runner_main_unexpected_failure_preserves_the_requested_background_mode(monkeypatch):
     stream = _CollectStream()
 
@@ -1852,6 +1900,8 @@ async def test_run_request_wires_sdk_runtime_and_reports_effective_state(monkeyp
     assert "Never ask them to give you a password" in agent.kwargs["system_prompt"]
     assert "Do not install software or packages" in agent.kwargs["system_prompt"]
     assert computer.closed
+    startup_events = [json.loads(line) for line in stream.lines if json.loads(line)["type"] == "startup"]
+    assert [event["phase"] for event in startup_events] == ["api_client", "computer", "model"]
     result = json.loads(stream.lines[-1])
     assert result["final_text"] == "Done"
     assert result["reasoning_overlay_requested"] is True
@@ -2227,6 +2277,21 @@ async def test_progress_reporter_delivers_progress_and_log_notifications_concurr
     assert "12 model turns" in progress_call["message"]
 
 
+async def test_progress_reporter_formats_startup_phases_without_action_fields():
+    from yutori_mcp import server
+
+    ctx = SimpleNamespace(report_progress=AsyncMock(), info=AsyncMock())
+    on_event = server._progress_reporter(ctx, 12, mode="background", app="Notes")
+
+    await on_event(_startup_event(phase="target"))
+
+    ctx.report_progress.assert_awaited_once_with(
+        progress=0,
+        message="Computer-use startup: Notes ready  250ms | at 300ms",
+    )
+    ctx.info.assert_awaited_once_with("Computer-use startup: Notes ready  250ms | at 300ms")
+
+
 async def test_server_early_failures_preserve_the_requested_background_mode(monkeypatch, tmp_path):
     from yutori_mcp import server
     from yutori_mcp.computer_use import lock as lock_module
@@ -2310,6 +2375,7 @@ async def test_cli_run_forwards_the_mode_and_prints_the_matching_notice(monkeypa
     assert run.await_args.kwargs["allow_local_shell"] is False
     assert run.await_args.kwargs["platform_url"] == "https://platform.yutori.com"
     out = capsys.readouterr().out
+    assert "preflight ready" in out
     assert cli.hands_off_notice("background") in out
     assert "completed" in out and "background" in out
     with pytest.raises(ValidationError, match="requires app"):
@@ -2482,6 +2548,8 @@ async def test_run_request_background_binds_the_window_and_never_fronts(monkeypa
     assert result["window_rebinds"] == 1 and result["focus_guard_trips"] == 0
     assert result["preview_frames"] == 0
     assert result["window_target"] == {"pid": 42, "window_id": 7, "app_name": "Notes"}
+    startup_events = [json.loads(line) for line in stream.lines if json.loads(line)["type"] == "startup"]
+    assert [event["phase"] for event in startup_events] == ["api_client", "computer", "target", "model"]
     action = next(json.loads(line) for line in stream.lines if json.loads(line)["type"] == "action")
     assert action["delivery_mode"] == "background" and action["route"] == "pixel"
     assert action["effect"] is None and action["escalated"] is False
@@ -2492,7 +2560,7 @@ async def test_run_request_background_binds_the_window_and_never_fronts(monkeypa
     assert computer.window_targets[-1] == _FakeWindowTarget(43, 9, app_name="Notes")
 
 
-async def test_run_request_foreground_still_consumes_the_prelaunch_frame_and_fronts(monkeypatch):
+async def test_run_request_foreground_does_not_encode_the_invalidated_prelaunch_frame(monkeypatch):
     _FakeComputer.instances.clear()
     prepared = AsyncMock(return_value={"name": "Notes", "pid": 42, "window_id": 7})
     _patch_runner_sdk(monkeypatch)
@@ -2503,12 +2571,25 @@ async def test_run_request_foreground_still_consumes_the_prelaunch_frame_and_fro
     assert await runner_module.run_request(request, Emitter(stream), "yt-secret") == "completed"
 
     computer = _FakeComputer.instances[-1]
-    assert computer.screenshots == 1
+    assert computer.screenshots == 0
     assert prepared.await_args.kwargs == {"front": True}
     assert computer.window_targets == []
     result = json.loads(stream.lines[-1])
     assert result["delivery_mode"] == "foreground" and result["window_target"] is None
     assert result["fallback_escalations"] == 0 and result["background_refusals"] == 0
+
+
+async def test_pinned_sdk_launch_invalidates_its_cached_prelaunch_frame():
+    from yutori.navigator.macos import MacOSComputer
+
+    transport = SimpleNamespace(
+        call_tool=AsyncMock(return_value={"structuredContent": {"name": "Notes", "pid": 42}})
+    )
+    computer = MacOSComputer(transport=transport, owns_transport=False, presentation=False)
+    computer._initial_png = b"stale desktop"
+
+    assert await computer.launch_app(name="Notes") == {"name": "Notes", "pid": 42}
+    assert computer._initial_png is None
 
 
 async def test_run_request_background_without_sdk_support_fails_before_touching_the_desktop(monkeypatch):
@@ -3051,6 +3132,28 @@ def test_cli_run_header_states_the_task_target_and_limits():
     assert f"version   yutori-mcp {MCP_VERSION}  |  yutori {SDK_VERSION}" in text
     assert "limits    foreground  |  5 min  |  60 model turns" in text
     assert cli.hands_off_notice("foreground") in text
+
+
+async def test_cli_startup_printer_shows_phase_and_cumulative_timers(capsys):
+    from yutori_mcp.computer_use import cli
+
+    clock = iter((10.25, 10.5)).__next__
+    printer = cli._event_printer("foreground", "Safari", _PLAIN_TERMINAL, started_at=10.0, clock=clock)
+
+    await printer(_ready_event())
+    await printer(_startup_event(phase="target", duration_ms=120))
+
+    output = capsys.readouterr().out
+    assert "runner process ready  250ms" in output
+    assert "Safari ready  120ms | at 500ms" in output
+
+
+def test_startup_timing_formatter_scales_durations_and_names_phases():
+    assert format_duration(85) == "85ms"
+    assert format_duration(1_250) == "1.2s"
+    assert format_startup_line(_startup_event(phase="target"), app="Notes") == (
+        "Notes ready  250ms | at 300ms"
+    )
 
 
 async def test_progress_reporter_folds_the_batch_detail_into_one_message():

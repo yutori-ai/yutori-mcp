@@ -248,7 +248,7 @@ class Terminal:
         return "  " + self(label.ljust(_LABEL_WIDTH), "dim") + value
 
 
-def _clock(ms: Any) -> str:
+def format_duration(ms: Any) -> str:
     """A duration scaled for reading: milliseconds under a second, minutes past sixty."""
     if not isinstance(ms, (int, float)):
         return "?"
@@ -258,6 +258,28 @@ def _clock(ms: Any) -> str:
     if seconds < 60:
         return f"{seconds:.1f}s"
     return f"{int(seconds // 60)}m {seconds % 60:04.1f}s"
+
+
+_STARTUP_PHASE_LABELS = {
+    "api_client": "API client ready",
+    "computer": "computer session ready",
+    "target": "target application ready",
+    "model": "first model request started",
+}
+
+
+def format_startup_line(event: dict[str, Any], *, app: str | None = None) -> str:
+    """Render one runner startup checkpoint with phase and cumulative timing."""
+    phase = str(event.get("phase") or "startup")
+    label = _STARTUP_PHASE_LABELS.get(phase, phase.replace("_", " "))
+    if phase == "target" and app:
+        label = f"{app} ready"
+    timings = []
+    if event.get("duration_ms") is not None:
+        timings.append(format_duration(event["duration_ms"]))
+    if event.get("elapsed_ms") is not None:
+        timings.append(f"at {format_duration(event['elapsed_ms'])}")
+    return label + (f"  {' | '.join(timings)}" if timings else "")
 
 
 def format_terminal_action(event: dict[str, Any], paint: Terminal) -> list[str]:
@@ -280,9 +302,9 @@ def format_terminal_action(event: dict[str, Any], paint: Terminal) -> list[str]:
         line += " " + paint("[fronted]", "yellow")
     if event.get("run_in_background"):
         line += " " + paint("[background]", "yellow")
-    timings = [_clock(event["duration_ms"])] if event.get("duration_ms") is not None else []
+    timings = [format_duration(event["duration_ms"])] if event.get("duration_ms") is not None else []
     if event.get("elapsed_ms") is not None:
-        timings.append(f"at {_clock(event['elapsed_ms'])}")
+        timings.append(f"at {format_duration(event['elapsed_ms'])}")
     if timings:
         line += "  " + paint(f" {paint.glyph('separator')} ".join(timings), "dim")
     lines = [line]
@@ -317,7 +339,7 @@ def format_terminal_result(
     glyph, color = _OUTCOME_STYLES.get(outcome, ("bullet", "yellow"))
     facts = []
     if result.get("elapsed_ms") is not None:
-        facts.append(_clock(result["elapsed_ms"]))
+        facts.append(format_duration(result["elapsed_ms"]))
     if isinstance(result.get("steps"), int):
         facts.append(f"{result['steps']} model turns")
     facts.append(str(result.get("delivery_mode") or DELIVERY_MODE_FOREGROUND))
