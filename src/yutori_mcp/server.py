@@ -426,6 +426,7 @@ async def run_computer_use_task(
     max_steps: int = COMPUTER_USE_DEFAULT_MAX_STEPS,
     mode: ComputerUseMode = COMPUTER_USE_DEFAULT_MODE,
     allow_foreground_fallback: bool = False,
+    allow_local_shell: bool = True,
     ctx: Context | None = None,
 ) -> str:
     # `ctx` is FastMCP's injected request context (excluded from the client-facing

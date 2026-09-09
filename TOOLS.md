@@ -99,6 +99,7 @@ before the model was called.
 | `max_steps` | No | Max model turns, 1 or more. A turn may contain multiple desktop actions. Default: 60 |
 | `mode` | No | `foreground` (default) drives the visible desktop; `background` drives only `app`'s window without taking focus. Background requires `app` |
 | `allow_foreground_fallback` | No | Background only. Retry an action that did not land with the window fronted briefly. Default: false |
+| `allow_local_shell` | No | Allow local shell and filesystem tools. Set false to require visible computer actions only. Default: true |
 
 `max_steps` has no upper bound. The SDK automatically compacts older screenshots and tool
 results on long runs; each step is one model turn, not an individual desktop action.

@@ -108,7 +108,7 @@ def _background_opening(app: str) -> str:
     )
 
 
-def system_context(mode: str, app: str | None = None) -> str:
+def system_context(mode: str, app: str | None = None, allow_local_shell: bool = True) -> str:
     """The model's standing instructions for one delivery mode.
 
     Foreground runs own the whole screen and keep results visible; background runs see and
@@ -116,8 +116,15 @@ def system_context(mode: str, app: str | None = None) -> str:
     """
     if mode == DELIVERY_MODE_BACKGROUND:
         opening = _background_opening(app or "the target application")
-        return opening + _SHARED_CONTEXT + _BACKGROUND_FINISH + _SHARED_TAIL
-    return _FOREGROUND_OPENING + _SHARED_CONTEXT + _FOREGROUND_FINISH + _SHARED_TAIL
+        context = opening + _SHARED_CONTEXT + _BACKGROUND_FINISH + _SHARED_TAIL
+    else:
+        context = _FOREGROUND_OPENING + _SHARED_CONTEXT + _FOREGROUND_FINISH + _SHARED_TAIL
+    if not allow_local_shell:
+        context += (
+            "\n\nLocal shell and filesystem tools are disabled for this run. Do not call bash, "
+            "read, write, or edit; complete the task only through visible computer actions."
+        )
+    return context
 
 
 SYSTEM_CONTEXT = system_context(DELIVERY_MODE_FOREGROUND)
@@ -200,6 +207,7 @@ def parse_request(payload: Any) -> dict[str, Any]:
         raise RequestError("INVALID_REQUEST", "start_url requires app.")
     mode = _require_mode(payload)
     allow_foreground_fallback = _require_bool(payload, "allow_foreground_fallback")
+    allow_local_shell = _require_bool(payload, "allow_local_shell")
     if mode == DELIVERY_MODE_BACKGROUND and app is None:
         raise RequestError("INVALID_REQUEST", "mode 'background' requires app.")
     if allow_foreground_fallback and mode != DELIVERY_MODE_BACKGROUND:
@@ -214,6 +222,7 @@ def parse_request(payload: Any) -> dict[str, Any]:
         "max_steps": max_steps,
         "mode": mode,
         "allow_foreground_fallback": allow_foreground_fallback,
+        "allow_local_shell": allow_local_shell,
         "model": _require_string(payload, "model"),
         "api_base_url": _require_string(payload, "api_base_url"),
     }
@@ -689,7 +698,7 @@ def _computer_kwargs(
     """MacOSComputer construction per mode; the foreground shape is the long-standing one."""
     kwargs: dict[str, Any] = {
         "presentation": True,
-        "allow_local_shell": True,
+        "allow_local_shell": request["allow_local_shell"],
         "execution_deadline": deadline,
         "cancellation": cancellation,
         "known_secrets": (api_key,),
@@ -714,7 +723,9 @@ def _agent_base_kwargs(
         "tool_set": TOOL_SET,
         "completions": completions,
         "model": request["model"],
-        "system_prompt": system_context(request["mode"], request["app"]),
+        "system_prompt": system_context(
+            request["mode"], request["app"], request["allow_local_shell"]
+        ),
         "presentation": computer.presentation,
         "screenshot_delay": 0,
         "image_format": OBSERVATION_FORMAT,

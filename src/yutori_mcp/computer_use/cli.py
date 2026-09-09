@@ -253,6 +253,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
         max_steps=args.max_steps,
         mode=args.mode,
         allow_foreground_fallback=args.allow_foreground_fallback,
+        allow_local_shell=args.allow_local_shell,
     )
     if _blocked():
         return 1
@@ -351,6 +352,12 @@ def register_parser(
         dest="allow_foreground_fallback",
         action="store_true",
         help="Background only: retry an action that did not land with the window fronted briefly",
+    )
+    run_parser.add_argument(
+        "--no-local-shell",
+        dest="allow_local_shell",
+        action="store_false",
+        help="Disable local shell and filesystem tools; drive only the visible desktop or target app window",
     )
 
 
