@@ -2464,6 +2464,30 @@ def test_computer_kwargs_keep_the_foreground_shape_and_add_window_scope_for_back
     }
 
 
+def test_computer_kwargs_keep_a_recordable_overlay_only_for_foreground_runs(monkeypatch):
+    monkeypatch.setenv(runner_module.ENV_RECORDABLE_OVERLAY, "1")
+    foreground = runner_module._computer_kwargs(
+        parse_request(_valid_request()), deadline=1.0, cancellation=object(), api_key="k"
+    )
+    assert foreground["exclude_overlay_from_capture"] is False
+    # Window scope shows no full-screen overlay; nothing to keep in a recording.
+    background = runner_module._computer_kwargs(
+        parse_request(_valid_request(app="Notes", mode="background")), deadline=1.0, cancellation=object(), api_key="k"
+    )
+    assert "exclude_overlay_from_capture" not in background
+    monkeypatch.setenv(runner_module.ENV_RECORDABLE_OVERLAY, "true")
+    assert "exclude_overlay_from_capture" not in runner_module._computer_kwargs(
+        parse_request(_valid_request()), deadline=1.0, cancellation=object(), api_key="k"
+    )
+
+
+def test_child_environment_forwards_the_recordable_overlay_switch(monkeypatch):
+    monkeypatch.delenv(runner_module.ENV_RECORDABLE_OVERLAY, raising=False)
+    assert runner_module.ENV_RECORDABLE_OVERLAY not in supervisor._child_environment("k")
+    monkeypatch.setenv(runner_module.ENV_RECORDABLE_OVERLAY, "1")
+    assert supervisor._child_environment("k")[runner_module.ENV_RECORDABLE_OVERLAY] == "1"
+
+
 def test_computer_kwargs_can_disable_local_shell():
     request = parse_request(_valid_request(app="iPhone Mirroring", mode="background", allow_local_shell=False))
     kwargs = runner_module._computer_kwargs(request, deadline=1.0, cancellation=object(), api_key="k")

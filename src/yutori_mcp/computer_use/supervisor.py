@@ -15,9 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from .constants import (
-    DELIVERY_MODE_FOREGROUND,
     DELIVERY_MODES,
+    DELIVERY_MODE_FOREGROUND,
     DRIVER_VERSION,
+    ENV_RECORDABLE_OVERLAY,
     MCP_VERSION,
     MODEL,
     PROTOCOL_VERSION,
@@ -182,7 +183,7 @@ def _child_environment(api_key: str) -> dict[str, str]:
         "YUTORI_API_KEY": api_key,
         "PATH": child_search_path(),
     }
-    for name in ("HOME", "TMPDIR", "LANG", "LC_ALL"):
+    for name in ("HOME", "TMPDIR", "LANG", "LC_ALL", ENV_RECORDABLE_OVERLAY):
         if value := os.environ.get(name):
             env[name] = value
     return env
