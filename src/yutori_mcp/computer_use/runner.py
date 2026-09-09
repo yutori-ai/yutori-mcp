@@ -746,8 +746,8 @@ def _computer_kwargs(
             scope="window",
             allow_foreground_fallback=request["allow_foreground_fallback"],
         )
-    elif os.environ.get(ENV_RECORDABLE_OVERLAY) == "1":
-        kwargs["exclude_overlay_from_capture"] = False
+    else:
+        kwargs["exclude_overlay_from_capture"] = os.environ.get(ENV_RECORDABLE_OVERLAY) == "0"
     return kwargs
 
 
