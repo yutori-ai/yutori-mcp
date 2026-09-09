@@ -26,11 +26,17 @@ OBSERVATION_FORMAT = "webp"
 DELIVERY_MODE_FOREGROUND = "foreground"
 DELIVERY_MODE_BACKGROUND = "background"
 DELIVERY_MODES = (DELIVERY_MODE_FOREGROUND, DELIVERY_MODE_BACKGROUND)
-SDK_VERSION = "0.9.18"
+# Set to "1" to keep the overlay in screen recordings and screen shares of a foreground run
+# (demos). The SDK then takes the model's frames through the overlay host with its own windows
+# filtered out (`exclude_overlay_from_capture=False`); by default the overlay opts out of screen
+# capture altogether, which also hides it from recorders. Read by the runner; the supervisor
+# forwards it to the runner's environment.
+ENV_RECORDABLE_OVERLAY = "YUTORI_RECORDABLE_OVERLAY"
+SDK_VERSION = "0.9.19"
 # The PyPI wheel digest and a digest derived from its stable RECORD entries.
 # Doctor compares the latter with the unpacked installation before any task runs.
-SDK_ARTIFACT_SHA256 = "5c5e7b12b6671a4a8bf14f833635017e2429811e1ba3e5a6f28e756361fa4882"
-SDK_INSTALLATION_SHA256 = "814cc248c631c90966fab16237c2c59c2cc8485b4220817ee31b8c828b25f838"
+SDK_ARTIFACT_SHA256 = "30d6b51398788fc74cee83732b2608440b8ab5779fae57b727d8bc858bcdd556"
+SDK_INSTALLATION_SHA256 = "6848a2c28aabfc4ea97c51affee9f223a17985b1cee32d3e7e6200d6e067fa9f"
 SDK_PROVENANCE_SHA256 = "7cab595d2f00e1a9ab5cd121204fbd6dd4c24163ead3eb76f76eef7fba495fc4"
 
 # The cua-driver release that implements this tool contract, and the checksum

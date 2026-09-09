@@ -27,10 +27,11 @@ from yutori.navigator.macos import (
 
 from .app import prepare_app
 from .constants import (
+    DELIVERY_MODES,
     DELIVERY_MODE_BACKGROUND,
     DELIVERY_MODE_FOREGROUND,
-    DELIVERY_MODES,
     DRIVER_VERSION,
+    ENV_RECORDABLE_OVERLAY,
     OBSERVATION_FORMAT,
     PROTOCOL_VERSION,
     SDK_ARTIFACT_SHA256,
@@ -745,6 +746,8 @@ def _computer_kwargs(
             scope="window",
             allow_foreground_fallback=request["allow_foreground_fallback"],
         )
+    elif os.environ.get(ENV_RECORDABLE_OVERLAY) == "1":
+        kwargs["exclude_overlay_from_capture"] = False
     return kwargs
 
 
