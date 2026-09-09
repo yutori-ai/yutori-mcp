@@ -33,12 +33,12 @@ DELIVERY_MODES = (DELIVERY_MODE_FOREGROUND, DELIVERY_MODE_BACKGROUND)
 # also hides it from recorders. Read by the runner; the supervisor forwards it to the runner's
 # environment.
 ENV_RECORDABLE_OVERLAY = "YUTORI_RECORDABLE_OVERLAY"
-SDK_VERSION = "0.9.19"
+SDK_VERSION = "0.9.20"
 # The PyPI wheel digest and a digest derived from its stable RECORD entries.
 # Doctor compares the latter with the unpacked installation before any task runs.
-SDK_ARTIFACT_SHA256 = "30d6b51398788fc74cee83732b2608440b8ab5779fae57b727d8bc858bcdd556"
-SDK_INSTALLATION_SHA256 = "6848a2c28aabfc4ea97c51affee9f223a17985b1cee32d3e7e6200d6e067fa9f"
-SDK_PROVENANCE_SHA256 = "7cab595d2f00e1a9ab5cd121204fbd6dd4c24163ead3eb76f76eef7fba495fc4"
+SDK_ARTIFACT_SHA256 = "e267c85de2cfa0aae8c044b0629a50c2d0781b0d0f44eb400c9d300cf833d92c"
+SDK_INSTALLATION_SHA256 = "b5c8e019c8a4c7c6564f3833870d941af8c37d4fb35465bd67ebd7b14adc6cab"
+SDK_PROVENANCE_SHA256 = "cacc3ed5af3d6c5c8daeef60be4aa63e0af25b1d51770ef54d6a8f9db6811cee"
 
 # The cua-driver release that implements this tool contract, and the checksum
 # of its installer script. Both are hard gates.
