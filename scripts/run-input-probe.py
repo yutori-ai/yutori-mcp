@@ -148,6 +148,18 @@ def target_center(events: list[dict[str, Any]], target: str, capture_size: tuple
     )
 
 
+def capture_baseline(log_path: Path, computer: MacOSComputer) -> tuple[int, int]:
+    """Snapshot the log's latest sequence number and the computer's outcome count.
+
+    Call this immediately before dispatching an action so later event/outcome filtering
+    only sees what that action itself produced.
+    """
+    before = read_events(log_path)
+    starting_sequence = max((event_sequence(event) for event in before), default=-1)
+    starting_outcomes = len(computer.action_outcomes)
+    return starting_sequence, starting_outcomes
+
+
 async def run_case(
     computer: MacOSComputer,
     log_path: Path,
@@ -158,9 +170,7 @@ async def run_case(
     *,
     allow_explicit_refusal: bool = False,
 ) -> CaseResult:
-    before = read_events(log_path)
-    starting_sequence = max((event_sequence(event) for event in before), default=-1)
-    starting_outcomes = len(computer.action_outcomes)
+    starting_sequence, starting_outcomes = capture_baseline(log_path, computer)
     error: str | None = None
     try:
         await action()
@@ -361,9 +371,7 @@ async def run_mode(mode: str, log_path: Path, allow_fallback: bool) -> tuple[dic
                 )
             )
 
-            before = read_events(log_path)
-            starting_sequence = max((event_sequence(event) for event in before), default=-1)
-            starting_outcomes = len(computer.action_outcomes)
+            starting_sequence, starting_outcomes = capture_baseline(log_path, computer)
             modified_error: str | None = None
             try:
                 await computer.click(*button_point, modifier=["cmd"])
