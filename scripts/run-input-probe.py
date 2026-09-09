@@ -306,7 +306,7 @@ async def run_mode(mode: str, log_path: Path, allow_fallback: bool) -> tuple[dic
                 lambda: dispatch_n2(computer, "type", {"text": marker}, size),
                 lambda values: has_text(values, marker)
                 and (not requires_background_receipt or stayed_in_background(values)),
-                allow_explicit_refusal=background and not allow_fallback,
+                allow_explicit_refusal=requires_background_receipt,
             )
         )
 
@@ -330,7 +330,7 @@ async def run_mode(mode: str, log_path: Path, allow_fallback: bool) -> tuple[dic
                     lambda values, expected_command=expected_command: has_event(values, "command", expected_command)
                     and has_event(values, "nsevent", "keyUp")
                     and (not requires_background_receipt or stayed_in_background(values)),
-                    allow_explicit_refusal=background and not allow_fallback,
+                    allow_explicit_refusal=requires_background_receipt,
                 )
             )
 
@@ -349,7 +349,7 @@ async def run_mode(mode: str, log_path: Path, allow_fallback: bool) -> tuple[dic
                 ),
                 lambda values: has_key_down_sequence(values, ["123", "124", "53", "36"])
                 and (not requires_background_receipt or stayed_in_background(values)),
-                allow_explicit_refusal=background and not allow_fallback,
+                allow_explicit_refusal=requires_background_receipt,
             )
         )
 
