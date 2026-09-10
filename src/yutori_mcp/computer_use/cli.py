@@ -235,7 +235,7 @@ def _event_printer(
             _print_milestone(paint, "runner process ready", started_at, clock=clock)
             return
         if event.get("type") == "startup":
-            observed = {**event, "elapsed_ms": max(0, round((clock() - started_at) * 1000))}
+            observed = {**event, "elapsed_ms": elapsed_ms_since(started_at, clock=clock)}
             line = format_startup_line(observed, app=app)
             if event.get("phase") == "computer" and app is None:
                 line = line.replace("computer session ready", f"ready to drive {surface}", 1)
