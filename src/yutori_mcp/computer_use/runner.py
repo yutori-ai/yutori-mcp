@@ -480,13 +480,17 @@ class StartupReporter:
         self._model_started = False
 
     def mark(self, phase: str) -> None:
+        # One real clock() read, frozen behind a `lambda: now` clock for both
+        # elapsed_ms_since() calls: this is the same duration formula PR #295/#300
+        # already consolidated for the CLI's milestone prints and ActionReporter,
+        # left inline here since #293 introduced it before that cleanup landed.
         now = self._clock()
         self._emitter.emit(
             {
                 "type": "startup",
                 "phase": phase,
-                "duration_ms": max(0, round((now - self._phase_start) * 1000)),
-                "elapsed_ms": max(0, round((now - self._run_start) * 1000)),
+                "duration_ms": elapsed_ms_since(self._phase_start, clock=lambda: now),
+                "elapsed_ms": elapsed_ms_since(self._run_start, clock=lambda: now),
             }
         )
         self._phase_start = now
