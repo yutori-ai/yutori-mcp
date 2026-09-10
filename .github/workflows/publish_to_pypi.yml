@@ -16,11 +16,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: pip
+          # There is no requirements file to hash, so key the pip download
+          # cache off the only dependency manifest in the repo.
+          cache-dependency-path: pyproject.toml
 
       - name: Install build tools
         run: pip install build twine
