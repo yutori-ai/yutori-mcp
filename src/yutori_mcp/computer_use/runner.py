@@ -215,6 +215,8 @@ def parse_request(payload: Any) -> dict[str, Any]:
         raise RequestError("INVALID_REQUEST", "allow_foreground_fallback requires mode 'background'.")
     deadline_ms = _require_positive_int(payload, "deadline_ms")
     max_steps = _require_positive_int(payload, "max_steps")
+    # Optional so a protocol-v2 supervisor that predates the field keeps the SDK's default.
+    show_stop_button = _require_bool(payload, "show_stop_button") if "show_stop_button" in payload else True
     return {
         "task": task,
         "app": app,
@@ -224,6 +226,7 @@ def parse_request(payload: Any) -> dict[str, Any]:
         "mode": mode,
         "allow_foreground_fallback": allow_foreground_fallback,
         "allow_local_shell": allow_local_shell,
+        "show_stop_button": show_stop_button,
         "model": _require_string(payload, "model"),
         "api_base_url": _require_string(payload, "api_base_url"),
     }
@@ -737,6 +740,7 @@ def _computer_kwargs(
     """MacOSComputer construction per mode; the foreground shape is the long-standing one."""
     kwargs: dict[str, Any] = {
         "presentation": True,
+        "show_stop_button": request.get("show_stop_button", True),
         "allow_local_shell": request["allow_local_shell"],
         "execution_deadline": deadline,
         "cancellation": cancellation,
