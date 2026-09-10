@@ -332,6 +332,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
     json_output = bool(getattr(args, "json", False))
     show_stop_button = not getattr(args, "hide_stop_item", False)
     presentation = not getattr(args, "no_presentation", False)
+    exclude_capture_window_ids = tuple(getattr(args, "exclude_capture_windows", None) or ())
     paint = Terminal.detect()
     preflight_started = time.monotonic()
     if _blocked(json_output=json_output):
@@ -341,6 +342,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
             **params.model_dump(),
             show_stop_button=show_stop_button,
             presentation=presentation,
+            exclude_capture_window_ids=exclude_capture_window_ids,
             on_event=_json_event_printer(),
         )
         _json_line({"type": "result", **result})
@@ -352,6 +354,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
         **params.model_dump(),
         show_stop_button=show_stop_button,
         presentation=presentation,
+        exclude_capture_window_ids=exclude_capture_window_ids,
         on_event=_event_printer(params.mode, params.app, paint, started_at=runner_started),
     )
     return _report(result, include_actions=False)
@@ -426,6 +429,17 @@ def register_parser(
         dest="hide_stop_item",
         action="store_true",
         help="Do not show the SDK's menu bar Stop item; the host application provides its own (the hotkey stays active)",
+    )
+    run_parser.add_argument(
+        "--exclude-capture-window",
+        dest="exclude_capture_windows",
+        action="append",
+        type=int,
+        metavar="WINDOW_ID",
+        help=(
+            "CGWindowID of a host application window to keep out of the model's desktop frames "
+            "(foreground runs); it stays on screen and in recordings. Repeatable."
+        ),
     )
     run_parser.add_argument(
         "--no-presentation",

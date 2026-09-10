@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -472,6 +472,7 @@ async def run_task(
     allow_local_shell: bool = True,
     show_stop_button: bool = True,
     presentation: bool = True,
+    exclude_capture_window_ids: Sequence[int] = (),
     lock: DesktopLock | None = None,
     on_event: EventCallback | None = None,
 ) -> dict[str, Any]:
@@ -496,6 +497,9 @@ async def run_task(
                 # False when the host application renders the run itself (from the `frame` and
                 # `activity` events) and wants no SDK overlay, status item, or hotkey.
                 "presentation": presentation,
+                # CGWindowIDs of the host application's own panels to keep out of the model's
+                # desktop frames (foreground runs); they stay on screen and in recordings.
+                "exclude_capture_window_ids": [int(window_id) for window_id in exclude_capture_window_ids],
                 "model": MODEL,
                 "api_base_url": api_base_url,
             }

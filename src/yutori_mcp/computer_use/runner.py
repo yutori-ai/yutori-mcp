@@ -200,6 +200,16 @@ def _require_bool(request: dict[str, Any], field: str) -> bool:
     return _require_field(request, field, valid=lambda v: isinstance(v, bool), expected="a boolean")
 
 
+def _require_window_ids(request: dict[str, Any], field: str) -> list[int]:
+    return _require_field(
+        request,
+        field,
+        valid=lambda v: isinstance(v, list)
+        and all(isinstance(item, int) and not isinstance(item, bool) and item > 0 for item in v),
+        expected="a list of positive integer window ids",
+    )
+
+
 def parse_request(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RequestError("INVALID_REQUEST", "Request must be a JSON object.")
@@ -224,6 +234,9 @@ def parse_request(payload: Any) -> dict[str, Any]:
     # Optional so a protocol-v2 supervisor that predates the fields keeps the SDK's defaults.
     show_stop_button = _require_bool(payload, "show_stop_button") if "show_stop_button" in payload else True
     presentation = _require_bool(payload, "presentation") if "presentation" in payload else True
+    exclude_capture_window_ids = (
+        _require_window_ids(payload, "exclude_capture_window_ids") if "exclude_capture_window_ids" in payload else []
+    )
     return {
         "task": task,
         "app": app,
@@ -235,6 +248,7 @@ def parse_request(payload: Any) -> dict[str, Any]:
         "allow_local_shell": allow_local_shell,
         "show_stop_button": show_stop_button,
         "presentation": presentation,
+        "exclude_capture_window_ids": exclude_capture_window_ids,
         "model": _require_string(payload, "model"),
         "api_base_url": _require_string(payload, "api_base_url"),
     }
@@ -818,8 +832,12 @@ def _timings_payload(
 
 def _supports_background_mode() -> bool:
     """Whether the installed SDK's MacOSComputer has window scope (yutori >= 0.9.11)."""
+    return _computer_accepts("scope")
+
+
+def _computer_accepts(parameter: str) -> bool:
     try:
-        return "scope" in inspect.signature(MacOSComputer.__init__).parameters
+        return parameter in inspect.signature(MacOSComputer.__init__).parameters
     except (TypeError, ValueError):
         return False
 
@@ -852,6 +870,11 @@ def _computer_kwargs(
         )
     else:
         kwargs["exclude_overlay_from_capture"] = os.environ.get(ENV_RECORDABLE_OVERLAY) == "0"
+        # A host application's own panels, kept out of the model's desktop frames by the SDK's
+        # capturer while staying on screen and recordable. Only SDKs that know the parameter.
+        window_ids = request.get("exclude_capture_window_ids") or []
+        if window_ids and _computer_accepts("exclude_capture_window_ids"):
+            kwargs["exclude_capture_window_ids"] = tuple(window_ids)
     return kwargs
 
 

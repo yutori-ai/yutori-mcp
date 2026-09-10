@@ -3803,3 +3803,52 @@ async def test_progress_reporter_ignores_host_only_events():
     await on_event({"type": "activity", "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"}})
     ctx.report_progress.assert_not_awaited()
     ctx.info.assert_not_awaited()
+
+
+def test_parse_request_validates_host_window_ids():
+    assert parse_request(_valid_request())["exclude_capture_window_ids"] == []
+    assert parse_request(_valid_request(exclude_capture_window_ids=[101, 202]))["exclude_capture_window_ids"] == [101, 202]
+    for invalid in ("101", [0], [True], [1.5]):
+        with pytest.raises(RequestError, match="exclude_capture_window_ids must be a list of positive integer window ids"):
+            parse_request(_valid_request(exclude_capture_window_ids=invalid))
+
+
+def test_computer_kwargs_pass_host_window_ids_only_to_an_sdk_that_knows_them(monkeypatch):
+    request = parse_request(_valid_request(exclude_capture_window_ids=[101, 202]))
+    common = {"deadline": time.monotonic() + 60, "cancellation": runner_module.CancellationLatch(), "api_key": "k"}
+    monkeypatch.setattr(runner_module, "_computer_accepts", lambda parameter: True)
+    assert runner_module._computer_kwargs(request, **common)["exclude_capture_window_ids"] == (101, 202)
+    monkeypatch.setattr(runner_module, "_computer_accepts", lambda parameter: parameter == "scope")
+    assert "exclude_capture_window_ids" not in runner_module._computer_kwargs(request, **common)
+    background = parse_request(_valid_request(app="Notes", mode="background", exclude_capture_window_ids=[101]))
+    monkeypatch.setattr(runner_module, "_computer_accepts", lambda parameter: True)
+    assert "exclude_capture_window_ids" not in runner_module._computer_kwargs(background, **common), (
+        "window scope captures only the driven window; nothing to exclude"
+    )
+
+
+async def test_run_task_and_cli_carry_host_window_ids(monkeypatch, tmp_path, capsys):
+    with _patched_run_task_supervise(tmp_path) as supervise:
+        await run_task(**_run_task_kwargs(tmp_path, exclude_capture_window_ids=(101, 202)))
+    assert supervise.await_args.kwargs["request"]["exclude_capture_window_ids"] == [101, 202]
+    with _patched_run_task_supervise(tmp_path) as supervise:
+        await run_task(**_run_task_kwargs(tmp_path))
+    assert supervise.await_args.kwargs["request"]["exclude_capture_window_ids"] == []
+
+    from yutori_mcp.computer_use import cli
+
+    parser = argparse.ArgumentParser()
+    cli.register_parser(parser.add_subparsers(dest="command"))
+    parsed = parser.parse_args(
+        ["computer-use", "run", "x", "--exclude-capture-window", "101", "--exclude-capture-window", "202"]
+    )
+    assert parsed.exclude_capture_windows == [101, 202]
+    assert parser.parse_args(["computer-use", "run", "x"]).exclude_capture_windows is None
+
+    captured = AsyncMock(return_value={"outcome": "completed", "delivery_mode": "foreground", "final_text": "ok"})
+    monkeypatch.setattr(cli, "_blocked", lambda **_kwargs: False)
+    monkeypatch.setattr(supervisor, "run_task", captured)
+    _patch_run_credentials(monkeypatch)
+    assert await cli._run_custom(_run_args(json=True, exclude_capture_windows=[101, 202])) == 0
+    assert captured.await_args.kwargs["exclude_capture_window_ids"] == (101, 202)
+    capsys.readouterr()
