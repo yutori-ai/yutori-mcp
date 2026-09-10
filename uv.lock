@@ -1370,7 +1370,7 @@ wheels = [
 
 [[package]]
 name = "yutori"
-version = "0.9.24"
+version = "0.9.25"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1379,14 +1379,14 @@ dependencies = [
     { name = "rich" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/20/83/646e748eb8ccba09903f5132c52cdeb0de1e3519fe3346ec00bf9849c41f/yutori-0.9.24.tar.gz", hash = "sha256:31a7cd725103780bbf3414380ba931eae77db2e764293a83dccc6b2199015da0", size = 480575, upload-time = "2026-09-10T17:02:34.415Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4d/e3/10bf938f3bfc8c111243d3899c5b8ae7eedcc460db7ae1f142bb56b2d1b2/yutori-0.9.25.tar.gz", hash = "sha256:82f6fe756c0c0faf3d83b4298fbddd6da87ac878fdeeb89768776376e0c1f203", size = 481926, upload-time = "2026-09-10T18:00:51.656Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0b/d8/74b6a26bb7247ea4008dbf948b5d6c739b0e9f6b35de6e86078994e2f976/yutori-0.9.24-py3-none-any.whl", hash = "sha256:2b1696edc1d23eec7176de5aba935f623b1962769ae01c24cf93f9b3842cec17", size = 336446, upload-time = "2026-09-10T17:02:32.043Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/09/2b69deb55509a18de6e0245fb93f3ce268dc972c20d80e12e7c6243a06a9/yutori-0.9.25-py3-none-any.whl", hash = "sha256:95e27ec2429600ff6339318d35946deb119a4067cf1dc1879d8287751513be56", size = 337348, upload-time = "2026-09-10T18:00:49.906Z" },
 ]
 
 [[package]]
 name = "yutori-mcp"
-version = "0.5.26"
+version = "0.5.27"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
@@ -1406,6 +1406,6 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
-    { name = "yutori", specifier = "==0.9.24" },
+    { name = "yutori", specifier = "==0.9.25" },
 ]
 provides-extras = ["dev"]
