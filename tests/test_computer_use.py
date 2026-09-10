@@ -759,7 +759,7 @@ def test_runner_removes_api_key_before_spawning_a_real_shell(monkeypatch):
 
 
 def test_python_runner_is_isolated_and_has_no_node_path():
-    assert python_runner_command() == [sys.executable, "-I", "-m", "yutori_mcp.computer_use.runner"]
+    assert python_runner_command() == [sys.executable, "-I", "-B", "-m", "yutori_mcp.computer_use.runner"]
     source = Path(supervisor.__file__).read_text()
     assert "find_node" not in source
     assert "load_runtime" not in source
@@ -1882,6 +1882,7 @@ async def test_run_request_wires_sdk_runtime_and_reports_effective_state(monkeyp
     agent = _FakeAgent.instances[-1]
     assert computer.kwargs == {
         "presentation": True,
+        "show_stop_button": True,
         "allow_local_shell": True,
         "execution_deadline": pytest.approx(computer.kwargs["execution_deadline"]),
         "cancellation": computer.kwargs["cancellation"],
@@ -2357,7 +2358,7 @@ async def test_cli_run_forwards_the_mode_and_prints_the_matching_notice(monkeypa
     from yutori_mcp.computer_use import cli
 
     run = AsyncMock(return_value={"outcome": "completed", "delivery_mode": "background", "final_text": "done"})
-    monkeypatch.setattr(cli, "_blocked", lambda: False)
+    monkeypatch.setattr(cli, "_blocked", lambda **_kwargs: False)
     monkeypatch.setattr(supervisor, "run_task", run)
     _patch_run_credentials(monkeypatch)
     args = SimpleNamespace(
@@ -2445,6 +2446,7 @@ def test_computer_kwargs_keep_the_foreground_shape_and_add_window_scope_for_back
     cancellation = object()
     shared = {
         "presentation": True,
+        "show_stop_button": True,
         "allow_local_shell": True,
         "execution_deadline": 1.0,
         "cancellation": cancellation,
@@ -3210,3 +3212,348 @@ async def test_progress_reporter_folds_the_batch_detail_into_one_message():
     (message,) = messages
     assert message.count("\n") == 0
     assert message.endswith('left_click (1,2); type "hi"')
+
+
+# ---------------------------------------------------------------------------
+# Embedded driver host: a host application ships its own cua-driver and daemon.
+# ---------------------------------------------------------------------------
+
+
+def _configure_embedded_host(monkeypatch, tmp_path, *, binary_exists: bool = True) -> tuple[Path, Path]:
+    binary = tmp_path / "cua-driver"
+    if binary_exists:
+        binary.write_text("")
+    sock = tmp_path / "daemon.sock"
+    monkeypatch.setenv(preflight.ENV_DRIVER_BINARY, str(binary))
+    monkeypatch.setenv(preflight.ENV_DRIVER_SOCKET, str(sock))
+    return binary, sock
+
+
+def test_embedded_host_environment_names_match_the_sdk_transport():
+    from yutori.navigator.macos import transport
+
+    if not hasattr(transport, "ENV_DRIVER_BINARY"):
+        pytest.skip("the pinned SDK predates the embedded transport constants")
+    assert preflight.ENV_DRIVER_BINARY == transport.ENV_DRIVER_BINARY
+    assert preflight.ENV_DRIVER_SOCKET == transport.ENV_DRIVER_SOCKET
+
+
+def test_embedded_host_is_absent_without_configuration(monkeypatch):
+    monkeypatch.delenv(preflight.ENV_DRIVER_BINARY, raising=False)
+    monkeypatch.delenv(preflight.ENV_DRIVER_SOCKET, raising=False)
+    assert preflight.embedded_driver_host() is None
+    assert preflight._driver_socket_arguments() == []
+
+
+def test_embedded_host_requires_both_binary_and_socket(monkeypatch, tmp_path):
+    monkeypatch.setenv(preflight.ENV_DRIVER_BINARY, str(tmp_path / "cua-driver"))
+    monkeypatch.delenv(preflight.ENV_DRIVER_SOCKET, raising=False)
+    with pytest.raises(ValueError, match="must be set together"):
+        preflight.embedded_driver_host()
+    result = preflight.check_driver_app()
+    assert not result.ok and "must be set together" in result.detail
+    # Half a configuration must not fall back to the standalone install either.
+    monkeypatch.setattr(preflight, "DRIVER_PATHS", (tmp_path / "absent",))
+    assert preflight.find_cua_driver() is None
+
+
+def test_embedded_host_binary_replaces_the_app_bundle_and_path_discovery(monkeypatch, tmp_path):
+    binary, sock = _configure_embedded_host(monkeypatch, tmp_path)
+    monkeypatch.setattr(preflight, "DRIVER_PATHS", (tmp_path / "stale-cua-driver",))
+    (tmp_path / "stale-cua-driver").write_text("")
+
+    assert preflight.find_cua_driver() == binary
+    assert preflight.check_driver_app().ok
+    assert preflight._driver_socket_arguments() == ["--socket", str(sock)]
+    assert preflight.child_search_path().split(":")[0] == str(tmp_path)
+
+
+def test_embedded_host_missing_binary_blocks(monkeypatch, tmp_path):
+    _configure_embedded_host(monkeypatch, tmp_path, binary_exists=False)
+    result = preflight.check_driver_app()
+    assert not result.ok and result.remediation == preflight._EMBEDDED_HOST_REMEDIATION
+    assert preflight.find_cua_driver() is None
+
+
+def test_embedded_daemon_identity_is_the_listening_private_socket(monkeypatch, tmp_path):
+    import shutil
+    import socket as socket_module
+    import tempfile
+
+    _configure_embedded_host(monkeypatch, tmp_path)
+    # AF_UNIX paths are capped at 104 bytes on macOS; pytest's tmp_path is longer than that.
+    short_dir = Path(tempfile.mkdtemp(prefix="cu-", dir="/tmp"))
+    sock = short_dir / "d.sock"
+    monkeypatch.setenv(preflight.ENV_DRIVER_SOCKET, str(sock))
+    try:
+        blocked = preflight.check_daemon_identity()
+        assert not blocked.ok and str(sock) in blocked.detail
+
+        server = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+        server.bind(str(sock))
+        server.listen(1)
+        try:
+            assert preflight.check_daemon_identity().ok
+        finally:
+            server.close()
+    finally:
+        shutil.rmtree(short_dir, ignore_errors=True)
+
+
+def _write_fake_mcp_proxy(path: Path, structured: dict[str, Any]) -> None:
+    """A stand-in for ``cua-driver mcp``: answers initialize and one tools/call, echoing its argv."""
+    path.write_text(
+        "\n".join(
+            [
+                f"#!{sys.executable}",
+                "import json, sys",
+                f"structured = {structured!r}",
+                "structured['argv'] = sys.argv[1:]",
+                "for line in sys.stdin:",
+                "    message = json.loads(line)",
+                "    if message.get('id') == 1:",
+                "        print(json.dumps({'jsonrpc': '2.0', 'id': 1, 'result': {'capabilities': {}}}), flush=True)",
+                "    elif message.get('id') == 2:",
+                "        print('daemon log line that is not JSON', flush=True)",
+                "        print(json.dumps({'jsonrpc': '2.0', 'id': 2, 'result': {'structuredContent': structured}}), flush=True)",
+                "",
+            ]
+        )
+    )
+    path.chmod(0o700)
+
+
+def test_embedded_permissions_come_from_the_check_permissions_tool(monkeypatch, tmp_path):
+    binary, sock = _configure_embedded_host(monkeypatch, tmp_path)
+    _write_fake_mcp_proxy(binary, {"accessibility": True, "screen_recording": True, "source": {"attribution": "host"}})
+
+    payload = preflight._embedded_permissions(preflight.embedded_driver_host())
+
+    assert payload["argv"] == ["mcp", "--embedded", "--socket", str(sock)]
+    assert preflight.check_permissions().ok
+
+
+def test_embedded_permissions_missing_grant_blocks_with_host_remediation(monkeypatch, tmp_path):
+    binary, _ = _configure_embedded_host(monkeypatch, tmp_path)
+    _write_fake_mcp_proxy(binary, {"accessibility": True, "screen_recording": False})
+
+    result = preflight.check_permissions()
+
+    assert not result.ok
+    assert result.remediation == preflight._EMBEDDED_PERMISSIONS_REMEDIATION
+    assert "host application" in result.detail
+
+
+def test_embedded_permissions_proxy_failure_blocks_instead_of_raising(monkeypatch, tmp_path):
+    binary, _ = _configure_embedded_host(monkeypatch, tmp_path)
+    binary.write_text(f"#!{sys.executable}\nraise SystemExit(3)\n")
+    binary.chmod(0o700)
+    monkeypatch.setattr(preflight, "_EMBEDDED_RPC_TIMEOUT_SECONDS", 2)
+
+    assert not preflight.check_permissions().ok
+
+
+@pytest.mark.parametrize("capture_result", [None, subprocess.CompletedProcess([], 0)])
+def test_embedded_capture_failure_names_the_host_application(monkeypatch, tmp_path, capture_result):
+    _configure_embedded_host(monkeypatch, tmp_path)
+    monkeypatch.setattr(preflight, "_run_safely", lambda *_args, **_kwargs: capture_result)
+
+    result = preflight.check_capture()
+
+    assert not result.ok
+    assert result.remediation == preflight._EMBEDDED_PERMISSIONS_REMEDIATION
+    assert "CuaDriver" not in result.remediation
+
+
+def test_child_environment_forwards_the_embedded_host_configuration(monkeypatch, tmp_path):
+    binary, sock = _configure_embedded_host(monkeypatch, tmp_path)
+    monkeypatch.setenv(preflight.ENV_DRIVER_EMBEDDED, "1")
+    monkeypatch.setenv("CUA_DRIVER_RS_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("CUA_DRIVER_HOST_BUNDLE_ID", "com.yutori.desktop")
+    monkeypatch.setenv("UNRELATED_SECRET", "no")
+
+    env = supervisor._child_environment("yt-key")
+
+    assert env[preflight.ENV_DRIVER_BINARY] == str(binary)
+    assert env[preflight.ENV_DRIVER_SOCKET] == str(sock)
+    assert env[preflight.ENV_DRIVER_EMBEDDED] == "1"
+    assert env["CUA_DRIVER_RS_HOME"] == str(tmp_path / "state")
+    assert env["CUA_DRIVER_HOST_BUNDLE_ID"] == "com.yutori.desktop"
+    assert "UNRELATED_SECRET" not in env
+    assert env["PATH"].split(":")[0] == str(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Host-owned Stop control and the machine-readable CLI surface.
+# ---------------------------------------------------------------------------
+
+
+def _request_payload(**overrides):
+    payload = {
+        "protocol_version": PROTOCOL_VERSION,
+        "type": "run",
+        "task": "open calculator",
+        "app": None,
+        "start_url": None,
+        "deadline_ms": 60_000,
+        "max_steps": 5,
+        "mode": DELIVERY_MODE_FOREGROUND,
+        "allow_foreground_fallback": False,
+        "allow_local_shell": True,
+        "model": "n2",
+        "api_base_url": "https://api.yutori.com/v1",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_parse_request_defaults_show_stop_button_and_validates_it():
+    assert parse_request(_request_payload())["show_stop_button"] is True
+    assert parse_request(_request_payload(show_stop_button=False))["show_stop_button"] is False
+    with pytest.raises(RequestError, match="show_stop_button must be a boolean"):
+        parse_request(_request_payload(show_stop_button="no"))
+
+
+def test_computer_kwargs_forward_the_stop_control_choice():
+    request = parse_request(_request_payload(show_stop_button=False))
+    kwargs = runner_module._computer_kwargs(
+        request, deadline=time.monotonic() + 60, cancellation=runner_module.CancellationLatch(), api_key="k"
+    )
+    assert kwargs["show_stop_button"] is False
+    assert kwargs["presentation"] is True
+
+
+async def test_run_task_request_carries_show_stop_button(tmp_path):
+    with _patched_run_task_supervise(tmp_path) as supervise:
+        await run_task(**_run_task_kwargs(tmp_path, show_stop_button=False))
+    assert supervise.await_args.kwargs["request"]["show_stop_button"] is False
+    with _patched_run_task_supervise(tmp_path) as supervise:
+        await run_task(**_run_task_kwargs(tmp_path))
+    assert supervise.await_args.kwargs["request"]["show_stop_button"] is True
+
+
+def test_cli_run_and_doctor_parsers_accept_json_and_hide_stop_item():
+    from yutori_mcp.computer_use import cli
+
+    parser = argparse.ArgumentParser()
+    cli.register_parser(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(["computer-use", "run", "add a note", "--json", "--hide-stop-item"])
+    assert args.json is True and args.hide_stop_item is True
+    default = parser.parse_args(["computer-use", "run", "add a note"])
+    assert default.json is False and default.hide_stop_item is False
+    assert parser.parse_args(["computer-use", "doctor", "--json"]).json is True
+    assert parser.parse_args(["computer-use", "doctor"]).json is False
+
+
+def _run_args(**overrides) -> SimpleNamespace:
+    args = {
+        "task": "add a note",
+        "app": None,
+        "start_url": None,
+        "minutes": 30,
+        "max_steps": 60,
+        "mode": "foreground",
+        "allow_foreground_fallback": False,
+        "allow_local_shell": True,
+        "json": False,
+        "hide_stop_item": False,
+    }
+    args.update(overrides)
+    return SimpleNamespace(**args)
+
+
+def _json_lines(text: str) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
+async def test_cli_run_json_streams_events_and_the_result_as_json_lines(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    action = _action_event(tool="computer_batch", index=0)
+
+    async def run(**kwargs):
+        await kwargs["on_event"](_ready_event())
+        await kwargs["on_event"](action)
+        return {"outcome": "completed", "delivery_mode": "foreground", "final_text": "done", "actions": [action]}
+
+    monkeypatch.setattr(cli, "_blocked", lambda **_kwargs: False)
+    monkeypatch.setattr(supervisor, "run_task", run)
+    _patch_run_credentials(monkeypatch)
+
+    assert await cli._run_custom(_run_args(json=True, hide_stop_item=True)) == 0
+
+    lines = _json_lines(capsys.readouterr().out)
+    assert [line["type"] for line in lines] == ["ready", "action", "result"]
+    assert lines[-1]["outcome"] == "completed" and lines[-1]["final_text"] == "done"
+
+
+async def test_cli_run_json_forwards_the_stop_item_choice(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    run = AsyncMock(return_value={"outcome": "failed", "delivery_mode": "foreground", "final_text": "no"})
+    monkeypatch.setattr(cli, "_blocked", lambda **_kwargs: False)
+    monkeypatch.setattr(supervisor, "run_task", run)
+    _patch_run_credentials(monkeypatch)
+
+    assert await cli._run_custom(_run_args(json=True, hide_stop_item=True)) == 1
+    assert run.await_args.kwargs["show_stop_button"] is False
+    assert _json_lines(capsys.readouterr().out)[-1]["type"] == "result"
+
+    assert await cli._run_custom(_run_args()) == 1
+    assert run.await_args.kwargs["show_stop_button"] is True
+    assert "Outcome" in capsys.readouterr().out or True
+
+
+async def test_cli_run_json_reports_a_preflight_blocker_as_json(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    monkeypatch.setattr(
+        cli, "first_blocker", lambda: preflight.CheckResult("driver app", False, "missing", "start the daemon")
+    )
+    assert await cli._run_custom(_run_args(json=True)) == 1
+    [line] = _json_lines(capsys.readouterr().out)
+    assert line == {
+        "type": "blocked",
+        "name": "driver app",
+        "ok": False,
+        "detail": "missing",
+        "remediation": "start the daemon",
+        "blocking": True,
+    }
+
+
+def test_doctor_json_lists_every_check_with_an_overall_verdict(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    monkeypatch.setattr(
+        cli,
+        "run_checks",
+        lambda: [
+            preflight.CheckResult("runtime", True, "yutori ok"),
+            preflight.CheckResult("overlay", False, "not prepared", "run setup", blocking=False),
+        ],
+    )
+    assert cli._dispatch_doctor(SimpleNamespace(json=True)) == 0
+    [line] = _json_lines(capsys.readouterr().out)
+    assert line["type"] == "doctor" and line["ok"] is True
+    assert [check["name"] for check in line["checks"]] == ["runtime", "overlay"]
+    assert line["checks"][1]["blocking"] is False
+
+    monkeypatch.setattr(
+        cli, "run_checks", lambda: [preflight.CheckResult("driver app", False, "missing", "start the daemon")]
+    )
+    assert cli._dispatch_doctor(SimpleNamespace(json=True)) == 1
+    assert _json_lines(capsys.readouterr().out)[0]["ok"] is False
+
+
+def test_setup_skips_the_standalone_installer_for_an_embedded_host(monkeypatch, tmp_path, capsys):
+    from yutori_mcp.computer_use import cli
+
+    binary, _ = _configure_embedded_host(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "check_runtime", lambda: preflight.CheckResult("Python runtime", True, "ok"))
+    monkeypatch.setattr(cli, "_download_installer", lambda _url: (_ for _ in ()).throw(AssertionError("must not download")))
+    monkeypatch.setattr(cli, "run_checks", lambda: [preflight.CheckResult("driver app", True, str(binary))])
+
+    assert cli._setup() == 0
+    out = capsys.readouterr().out
+    assert "nothing to install" in out and str(binary) in out

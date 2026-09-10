@@ -27,7 +27,13 @@ from .constants import (
     SDK_VERSION,
 )
 from .lock import ComputerUseBusyError, DesktopLock
-from .preflight import child_search_path, find_cua_driver
+from .preflight import (
+    ENV_DRIVER_BINARY,
+    ENV_DRIVER_EMBEDDED,
+    ENV_DRIVER_SOCKET,
+    child_search_path,
+    find_cua_driver,
+)
 from .result import failure, redact
 from .result import remaining_seconds as _remaining_seconds
 from .result import terminal_result
@@ -183,7 +189,21 @@ def _child_environment(api_key: str) -> dict[str, str]:
         "YUTORI_API_KEY": api_key,
         "PATH": child_search_path(),
     }
-    for name in ("HOME", "TMPDIR", "LANG", "LC_ALL", ENV_RECORDABLE_OVERLAY):
+    # The embedded-host variables let the SDK's transport attach to the host application's
+    # cua-driver daemon instead of the standalone CuaDriver.app; CUA_DRIVER_RS_HOME keeps that
+    # daemon's state where the host put it.
+    for name in (
+        "HOME",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+        ENV_RECORDABLE_OVERLAY,
+        ENV_DRIVER_BINARY,
+        ENV_DRIVER_SOCKET,
+        ENV_DRIVER_EMBEDDED,
+        "CUA_DRIVER_RS_HOME",
+        "CUA_DRIVER_HOST_BUNDLE_ID",
+    ):
         if value := os.environ.get(name):
             env[name] = value
     return env
@@ -426,9 +446,11 @@ def python_runner_command() -> list[str]:
     process is exactly the one that can run it. `-I` (isolated mode) keeps the
     child's sys.path free of the working directory, PYTHONPATH, and user
     site-packages, so no ambient directory can shadow the installed packages;
-    the venv's own site-packages still resolve.
+    the venv's own site-packages still resolve. `-B` never writes bytecode: an application
+    that bundles this runtime inside its signed bundle cannot have `__pycache__` directories
+    appear under its code-signature seal.
     """
-    return [sys.executable, "-I", "-m", "yutori_mcp.computer_use.runner"]
+    return [sys.executable, "-I", "-B", "-m", "yutori_mcp.computer_use.runner"]
 
 
 async def run_task(
@@ -444,6 +466,7 @@ async def run_task(
     mode: str = DELIVERY_MODE_FOREGROUND,
     allow_foreground_fallback: bool = False,
     allow_local_shell: bool = True,
+    show_stop_button: bool = True,
     lock: DesktopLock | None = None,
     on_event: EventCallback | None = None,
 ) -> dict[str, Any]:
@@ -462,6 +485,9 @@ async def run_task(
                 "mode": mode,
                 "allow_foreground_fallback": allow_foreground_fallback,
                 "allow_local_shell": allow_local_shell,
+                # False when the host application owns the menu bar surface (its own Stop item);
+                # the SDK's overlay hotkey stays registered either way.
+                "show_stop_button": show_stop_button,
                 "model": MODEL,
                 "api_base_url": api_base_url,
             }

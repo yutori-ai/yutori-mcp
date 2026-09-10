@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import json
 import os
 import subprocess
 import tempfile
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
@@ -32,6 +34,7 @@ from .preflight import (
     check_driver_binary,
     check_runtime,
     child_search_path,
+    embedded_driver_host,
     find_cua_driver,
     first_blocker,
     run_checks,
@@ -49,8 +52,17 @@ from .result import (
 from .supervisor import run_task_with_resolved_credentials, stop_active_run
 
 
-def _doctor() -> int:
+def _json_line(payload: dict[str, Any]) -> None:
+    """One machine-readable stdout line; the `--json` surface a host application consumes."""
+    print(json.dumps(payload, separators=(",", ":")), flush=True)
+
+
+def _doctor(*, json_output: bool = False) -> int:
     results = run_checks()
+    ok = all(result.ok or not result.blocking for result in results)
+    if json_output:
+        _json_line({"type": "doctor", "ok": ok, "checks": [asdict(result) for result in results]})
+        return 0 if ok else 1
     for result in results:
         label = "PASS"
         if not result.ok:
@@ -58,7 +70,7 @@ def _doctor() -> int:
         print(f"{label} {result.name}: {result.detail}")
         if result.remediation:
             print(f"  Fix: {result.remediation}")
-    return 0 if all(result.ok or not result.blocking for result in results) else 1
+    return 0 if ok else 1
 
 
 def _download_installer(url: str) -> bytes:
@@ -71,6 +83,16 @@ def _setup() -> int:
     if not runtime.ok:
         print(runtime.remediation)
         return 1
+    try:
+        embedded = embedded_driver_host()
+    except ValueError as error:
+        print(error)
+        return 1
+    if embedded is not None:
+        # The host application ships the driver and owns permissions; installing the standalone
+        # CuaDriver.app here would create the second permission identity embedding exists to avoid.
+        print(f"Embedded cua-driver host configured ({embedded.binary}); nothing to install.")
+        return _doctor()
     version = DRIVER_VERSION
     installer = _download_installer(
         f"https://github.com/trycua/cua/releases/download/cua-driver-rs-v{version}/install.sh"
@@ -109,12 +131,15 @@ def _setup() -> int:
     return _doctor()
 
 
-def _blocked() -> bool:
+def _blocked(*, json_output: bool = False) -> bool:
     """Print and return True if a blocking preflight check fails; False if ready to run."""
     blocker = first_blocker()
     if blocker is None:
         return False
-    print(blocker_message(blocker))
+    if json_output:
+        _json_line({"type": "blocked", **asdict(blocker)})
+    else:
+        print(blocker_message(blocker))
     return True
 
 
@@ -246,6 +271,15 @@ def _event_printer(
     return print_event
 
 
+def _json_event_printer():
+    """Relay every runner event verbatim as one JSON line, for a host that renders progress itself."""
+
+    async def print_event(event: dict) -> None:
+        _json_line(event)
+
+    return print_event
+
+
 def format_run_header(params: ComputerUseTaskInput, paint: Terminal) -> str:
     """The block a `run` opens with: what was asked, where it lands, and the limits."""
     target = params.app or "the visible desktop"
@@ -282,15 +316,26 @@ async def _run_custom(args: argparse.Namespace) -> int:
         allow_foreground_fallback=args.allow_foreground_fallback,
         allow_local_shell=args.allow_local_shell,
     )
+    json_output = bool(getattr(args, "json", False))
+    show_stop_button = not getattr(args, "hide_stop_item", False)
     paint = Terminal.detect()
     preflight_started = time.monotonic()
-    if _blocked():
+    if _blocked(json_output=json_output):
         return 1
+    if json_output:
+        result = await run_task_with_resolved_credentials(
+            **params.model_dump(),
+            show_stop_button=show_stop_button,
+            on_event=_json_event_printer(),
+        )
+        _json_line({"type": "result", **result})
+        return 0 if result.get("outcome") == "completed" else 1
     _print_milestone(paint, "preflight ready", preflight_started)
     print(format_run_header(params, paint))
     runner_started = time.monotonic()
     result = await run_task_with_resolved_credentials(
         **params.model_dump(),
+        show_stop_button=show_stop_button,
         on_event=_event_printer(params.mode, params.app, paint, started_at=runner_started),
     )
     return _report(result, include_actions=False)
@@ -315,8 +360,8 @@ def _dispatch_setup(_args: argparse.Namespace | None) -> int:
     return _setup()
 
 
-def _dispatch_doctor(_args: argparse.Namespace | None) -> int:
-    return _doctor()
+def _dispatch_doctor(args: argparse.Namespace | None) -> int:
+    return _doctor(json_output=bool(args is not None and getattr(args, "json", False)))
 
 
 def _dispatch_smoke(_args: argparse.Namespace | None) -> int:
@@ -351,10 +396,21 @@ def register_parser(
 ) -> None:
     parser = subparsers.add_parser("computer-use", help="Set up, diagnose, and run macOS computer use")
     commands = parser.add_subparsers(dest="computer_use_command", required=True)
+    json_help = "Emit JSON lines instead of terminal text, for a host application that renders progress itself"
     for name, (help_text, _) in _COMPUTER_USE_SUBCOMMANDS.items():
-        if name != "run":
-            commands.add_parser(name, help=help_text)
+        if name == "run":
+            continue
+        command = commands.add_parser(name, help=help_text)
+        if name == "doctor":
+            command.add_argument("--json", action="store_true", help=json_help)
     run_parser = commands.add_parser("run", help=_COMPUTER_USE_SUBCOMMANDS["run"][0])
+    run_parser.add_argument("--json", action="store_true", help=json_help)
+    run_parser.add_argument(
+        "--hide-stop-item",
+        dest="hide_stop_item",
+        action="store_true",
+        help="Do not show the SDK's menu bar Stop item; the host application provides its own (the hotkey stays active)",
+    )
     run_parser.add_argument("task", help="Task for the model to perform")
     run_parser.add_argument("--app", default=None, help="Application to target")
     run_parser.add_argument("--start-url", dest="start_url", default=None, help="URL to open in the app")

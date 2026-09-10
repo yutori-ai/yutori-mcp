@@ -6,9 +6,13 @@ import importlib.metadata
 import json
 import os
 import platform
+import queue
 import re
+import socket
 import subprocess
 import tempfile
+import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,6 +65,54 @@ _SETUP_REMEDIATION = "Run: yutori-mcp computer-use setup"
 # Shared remediation text for checks whose fix is granting the driver's TCC permissions:
 # check_permissions and check_capture's driver-capture-failed branch both point here.
 _PERMISSIONS_GRANT_REMEDIATION = "Run: cua-driver permissions grant"
+# An application that embeds cua-driver (the driver's EMBEDDING contract) hands this runtime its
+# own binary and the private socket of the daemon it spawned. Both must be set together; the
+# runtime then never looks for /Applications/CuaDriver.app and permissions are read from the host
+# daemon, whose TCC identity is the host application's. Duplicated from the SDK's transport module
+# (which reads the same names) because this module must stay importable without the SDK.
+ENV_DRIVER_BINARY = "YUTORI_CUA_DRIVER_BINARY"
+ENV_DRIVER_SOCKET = "YUTORI_CUA_DRIVER_SOCKET"
+ENV_DRIVER_EMBEDDED = "CUA_DRIVER_EMBEDDED"
+_EMBEDDED_HOST_REMEDIATION = "Start the embedded cua-driver daemon from the host application, then retry."
+_EMBEDDED_PERMISSIONS_REMEDIATION = (
+    "Grant Accessibility and Screen Recording to the host application in "
+    "System Settings > Privacy & Security, then restart it."
+)
+_EMBEDDED_RPC_TIMEOUT_SECONDS = 15
+
+
+@dataclass(frozen=True)
+class EmbeddedDriverHost:
+    binary: Path
+    socket: Path
+
+
+def embedded_driver_host() -> EmbeddedDriverHost | None:
+    """The host-owned driver named by the environment, or None for the standalone CuaDriver.app.
+
+    Raises ValueError when only one of the two variables is set: half a configuration would
+    otherwise fall back silently to the standalone install and a second permission identity.
+    """
+    binary = os.environ.get(ENV_DRIVER_BINARY)
+    socket_path = os.environ.get(ENV_DRIVER_SOCKET)
+    if not binary and not socket_path:
+        return None
+    if not (binary and socket_path):
+        raise ValueError(f"{ENV_DRIVER_BINARY} and {ENV_DRIVER_SOCKET} must be set together.")
+    return EmbeddedDriverHost(Path(binary), Path(socket_path))
+
+
+def _configured_embedded_host() -> EmbeddedDriverHost | None:
+    """A fully configured embedded host, or None; the half-set case is check_driver_app's to report."""
+    try:
+        return embedded_driver_host()
+    except ValueError:
+        return None
+
+
+def _driver_socket_arguments() -> list[str]:
+    host = _configured_embedded_host()
+    return ["--socket", str(host.socket)] if host is not None else []
 
 
 def _login_remediation(environment: str) -> str:
@@ -76,6 +128,9 @@ def _api_access_remediation(environment: str) -> str:
 
 
 def find_cua_driver() -> Path | None:
+    host = _configured_embedded_host()
+    if host is not None:
+        return host.binary if host.binary.is_file() else None
     for path in DRIVER_PATHS:
         if path.is_file():
             return path
@@ -274,6 +329,17 @@ def check_overlay() -> CheckResult:
 
 
 def check_driver_app() -> CheckResult:
+    try:
+        host = embedded_driver_host()
+    except ValueError as error:
+        return _result("driver app", False, str(error), _EMBEDDED_HOST_REMEDIATION)
+    if host is not None:
+        return _result(
+            "driver app",
+            host.binary.is_file(),
+            f"embedded host binary {host.binary}",
+            _EMBEDDED_HOST_REMEDIATION,
+        )
     return _result(
         "driver app",
         DRIVER_APP.is_dir(),
@@ -341,7 +407,112 @@ def check_driver_contract() -> CheckResult:
     )
 
 
+def _socket_accepts_connections(path: Path) -> bool:
+    if not path.is_socket():
+        return False
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(2)
+        try:
+            client.connect(str(path))
+        except OSError:
+            return False
+    return True
+
+
+def _read_rpc_result(stream: Any, request_id: int, timeout: float) -> dict[str, Any]:
+    """The ``result`` of the JSON-RPC response carrying ``request_id`` from a line stream.
+
+    A reader thread feeds lines into a queue so a proxy that never answers cannot hang the
+    preflight past ``timeout``; the daemon's log lines and unrelated responses are skipped.
+    """
+    lines: queue.Queue[str | None] = queue.Queue()
+
+    def pump() -> None:
+        for line in stream:
+            lines.put(line)
+        lines.put(None)
+
+    threading.Thread(target=pump, daemon=True).start()
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError(f"cua-driver proxy did not answer request {request_id} within {timeout:g}s")
+        try:
+            line = lines.get(timeout=remaining)
+        except queue.Empty:
+            continue
+        if line is None:
+            raise RuntimeError("cua-driver proxy closed its output before answering")
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(message, dict) or message.get("id") != request_id:
+            continue
+        if message.get("error"):
+            raise RuntimeError(f"cua-driver proxy error: {message['error']}")
+        result = message.get("result")
+        if not isinstance(result, dict):
+            raise RuntimeError("cua-driver proxy returned a non-object result")
+        return result
+
+
+def _embedded_permissions(host: EmbeddedDriverHost) -> dict[str, Any]:
+    """``check_permissions`` through the host daemon's MCP proxy.
+
+    ``cua-driver permissions status`` only knows the standalone daemon identity and reports
+    ``unknown`` for an embedded daemon, so the tool call is the one surface that reads the
+    grants the run will actually have: the daemon answers from inside the host's TCC chain.
+    """
+    messages = [
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "yutori-mcp-preflight", "version": MCP_VERSION},
+            },
+        },
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "check_permissions", "arguments": {"prompt": False}},
+        },
+    ]
+    process = subprocess.Popen(
+        [str(host.binary), "mcp", "--embedded", "--socket", str(host.socket)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        env={**os.environ, ENV_DRIVER_EMBEDDED: "1"},
+    )
+    try:
+        assert process.stdin is not None and process.stdout is not None
+        process.stdin.write("".join(json.dumps(message, separators=(",", ":")) + "\n" for message in messages))
+        process.stdin.flush()
+        result = _read_rpc_result(process.stdout, request_id=2, timeout=_EMBEDDED_RPC_TIMEOUT_SECONDS)
+    finally:
+        process.kill()
+        process.wait(timeout=5)
+    structured = result.get("structuredContent") or result.get("structured_content") or {}
+    return structured if isinstance(structured, dict) else {}
+
+
 def check_daemon_identity() -> CheckResult:
+    host = _configured_embedded_host()
+    if host is not None:
+        return _result(
+            "daemon identity",
+            _socket_accepts_connections(host.socket),
+            f"embedded daemon at {host.socket}",
+            _EMBEDDED_HOST_REMEDIATION,
+        )
     result = _run_safely(["pgrep", "-f", "/Applications/CuaDriver.app/Contents/MacOS/"], timeout=10)
     return _result(
         "daemon identity",
@@ -352,6 +523,19 @@ def check_daemon_identity() -> CheckResult:
 
 
 def check_permissions() -> CheckResult:
+    host = _configured_embedded_host()
+    if host is not None:
+        try:
+            info = _embedded_permissions(host)
+            ok = bool(info.get("accessibility")) and bool(info.get("screen_recording"))
+        except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
+            ok = False
+        return _result(
+            "permissions",
+            ok,
+            "Accessibility and Screen Recording (host application)",
+            _EMBEDDED_PERMISSIONS_REMEDIATION,
+        )
     try:
         info = _driver_json("permissions")
         ok = bool(info.get("accessibility")) and bool(info.get("screen_recording"))
@@ -425,12 +609,20 @@ def check_capture() -> CheckResult:
             _SETUP_REMEDIATION,
             blocking=False,
         )
+    embedded = _configured_embedded_host() is not None
     with tempfile.TemporaryDirectory(prefix="cua-capture-check-") as directory:
         # Under $TMPDIR, whose /var -> /private/var symlink the driver rejects as an unresolved
         # ancestor, so hand it a fully resolved path.
         target = Path(directory).resolve() / "capture.png"
         result = _run_safely(
-            [str(driver), "call", "get_desktop_state", json.dumps({"screenshot_out_file": str(target)}), "--raw"],
+            [
+                str(driver),
+                "call",
+                "get_desktop_state",
+                json.dumps({"screenshot_out_file": str(target)}),
+                "--raw",
+                *_driver_socket_arguments(),
+            ],
             timeout=30,
             text=False,
         )
@@ -439,7 +631,7 @@ def check_capture() -> CheckResult:
                 "desktop capture",
                 False,
                 "driver capture failed",
-                _PERMISSIONS_GRANT_REMEDIATION,
+                _EMBEDDED_PERMISSIONS_REMEDIATION if embedded else _PERMISSIONS_GRANT_REMEDIATION,
                 blocking=False,
             )
         ok = target.is_file() and target.stat().st_size > 0
@@ -447,7 +639,11 @@ def check_capture() -> CheckResult:
         "desktop capture",
         ok,
         "driver captured the desktop" if ok else "driver produced no image",
-        "Allow Screen Recording for CuaDriver in System Settings.",
+        (
+            _EMBEDDED_PERMISSIONS_REMEDIATION
+            if embedded
+            else "Allow Screen Recording for CuaDriver in System Settings."
+        ),
         blocking=False,
     )
 
