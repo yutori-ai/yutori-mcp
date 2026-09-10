@@ -27,6 +27,19 @@ def redact(text: str, secret: str) -> str:
     return text.replace(secret, REDACTED)
 
 
+def structured_content(result: dict[str, Any]) -> dict[str, Any]:
+    """The structured payload of an MCP tool result, tolerating either key casing.
+
+    The driver protocol has used both ``structuredContent`` (MCP-style) and
+    ``structured_content`` across releases; every caller wants "whichever one is present,
+    or an empty dict" rather than caring which. Lives here (not ``app.py``, which owns the
+    SDK-backed ``MacOSComputer`` calls) so ``preflight.py``'s embedded-host MCP proxy call
+    can reuse it without importing the SDK.
+    """
+    value = result.get("structuredContent") or result.get("structured_content") or {}
+    return value if isinstance(value, dict) else {}
+
+
 def remaining_seconds(deadline: float) -> float:
     """Seconds left before ``deadline`` (a ``time.monotonic()`` value).
 
