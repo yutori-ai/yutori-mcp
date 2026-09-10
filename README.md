@@ -407,6 +407,11 @@ working; leave that window alone. Some apps accept background clicks but not typ
 (Calculator, for one), and the run reports the refusal rather than typing blind — add
 `--allow-foreground-fallback` for typing-heavy background tasks.
 
+During a foreground run, the overlay (cursor, click pulses, shell rail, activity window) stays
+visible in screen recordings, screen shares, and VNC by default — only the model's own frames
+exclude it. Set `YUTORI_RECORDABLE_OVERLAY=0` to make the overlay leave screen capture
+altogether instead, hidden from recorders around every capture as before.
+
 `uvx yutori-mcp computer-use stop` ends the active run from another terminal (background runs
 have no on-screen Stop button). `uvx yutori-mcp computer-use smoke` is an end-to-end check: it
 types into Calculator to confirm the permissions took effect, then has the agent compute 9 * 9.
