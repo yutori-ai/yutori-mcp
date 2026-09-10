@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.5.22"
+version = "0.5.23"
 description = "MCP server and workflow skills for building agents with Yutori"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,9 +30,9 @@ dependencies = [
     # breaks the install as soon as 2.x resolves.
     "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
-    # SDK 0.9.20 bundles the protocol-v4 navigator overlay from yutori#13269
-    # and presents terminal commands beside the cursor capsule.
-    "yutori==0.9.20",
+    # SDK 0.9.21 lets MCP attach to a host-embedded macOS driver daemon while
+    # preserving the standalone CuaDriver transport.
+    "yutori==0.9.21",
 ]
 
 [project.optional-dependencies]
