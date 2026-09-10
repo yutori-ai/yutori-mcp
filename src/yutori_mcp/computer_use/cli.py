@@ -144,6 +144,11 @@ def _blocked(*, json_output: bool = False) -> bool:
     return True
 
 
+def _exit_code(result: dict[str, Any]) -> int:
+    """The process exit code a run result maps to: 0 only for a completed outcome."""
+    return 0 if result.get("outcome") == "completed" else 1
+
+
 def _report(result: dict[str, Any], *, include_actions: bool = True) -> int:
     """Print the formatted run result and derive the process exit code from its outcome.
 
@@ -151,7 +156,7 @@ def _report(result: dict[str, Any], *, include_actions: bool = True) -> int:
     in progress; `run` turns it off, having already printed each action as it landed.
     """
     print(format_terminal_result(result, Terminal.detect(), include_actions=include_actions))
-    return 0 if result.get("outcome") == "completed" else 1
+    return _exit_code(result)
 
 
 async def _mechanical_calculator_check() -> str:
@@ -330,7 +335,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
             on_event=_json_event_printer(),
         )
         _json_line({"type": "result", **result})
-        return 0 if result.get("outcome") == "completed" else 1
+        return _exit_code(result)
     _print_milestone(paint, "preflight ready", preflight_started)
     print(format_run_header(params, paint))
     runner_started = time.monotonic()
