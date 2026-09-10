@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.5.25"
+version = "0.5.26"
 description = "MCP server and workflow skills for building agents with Yutori"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,10 +30,10 @@ dependencies = [
     # breaks the install as soon as 2.x resolves.
     "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
-    # SDK 0.9.23 reverts the cursor-anchored run-command panel: the shell rail is
-    # back under the menu bar, the capsule carries "$ <command>" again, and the
-    # bundled overlay runtime is back on renderer protocol 3.
-    "yutori==0.9.23",
+    # SDK 0.9.24 re-bundles navigator overlay runtime 0.5.0 (renderer protocol 4),
+    # restoring the shared overlay work the 0.9.23 revert dropped. The rail stays
+    # under the menu bar and the capsule keeps carrying "$ <command>".
+    "yutori==0.9.24",
 ]
 
 [project.optional-dependencies]
