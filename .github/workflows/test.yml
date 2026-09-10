@@ -18,9 +18,17 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v6
+      # No floating major tag is published past v7, so pin the exact release.
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          # Also hands setup-uv the interpreter so the uv cache key is
+          # per-Python; otherwise every matrix leg races on one shared key.
+          python-version: ${{ matrix.python-version }}
+          # `auto` caches on push/pull_request but skips release and tag pushes,
+          # so the publish gate never restores a cache it could be poisoned by.
+          enable-cache: auto
 
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} --extra dev pytest -q
