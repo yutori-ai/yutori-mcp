@@ -609,6 +609,7 @@ def check_capture() -> CheckResult:
             _SETUP_REMEDIATION,
             blocking=False,
         )
+    embedded = _configured_embedded_host() is not None
     with tempfile.TemporaryDirectory(prefix="cua-capture-check-") as directory:
         # Under $TMPDIR, whose /var -> /private/var symlink the driver rejects as an unresolved
         # ancestor, so hand it a fully resolved path.
@@ -630,7 +631,7 @@ def check_capture() -> CheckResult:
                 "desktop capture",
                 False,
                 "driver capture failed",
-                _PERMISSIONS_GRANT_REMEDIATION,
+                _EMBEDDED_PERMISSIONS_REMEDIATION if embedded else _PERMISSIONS_GRANT_REMEDIATION,
                 blocking=False,
             )
         ok = target.is_file() and target.stat().st_size > 0
@@ -638,7 +639,11 @@ def check_capture() -> CheckResult:
         "desktop capture",
         ok,
         "driver captured the desktop" if ok else "driver produced no image",
-        "Allow Screen Recording for CuaDriver in System Settings.",
+        (
+            _EMBEDDED_PERMISSIONS_REMEDIATION
+            if embedded
+            else "Allow Screen Recording for CuaDriver in System Settings."
+        ),
         blocking=False,
     )
 

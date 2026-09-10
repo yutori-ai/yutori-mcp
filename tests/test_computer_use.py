@@ -3353,6 +3353,18 @@ def test_embedded_permissions_proxy_failure_blocks_instead_of_raising(monkeypatc
     assert not preflight.check_permissions().ok
 
 
+@pytest.mark.parametrize("capture_result", [None, subprocess.CompletedProcess([], 0)])
+def test_embedded_capture_failure_names_the_host_application(monkeypatch, tmp_path, capture_result):
+    _configure_embedded_host(monkeypatch, tmp_path)
+    monkeypatch.setattr(preflight, "_run_safely", lambda *_args, **_kwargs: capture_result)
+
+    result = preflight.check_capture()
+
+    assert not result.ok
+    assert result.remediation == preflight._EMBEDDED_PERMISSIONS_REMEDIATION
+    assert "CuaDriver" not in result.remediation
+
+
 def test_child_environment_forwards_the_embedded_host_configuration(monkeypatch, tmp_path):
     binary, sock = _configure_embedded_host(monkeypatch, tmp_path)
     monkeypatch.setenv(preflight.ENV_DRIVER_EMBEDDED, "1")
