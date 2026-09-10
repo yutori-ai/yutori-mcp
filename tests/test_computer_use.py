@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import asyncio
 import hashlib
 import importlib.metadata
@@ -459,6 +460,22 @@ async def test_supervisor_forwards_ready_and_action_events():
     result = await _run_supervised(process, on_event=on_event)
     assert [event["type"] for event in seen] == ["ready", "startup", "action"]
     assert result["actions"] == [events[2]]
+
+
+async def test_supervisor_forwards_frame_and_activity_events_without_recording_them_as_actions():
+    frame = {"type": "frame", "capture_id": 1, "media_type": "image/jpeg", "data": "AAAA", "caption": "Frame 1"}
+    activity = {"type": "activity", "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"}}
+    events = [_ready_event(reasoning_overlay_requested=True), frame, activity, _action_event(index=1), _result_event()]
+    process = _Process(_stream(*(json.dumps(event) for event in events)), _stream(""))
+    seen: list[dict] = []
+
+    async def on_event(event):
+        seen.append(event)
+
+    result = await _run_supervised(process, on_event=on_event)
+    assert [event["type"] for event in seen] == ["ready", "frame", "activity", "action"]
+    assert result["outcome"] == "completed"
+    assert [action["type"] for action in result["actions"]] == ["action"]
 
 
 async def test_supervisor_does_not_let_a_blocked_progress_callback_stall_protocol_drain(monkeypatch):
@@ -1890,7 +1907,9 @@ async def test_run_request_wires_sdk_runtime_and_reports_effective_state(monkeyp
         "exclude_overlay_from_capture": False,
     }
     assert agent.kwargs["tool_set"] == TOOL_SET
-    assert agent.kwargs["presentation"] is computer.presentation
+    # The agent's sink is the activity tee wrapping the SDK's own controller.
+    assert isinstance(agent.kwargs["presentation"], runner_module.ActivityReporter)
+    assert agent.kwargs["presentation"]._inner is computer.presentation
     assert agent.kwargs["image_format"] == OBSERVATION_FORMAT == "webp"
     assert agent.kwargs["supports_click_modifiers"] is True
     assert "Shell commands run headlessly" in agent.kwargs["system_prompt"]
@@ -2097,7 +2116,8 @@ async def test_run_request_carries_the_chat_id_on_actions_and_the_result(monkeyp
     assert await runner_module.run_request(request, Emitter(stream), "yt-secret") == "completed"
 
     events = [json.loads(line) for line in stream.lines]
-    action, result = events[-2], events[-1]
+    # `activity` and `frame` events interleave with actions, so pick the last action by type.
+    action, result = [event for event in events if event["type"] == "action"][-1], events[-1]
     assert (action["type"], action["chat_id"]) == ("action", "req-first")
     assert (result["type"], result["chat_id"]) == ("result", "req-first")
 
@@ -2581,7 +2601,9 @@ async def test_run_request_background_binds_the_window_and_never_fronts(monkeypa
     assert computer.window_targets == [_FakeWindowTarget(42, 7, app_name="Notes")]
     assert computer.target_pid == 42
     assert agent.kwargs["system_prompt"].startswith("You control exactly one application window: Notes.")
-    assert agent.kwargs["presentation"] is computer.presentation
+    # The agent's sink is the activity tee wrapping the SDK's own controller.
+    assert isinstance(agent.kwargs["presentation"], runner_module.ActivityReporter)
+    assert agent.kwargs["presentation"]._inner is computer.presentation
     result = json.loads(stream.lines[-1])
     assert result["delivery_mode"] == "background"
     assert result["reasoning_overlay_requested"] is True and result["reasoning_overlay_effective"] is True
@@ -3565,3 +3587,219 @@ def test_setup_skips_the_standalone_installer_for_an_embedded_host(monkeypatch, 
     assert cli._setup() == 0
     out = capsys.readouterr().out
     assert "nothing to install" in out and str(binary) in out
+
+
+# ---------------------------------------------------------------------------
+# Host rendering: `activity` transcript rows and `frame` thumbnails; the presentation flag.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakeObservation:
+    capture_id: int
+    encoded_bytes: bytes = b"frame-bytes"
+
+
+class _FakeTarget:
+    def describe(self) -> str:
+        return "Calculator (pid 5, window 9)"
+
+
+class _FakeActivityComputer:
+    def __init__(self) -> None:
+        self.current_observation = None
+        self.target_window = None
+        self.shell_events: tuple[ShellPresentationEvent, ...] = ()
+
+    @staticmethod
+    def _thumbnail_jpeg(image_bytes: bytes) -> bytes:
+        return b"thumb:" + image_bytes
+
+
+class _RecordingPresentation:
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+
+    async def present(self, event: dict[str, Any]) -> None:
+        self.events.append(event)
+
+
+def _activity_reporter():
+    stream = io.StringIO()
+    computer = _FakeActivityComputer()
+    inner = _RecordingPresentation()
+    reporter = runner_module.ActivityReporter(
+        Emitter(stream), computer, inner=inner, thumbnail=_FakeActivityComputer._thumbnail_jpeg
+    )
+    return reporter, computer, inner, stream
+
+
+def _events(stream: io.StringIO) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in stream.getvalue().splitlines() if line.strip()]
+
+
+async def test_activity_reporter_tees_presentation_events_into_sdk_shaped_rows():
+    reporter, _computer, inner, stream = _activity_reporter()
+    await reporter.present({"type": "task", "text": "Compute 9 * 9"})
+    await reporter.present({"type": "reasoning", "text": "I should open Calculator."})
+    await reporter.present({"type": "action", "name": "left_click", "arguments": {"coordinates": [100, 20]}})
+    await reporter.present({"type": "request"})  # nothing to show
+    await reporter.present({"type": "final", "text": "81"})
+
+    assert [event["type"] for event in inner.events] == ["task", "reasoning", "action", "request", "final"]
+    entries = [event["entry"] for event in _events(stream) if event["type"] == "activity"]
+    assert [entry["kind"] for entry in entries] == ["task", "thinking", "action", "final"]
+    assert entries[0] == {"id": "entry-0", "kind": "task", "text": "Compute 9 * 9"}
+    assert entries[2]["text"] == "left click at (100, 20)" and entries[2]["icon"] == "click"
+    assert entries[3]["text"] == "81"
+
+
+async def test_activity_reporter_forwards_even_when_the_native_controller_fails():
+    class Failing:
+        async def present(self, _event):
+            raise RuntimeError("host gone")
+
+    stream = io.StringIO()
+    reporter = runner_module.ActivityReporter(Emitter(stream), _FakeActivityComputer(), inner=Failing())
+    await reporter.present({"type": "reasoning", "text": "still reported"})
+    assert _events(stream)[0]["entry"]["kind"] == "thinking"
+
+
+async def test_activity_reporter_streams_one_frame_per_new_observation_with_the_sdk_caption():
+    reporter, computer, _inner, stream = _activity_reporter()
+    await reporter.on_computer_call_end({}, [])
+    assert _events(stream) == [], "no observation yet, no frame"
+
+    computer.current_observation = _FakeObservation(capture_id=1)
+    computer.target_window = _FakeTarget()
+    await reporter.on_computer_call_end({}, [])
+    await reporter.on_computer_call_end({}, [])  # same capture: not repeated
+    computer.current_observation = _FakeObservation(capture_id=2, encoded_bytes=b"second")
+    await reporter.on_computer_call_end({}, [])
+
+    frames = [event for event in _events(stream) if event["type"] == "frame"]
+    assert [frame["capture_id"] for frame in frames] == [1, 2]
+    assert frames[0]["caption"] == "Frame 1 of Calculator (pid 5, window 9)"
+    assert frames[0]["media_type"] == "image/jpeg"
+    assert base64.b64decode(frames[1]["data"]) == b"thumb:second"
+
+
+async def test_activity_reporter_revises_shell_rows_in_place_as_commands_finish():
+    reporter, computer, _inner, stream = _activity_reporter()
+    computer.shell_events = (ShellPresentationEvent("t1", "ls ~", False, "running"),)
+    await reporter.on_computer_call_end({}, [])
+    computer.shell_events = (ShellPresentationEvent("t1", "ls ~", False, "completed", 0),)
+    await reporter.present({"type": "request"})
+    await reporter.present({"type": "request"})  # unchanged shell state: not repeated
+
+    rows = [event["entry"] for event in _events(stream) if event["type"] == "activity"]
+    assert [(row["id"], row["state"], row["exitCode"]) for row in rows] == [
+        ("shell-t1", "running", None),
+        ("shell-t1", "completed", 0),
+    ]
+    assert rows[0]["command"] == "ls ~" and rows[0]["kind"] == "shell"
+
+
+def test_parse_request_defaults_presentation_and_validates_it():
+    assert parse_request(_valid_request())["presentation"] is True
+    assert parse_request(_valid_request(presentation=False))["presentation"] is False
+    with pytest.raises(RequestError, match="presentation must be a boolean"):
+        parse_request(_valid_request(presentation="off"))
+
+
+def test_computer_kwargs_forward_the_presentation_choice():
+    request = parse_request(_valid_request(presentation=False))
+    kwargs = runner_module._computer_kwargs(
+        request, deadline=time.monotonic() + 60, cancellation=runner_module.CancellationLatch(), api_key="k"
+    )
+    assert kwargs["presentation"] is False
+
+
+def test_agent_kwargs_route_presentation_through_the_activity_sink():
+    computer = SimpleNamespace(presentation=object())
+    sink = object()
+    request = parse_request(_valid_request())
+    routed = runner_module._agent_base_kwargs(
+        request, completions=None, computer=computer, deadline=1.0, presentation=sink
+    )
+    assert routed["presentation"] is sink
+    default = runner_module._agent_base_kwargs(request, completions=None, computer=computer, deadline=1.0)
+    assert default["presentation"] is computer.presentation
+
+
+@pytest.mark.parametrize(
+    ("event", "ok"),
+    [
+        ({"type": "frame", "capture_id": 1, "media_type": "image/jpeg", "data": "AAAA"}, True),
+        ({"type": "frame", "capture_id": "1", "media_type": "image/jpeg", "data": "AAAA"}, False),
+        ({"type": "frame", "capture_id": 1, "media_type": "image/jpeg"}, False),
+        ({"type": "activity", "entry": {"id": "entry-0", "kind": "thinking", "text": "x"}}, True),
+        ({"type": "activity", "entry": "not a row"}, False),
+    ],
+)
+def test_supervisor_validates_frame_and_activity_event_shapes(event, ok):
+    assert (supervisor._event_shape_error(event) is None) is ok
+
+
+async def test_run_task_request_carries_presentation(tmp_path):
+    with _patched_run_task_supervise(tmp_path) as supervise:
+        await run_task(**_run_task_kwargs(tmp_path, presentation=False))
+    assert supervise.await_args.kwargs["request"]["presentation"] is False
+    with _patched_run_task_supervise(tmp_path) as supervise:
+        await run_task(**_run_task_kwargs(tmp_path))
+    assert supervise.await_args.kwargs["request"]["presentation"] is True
+
+
+def test_cli_run_parser_accepts_no_presentation():
+    from yutori_mcp.computer_use import cli
+
+    parser = argparse.ArgumentParser()
+    cli.register_parser(parser.add_subparsers(dest="command"))
+    assert parser.parse_args(["computer-use", "run", "x", "--no-presentation"]).no_presentation is True
+    assert parser.parse_args(["computer-use", "run", "x"]).no_presentation is False
+
+
+async def test_cli_run_forwards_presentation_and_json_streams_host_only_events(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    frame = {"type": "frame", "capture_id": 1, "media_type": "image/jpeg", "data": "AAAA"}
+
+    async def run(**kwargs):
+        await kwargs["on_event"](frame)
+        await kwargs["on_event"]({"type": "activity", "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"}})
+        return {"outcome": "completed", "delivery_mode": "background", "final_text": "done"}
+
+    monkeypatch.setattr(cli, "_blocked", lambda **_kwargs: False)
+    monkeypatch.setattr(supervisor, "run_task", run)
+    _patch_run_credentials(monkeypatch)
+
+    args = _run_args(json=True, mode="background", app="Notes", no_presentation=True)
+    assert await cli._run_custom(args) == 0
+    lines = _json_lines(capsys.readouterr().out)
+    assert [line["type"] for line in lines] == ["frame", "activity", "result"]
+
+    captured = AsyncMock(return_value={"outcome": "completed", "delivery_mode": "foreground", "final_text": "ok"})
+    monkeypatch.setattr(supervisor, "run_task", captured)
+    assert await cli._run_custom(_run_args(no_presentation=True)) == 0
+    assert captured.await_args.kwargs["presentation"] is False
+    assert "frame" not in capsys.readouterr().out
+
+
+async def test_cli_text_printer_ignores_host_only_events(capsys):
+    from yutori_mcp.computer_use import cli
+
+    printer = cli._event_printer("foreground", None, _PLAIN_TERMINAL, started_at=0.0, clock=lambda: 1.0)
+    await printer({"type": "frame", "capture_id": 1, "media_type": "image/jpeg", "data": "AAAA"})
+    await printer({"type": "activity", "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"}})
+    assert capsys.readouterr().out == ""
+
+
+async def test_progress_reporter_ignores_host_only_events():
+    from yutori_mcp import server
+
+    ctx = SimpleNamespace(report_progress=AsyncMock(), info=AsyncMock())
+    on_event = server._progress_reporter(ctx, 10)
+    await on_event({"type": "frame", "capture_id": 1, "media_type": "image/jpeg", "data": "AAAA"})
+    await on_event({"type": "activity", "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"}})
+    ctx.report_progress.assert_not_awaited()
+    ctx.info.assert_not_awaited()

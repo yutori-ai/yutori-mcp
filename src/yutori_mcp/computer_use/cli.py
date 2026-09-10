@@ -262,6 +262,8 @@ def _event_printer(
     started_at = clock() if started_at is None else started_at
 
     async def print_event(event: dict) -> None:
+        if event.get("type") in _HOST_ONLY_EVENT_TYPES:
+            return
         if event.get("type") == "ready":
             _print_milestone(paint, "runner process ready", started_at, clock=clock)
             return
@@ -275,6 +277,11 @@ def _event_printer(
         print("\n".join(format_terminal_action(event, paint)), flush=True)
 
     return print_event
+
+
+# Streamed for a host application's own rendering (`--json`); the terminal printer and the
+# MCP progress reporter have nothing to show for them.
+_HOST_ONLY_EVENT_TYPES = frozenset({"frame", "activity"})
 
 
 def _json_event_printer():
@@ -324,6 +331,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
     )
     json_output = bool(getattr(args, "json", False))
     show_stop_button = not getattr(args, "hide_stop_item", False)
+    presentation = not getattr(args, "no_presentation", False)
     paint = Terminal.detect()
     preflight_started = time.monotonic()
     if _blocked(json_output=json_output):
@@ -332,6 +340,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
         result = await run_task_with_resolved_credentials(
             **params.model_dump(),
             show_stop_button=show_stop_button,
+            presentation=presentation,
             on_event=_json_event_printer(),
         )
         _json_line({"type": "result", **result})
@@ -342,6 +351,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
     result = await run_task_with_resolved_credentials(
         **params.model_dump(),
         show_stop_button=show_stop_button,
+        presentation=presentation,
         on_event=_event_printer(params.mode, params.app, paint, started_at=runner_started),
     )
     return _report(result, include_actions=False)
@@ -416,6 +426,15 @@ def register_parser(
         dest="hide_stop_item",
         action="store_true",
         help="Do not show the SDK's menu bar Stop item; the host application provides its own (the hotkey stays active)",
+    )
+    run_parser.add_argument(
+        "--no-presentation",
+        dest="no_presentation",
+        action="store_true",
+        help=(
+            "Show none of the SDK's surfaces (overlay, menu bar item, activity window, hotkey); "
+            "the host application renders the run from the --json frame and activity events"
+        ),
     )
     run_parser.add_argument("task", help="Task for the model to perform")
     run_parser.add_argument("--app", default=None, help="Application to target")
