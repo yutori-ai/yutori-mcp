@@ -48,6 +48,7 @@ from .result import (
     format_runtime_version,
     format_terminal_action,
     format_terminal_result,
+    structured_content,
 )
 from .supervisor import run_task_with_resolved_credentials, stop_active_run
 
@@ -156,7 +157,7 @@ def _report(result: dict[str, Any], *, include_actions: bool = True) -> int:
 async def _mechanical_calculator_check() -> str:
     from yutori.navigator.macos.transport import CuaDriverTransport
 
-    from .app import prepare_app, structured_content
+    from .app import prepare_app
     from .targeting import TargetGuardedMacOSComputer
 
     driver = find_cua_driver()

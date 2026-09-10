@@ -13,6 +13,7 @@ from yutori.navigator.macos.transport import (
     CuaDriverUncertainActionError,
 )
 
+from .result import structured_content
 from .targeting import require_frontmost_target
 
 _BUNDLE_ID_PATTERN = re.compile(r"^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
@@ -24,17 +25,6 @@ _BACKGROUND_SETTLE_MS = 300
 _WINDOW_POLL_MS = 250
 _WINDOW_POLL_ATTEMPTS = 12
 _MIN_IMMEDIATE_UNTITLED_WINDOW_AREA = 60_000
-
-
-def structured_content(result: dict[str, Any]) -> dict[str, Any]:
-    """The structured payload of a ``_call_tool`` result, tolerating either key casing.
-
-    The driver protocol has used both ``structuredContent`` (MCP-style) and
-    ``structured_content`` across releases; every caller wants "whichever one is present,
-    or an empty dict" rather than caring which.
-    """
-    value = result.get("structuredContent") or result.get("structured_content") or {}
-    return value if isinstance(value, dict) else {}
 
 
 def _windows(payload: dict[str, Any]) -> list[dict[str, Any]]:

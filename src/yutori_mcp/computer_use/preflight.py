@@ -31,6 +31,7 @@ from .constants import (
     SDK_VERSION,
     TOOL_SET,
 )
+from .result import structured_content
 
 DRIVER_APP = Path("/Applications/CuaDriver.app")
 DRIVER_PATHS = (
@@ -500,8 +501,7 @@ def _embedded_permissions(host: EmbeddedDriverHost) -> dict[str, Any]:
     finally:
         process.kill()
         process.wait(timeout=5)
-    structured = result.get("structuredContent") or result.get("structured_content") or {}
-    return structured if isinstance(structured, dict) else {}
+    return structured_content(result)
 
 
 def check_daemon_identity() -> CheckResult:
