@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import inspect
 import json
 import os
@@ -18,12 +19,17 @@ from typing import Any, TextIO
 from yutori import AsyncYutoriClient
 from yutori.navigator import N2ComputerAgent, flatten_batch_member
 from yutori.navigator.macos import (
+    MacOSComputer as _SDKMacOSComputer,
     MacOSPresentationStatus,
     MacOSTargetCrashedError,
     CancellationLatch,
     ShellPresentationEvent,
     sanitize_command_preview,
 )
+# The SDK's own activity-window row shaping, so a host application rendering the `activity`
+# stream shows exactly the conversation the SDK's activity window shows. Private to the SDK,
+# which this package pins by exact version and hash; tests guard the import.
+from yutori.navigator.macos.presentation import _transcript_entry as transcript_entry
 
 from .app import prepare_app
 from .constants import (
@@ -194,6 +200,16 @@ def _require_bool(request: dict[str, Any], field: str) -> bool:
     return _require_field(request, field, valid=lambda v: isinstance(v, bool), expected="a boolean")
 
 
+def _require_window_ids(request: dict[str, Any], field: str) -> list[int]:
+    return _require_field(
+        request,
+        field,
+        valid=lambda v: isinstance(v, list)
+        and all(isinstance(item, int) and not isinstance(item, bool) and item > 0 for item in v),
+        expected="a list of positive integer window ids",
+    )
+
+
 def parse_request(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RequestError("INVALID_REQUEST", "Request must be a JSON object.")
@@ -215,8 +231,12 @@ def parse_request(payload: Any) -> dict[str, Any]:
         raise RequestError("INVALID_REQUEST", "allow_foreground_fallback requires mode 'background'.")
     deadline_ms = _require_positive_int(payload, "deadline_ms")
     max_steps = _require_positive_int(payload, "max_steps")
-    # Optional so a protocol-v2 supervisor that predates the field keeps the SDK's default.
+    # Optional so a protocol-v2 supervisor that predates the fields keeps the SDK's defaults.
     show_stop_button = _require_bool(payload, "show_stop_button") if "show_stop_button" in payload else True
+    presentation = _require_bool(payload, "presentation") if "presentation" in payload else True
+    exclude_capture_window_ids = (
+        _require_window_ids(payload, "exclude_capture_window_ids") if "exclude_capture_window_ids" in payload else []
+    )
     return {
         "task": task,
         "app": app,
@@ -227,6 +247,8 @@ def parse_request(payload: Any) -> dict[str, Any]:
         "allow_foreground_fallback": allow_foreground_fallback,
         "allow_local_shell": allow_local_shell,
         "show_stop_button": show_stop_button,
+        "presentation": presentation,
+        "exclude_capture_window_ids": exclude_capture_window_ids,
         "model": _require_string(payload, "model"),
         "api_base_url": _require_string(payload, "api_base_url"),
     }
@@ -451,6 +473,92 @@ class ActionReporter:
         )
         self._index += 1
         self.tool_calls += 1
+
+
+class ActivityReporter:
+    """Stream the run's conversation and frames to the host as `activity` and `frame` events.
+
+    Sits between N2ComputerAgent and the SDK's native presentation controller as the agent's
+    presentation sink: every `present()` call is forwarded to the controller unchanged (when
+    there is one) and also shaped with the SDK's own activity-window row conversion into one
+    `activity` event, so a host application renders the same transcript the SDK's activity
+    window shows (task, thinking, actions, shell commands, final answer). Shell commands are
+    picked up from the computer's shell lifecycle so their rows are revised in place as they
+    finish. As an agent callback it also emits one `frame` per new observation, thumbnailed the
+    way the SDK's menu bar item thumbnails them.
+    """
+
+    def __init__(
+        self,
+        emitter: Emitter,
+        computer: MacOSComputer,
+        *,
+        inner: Any = None,
+        thumbnail: Callable[[bytes], bytes] | None = None,
+    ) -> None:
+        self._emitter = emitter
+        self._computer = computer
+        self._inner = inner
+        # The SDK's menu-bar thumbnail shaping (720px long side JPEG), taken from the SDK class
+        # rather than the instance so a stand-in computer in tests needs no such method.
+        self._thumbnail = thumbnail or _SDKMacOSComputer._thumbnail_jpeg
+        self._sequence = 0
+        self._shell_states: dict[str, tuple[str, int | None]] = {}
+        self._last_capture_id: int | None = None
+
+    async def present(self, event: dict[str, Any]) -> None:
+        if self._inner is not None:
+            try:
+                await self._inner.present(event)
+            except Exception:  # noqa: BLE001 - the SDK controller records its own degradation
+                pass
+        self._emit_entry(event)
+        self._emit_shell_updates()
+
+    async def on_computer_call_end(self, _item: dict[str, Any], _result: list[dict[str, Any]]) -> None:
+        self._emit_shell_updates()
+        await self.emit_frame()
+
+    def _emit_entry(self, event: dict[str, Any]) -> None:
+        try:
+            entry = transcript_entry(event, self._sequence)
+        except Exception:  # noqa: BLE001 - a row the SDK cannot shape is not worth the run
+            return
+        if entry is None:
+            return
+        self._sequence += 1
+        self._emitter.emit({"type": "activity", "entry": entry})
+
+    def _emit_shell_updates(self) -> None:
+        for shell_event in self._computer.shell_events:
+            key = (str(shell_event.state), shell_event.exit_code)
+            if self._shell_states.get(shell_event.task_id) == key:
+                continue
+            self._shell_states[shell_event.task_id] = key
+            entry = transcript_entry({"type": "shell", "event": shell_event}, self._sequence)
+            if entry is not None:
+                self._emitter.emit({"type": "activity", "entry": entry})
+
+    async def emit_frame(self) -> None:
+        observation = self._computer.current_observation
+        if observation is None or observation.capture_id == self._last_capture_id:
+            return
+        try:
+            jpeg = await asyncio.to_thread(self._thumbnail, observation.encoded_bytes)
+        except (OSError, ValueError):
+            return
+        self._last_capture_id = observation.capture_id
+        target = self._computer.target_window
+        caption = f"Frame {observation.capture_id}" + (f" of {target.describe()}" if target is not None else "")
+        self._emitter.emit(
+            {
+                "type": "frame",
+                "capture_id": observation.capture_id,
+                "media_type": "image/jpeg",
+                "data": base64.b64encode(jpeg).decode("ascii"),
+                "caption": caption,
+            }
+        )
 
 
 class ApiCounter:
@@ -724,8 +832,12 @@ def _timings_payload(
 
 def _supports_background_mode() -> bool:
     """Whether the installed SDK's MacOSComputer has window scope (yutori >= 0.9.11)."""
+    return _computer_accepts("scope")
+
+
+def _computer_accepts(parameter: str) -> bool:
     try:
-        return "scope" in inspect.signature(MacOSComputer.__init__).parameters
+        return parameter in inspect.signature(MacOSComputer.__init__).parameters
     except (TypeError, ValueError):
         return False
 
@@ -739,7 +851,9 @@ def _computer_kwargs(
 ) -> dict[str, Any]:
     """MacOSComputer construction per mode; the foreground shape is the long-standing one."""
     kwargs: dict[str, Any] = {
-        "presentation": True,
+        # False lets a host application own every visible surface (no overlay, no status item,
+        # no hotkey); the host then also owns the stop shortcut.
+        "presentation": request.get("presentation", True),
         "show_stop_button": request.get("show_stop_button", True),
         "allow_local_shell": request["allow_local_shell"],
         "execution_deadline": deadline,
@@ -756,11 +870,21 @@ def _computer_kwargs(
         )
     else:
         kwargs["exclude_overlay_from_capture"] = os.environ.get(ENV_RECORDABLE_OVERLAY) == "0"
+        # A host application's own panels, kept out of the model's desktop frames by the SDK's
+        # capturer while staying on screen and recordable. Only SDKs that know the parameter.
+        window_ids = request.get("exclude_capture_window_ids") or []
+        if window_ids and _computer_accepts("exclude_capture_window_ids"):
+            kwargs["exclude_capture_window_ids"] = tuple(window_ids)
     return kwargs
 
 
 def _agent_base_kwargs(
-    request: dict[str, Any], *, completions: Any, computer: MacOSComputer, deadline: float
+    request: dict[str, Any],
+    *,
+    completions: Any,
+    computer: MacOSComputer,
+    deadline: float,
+    presentation: Any = None,
 ) -> dict[str, Any]:
     """N2ComputerAgent construction kwargs for the run's single agent lifecycle."""
     return {
@@ -771,7 +895,7 @@ def _agent_base_kwargs(
         "system_prompt": system_context(
             request["mode"], request["app"], request["allow_local_shell"]
         ),
-        "presentation": computer.presentation,
+        "presentation": presentation if presentation is not None else computer.presentation,
         "screenshot_delay": 0,
         "image_format": OBSERVATION_FORMAT,
         "execution_deadline": deadline,
@@ -982,14 +1106,16 @@ async def run_request(
 
                 computer.recover_target = recover_target
 
+            activity = ActivityReporter(emitter, computer, inner=computer.presentation)
             async with N2ComputerAgent(
                 **_agent_base_kwargs(
                     request,
                     completions=completions,
                     computer=computer,
                     deadline=deadline,
+                    presentation=activity,
                 ),
-                callbacks=[guard, reporter, api_counter, chat, startup],
+                callbacks=[guard, reporter, api_counter, chat, startup, activity],
             ) as agent:
                 final_text = await _collect_final_text(agent, request["task"])
                 if guard.limit_reached or guard.deadline_reached:

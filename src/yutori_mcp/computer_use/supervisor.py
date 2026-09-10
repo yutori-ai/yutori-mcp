@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -278,6 +278,10 @@ def _event_shape_error(event: dict[str, Any]) -> str | None:
         }
     elif event_type == "error":
         required = {"code": str, "message": str}
+    elif event_type == "frame":
+        required = {"capture_id": int, "media_type": str, "data": str}
+    elif event_type == "activity":
+        required = {"entry": dict}
     else:
         return None
     invalid = [
@@ -353,7 +357,7 @@ async def _supervise(
             event_type = event.get("type")
             if shape_error := _event_shape_error(event):
                 return protocol_failure(f"emitted malformed {event_type!r} event: {shape_error}.")
-            if event_type in {"action", "startup"}:
+            if event_type in {"action", "startup", "frame", "activity"}:
                 if not ready:
                     return protocol_failure(f"emitted {event_type} before ready.")
                 if event_type == "action":
@@ -467,6 +471,8 @@ async def run_task(
     allow_foreground_fallback: bool = False,
     allow_local_shell: bool = True,
     show_stop_button: bool = True,
+    presentation: bool = True,
+    exclude_capture_window_ids: Sequence[int] = (),
     lock: DesktopLock | None = None,
     on_event: EventCallback | None = None,
 ) -> dict[str, Any]:
@@ -488,6 +494,12 @@ async def run_task(
                 # False when the host application owns the menu bar surface (its own Stop item);
                 # the SDK's overlay hotkey stays registered either way.
                 "show_stop_button": show_stop_button,
+                # False when the host application renders the run itself (from the `frame` and
+                # `activity` events) and wants no SDK overlay, status item, or hotkey.
+                "presentation": presentation,
+                # CGWindowIDs of the host application's own panels to keep out of the model's
+                # desktop frames (foreground runs); they stay on screen and in recordings.
+                "exclude_capture_window_ids": [int(window_id) for window_id in exclude_capture_window_ids],
                 "model": MODEL,
                 "api_base_url": api_base_url,
             }
