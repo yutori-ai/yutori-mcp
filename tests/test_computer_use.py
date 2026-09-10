@@ -22,6 +22,7 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from PIL import Image
 from pydantic import ValidationError
 from yutori.navigator.macos import (
     FrontmostApp,
@@ -1508,6 +1509,33 @@ async def test_target_guarded_computer_leaves_window_scope_unchanged():
     await computer._guard_frontmost("hotkey")
 
     computer._probe_frontmost.assert_not_awaited()
+
+
+async def test_target_guarded_computer_reads_images_as_model_visible_content(tmp_path):
+    image_path = tmp_path / "example.png"
+    Image.new("RGB", (3, 2), color=(12, 34, 56)).save(image_path)
+    computer = object.__new__(TargetGuardedMacOSComputer)
+    computer.allow_local_shell = True
+    computer._bash_cwd = str(tmp_path)
+    computer._file_snapshots = {}
+
+    result = await computer.read_file("example.png")
+
+    assert result["text"] == "Loaded image example.png (3x2)"
+    assert result["image_url"].startswith("data:image/webp;base64,")
+    assert image_path in computer._file_snapshots
+
+
+async def test_target_guarded_computer_still_reads_text_with_line_numbers(tmp_path):
+    (tmp_path / "example.txt").write_text("first\nsecond\nthird\n", encoding="utf-8")
+    computer = object.__new__(TargetGuardedMacOSComputer)
+    computer.allow_local_shell = True
+    computer._bash_cwd = str(tmp_path)
+    computer._file_snapshots = {}
+
+    result = await computer.read_file("example.txt", offset=2, limit=1)
+
+    assert result == "     2\tsecond"
 
 
 async def test_smoke_reports_preflight_detail_and_fix(monkeypatch, tmp_path, capsys):
