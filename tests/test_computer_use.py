@@ -2344,6 +2344,14 @@ def test_cli_run_parser_accepts_mode_and_fallback_flags():
         parser.parse_args(["computer-use", "run", "x", "--mode", "sideways"])
 
 
+def test_exit_code_is_zero_only_for_a_completed_outcome():
+    from yutori_mcp.computer_use import cli
+
+    assert cli._exit_code({"outcome": "completed"}) == 0
+    assert cli._exit_code({"outcome": "limit"}) == 1
+    assert cli._exit_code({}) == 1
+
+
 def test_hands_off_notice_depends_on_the_mode():
     from yutori_mcp.computer_use import cli
 
