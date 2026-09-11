@@ -81,7 +81,13 @@ from yutori_mcp.computer_use.supervisor import (
     python_runner_command,
     run_task,
 )
-from yutori_mcp.schemas import COMPUTER_USE_DEFAULT_MINUTES, COMPUTER_USE_DEFAULT_MODE, ComputerUseMode, ComputerUseTaskInput
+from yutori_mcp.schemas import (
+    COMPUTER_USE_DEFAULT_MINUTES,
+    COMPUTER_USE_DEFAULT_MODE,
+    ComputerUseMode,
+    ComputerUseTaskInput,
+    computer_use_constraint_error,
+)
 
 
 @pytest.mark.parametrize("minutes", [0.9, 60.1])
@@ -2237,6 +2243,32 @@ def test_computer_use_mode_literal_matches_runtime_delivery_modes():
     from typing import get_args
 
     assert set(get_args(ComputerUseMode)) == set(DELIVERY_MODES)
+
+
+@pytest.mark.parametrize(
+    "kwargs,expected",
+    [
+        (
+            {"app": None, "start_url": "https://x", "mode": "foreground", "allow_foreground_fallback": False},
+            "start_url requires app",
+        ),
+        (
+            {"app": None, "start_url": None, "mode": "background", "allow_foreground_fallback": False},
+            "mode='background' requires app",
+        ),
+        (
+            {"app": "Notes", "start_url": None, "mode": "foreground", "allow_foreground_fallback": True},
+            "allow_foreground_fallback requires mode='background'",
+        ),
+        (
+            {"app": "Notes", "start_url": "https://x", "mode": "background", "allow_foreground_fallback": True},
+            None,
+        ),
+    ],
+)
+def test_computer_use_constraint_error_matches_both_call_sites(kwargs, expected):
+    """ComputerUseTaskInput and runner.parse_request both delegate to this one function."""
+    assert computer_use_constraint_error(**kwargs) == expected
     assert COMPUTER_USE_DEFAULT_MODE == DELIVERY_MODE_FOREGROUND
 
 
