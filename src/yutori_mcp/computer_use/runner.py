@@ -472,7 +472,7 @@ class ApiCounter:
     async def on_api_start(self, _kwargs: dict[str, Any]) -> None:
         self.calls += 1
         self._request_started_at = self._clock()
-        await self._publish(request_in_flight=True)
+        self._publish(request_in_flight=True)
 
     async def on_api_end(self, _kwargs: dict[str, Any], response: Any) -> None:
         if self._request_started_at is not None:
@@ -489,13 +489,13 @@ class ApiCounter:
         )
         self._output_tokens = _accumulate_count(self._output_tokens, output_tokens, first_response=first_response)
         self._completed_calls += 1
-        await self._publish(request_in_flight=False)
+        self._publish(request_in_flight=False)
 
-    async def clear_in_flight(self) -> None:
+    def clear_in_flight(self) -> None:
         if self._request_started_at is None:
             return
         self._request_started_at = None
-        await self._publish(request_in_flight=False)
+        self._publish(request_in_flight=False)
 
     async def flush(self) -> None:
         task = self._metrics_task
@@ -506,7 +506,7 @@ class ApiCounter:
         except Exception:  # noqa: BLE001 - status telemetry must never affect the run
             return
 
-    async def _publish(self, *, request_in_flight: bool) -> None:
+    def _publish(self, *, request_in_flight: bool) -> None:
         update = getattr(self._computer, "update_status_metrics", None)
         if update is None:
             return
@@ -782,7 +782,7 @@ async def _summarize_limit_run(
     try:
         response = await _await_summary_response(agent, completions.create(**api_kwargs), deadline)
     except BaseException:
-        await api_counter.clear_in_flight()
+        api_counter.clear_in_flight()
         raise
     finally:
         agent.timings["model_ms"] = agent.timings.get("model_ms", 0) + (
@@ -1129,7 +1129,7 @@ async def run_request(
         outcome = "failed"
         final_text = _redacted_error_text(error, api_key)
     finally:
-        await api_counter.clear_in_flight()
+        api_counter.clear_in_flight()
         await api_counter.flush()
         status = computer.presentation_status
         try:
