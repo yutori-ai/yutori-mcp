@@ -28,7 +28,7 @@ uvx yutori-mcp computer-use smoke
 ```
 
 Requirements: macOS 15+, Python 3.10+, `uvx`, a Yutori API key with computer-use access,
-`CuaDriver.app` / `cua-driver==0.23.2`, and Screen Recording plus Accessibility permissions.
+`CuaDriver.app` / `cua-driver==0.28.0`, and Screen Recording plus Accessibility permissions.
 The optional native reasoning overlay may require Xcode Command Line Tools.
 
 ## Run a Task
