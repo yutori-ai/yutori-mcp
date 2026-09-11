@@ -1511,13 +1511,20 @@ async def test_target_guarded_computer_leaves_window_scope_unchanged():
     computer._probe_frontmost.assert_not_awaited()
 
 
-async def test_target_guarded_computer_reads_images_as_model_visible_content(tmp_path):
-    image_path = tmp_path / "example.png"
-    Image.new("RGB", (3, 2), color=(12, 34, 56)).save(image_path)
+def _readable_computer(tmp_path, **overrides):
     computer = object.__new__(TargetGuardedMacOSComputer)
     computer.allow_local_shell = True
     computer._bash_cwd = str(tmp_path)
     computer._file_snapshots = {}
+    for key, value in overrides.items():
+        setattr(computer, key, value)
+    return computer
+
+
+async def test_target_guarded_computer_reads_images_as_model_visible_content(tmp_path):
+    image_path = tmp_path / "example.png"
+    Image.new("RGB", (3, 2), color=(12, 34, 56)).save(image_path)
+    computer = _readable_computer(tmp_path)
 
     result = await computer.read_file("example.png")
 
@@ -1528,10 +1535,7 @@ async def test_target_guarded_computer_reads_images_as_model_visible_content(tmp
 
 async def test_target_guarded_computer_still_reads_text_with_line_numbers(tmp_path):
     (tmp_path / "example.txt").write_text("first\nsecond\nthird\n", encoding="utf-8")
-    computer = object.__new__(TargetGuardedMacOSComputer)
-    computer.allow_local_shell = True
-    computer._bash_cwd = str(tmp_path)
-    computer._file_snapshots = {}
+    computer = _readable_computer(tmp_path)
 
     result = await computer.read_file("example.txt", offset=2, limit=1)
 
