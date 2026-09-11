@@ -41,6 +41,7 @@ from .constants import (
 )
 from .result import compact_json_line, elapsed_ms_since, redact, remaining_seconds
 from .targeting import TargetGuardedMacOSComputer as MacOSComputer
+from ..schemas import computer_use_constraint_error
 
 _FOREGROUND_OPENING = "You control the entire macOS screen. "
 _SHARED_CONTEXT = (
@@ -204,15 +205,13 @@ def parse_request(payload: Any) -> dict[str, Any]:
     task = _require_string(payload, "task")
     app = _require_optional_string(payload, "app")
     start_url = _require_optional_string(payload, "start_url")
-    if start_url is not None and app is None:
-        raise RequestError("INVALID_REQUEST", "start_url requires app.")
     mode = _require_mode(payload)
     allow_foreground_fallback = _require_bool(payload, "allow_foreground_fallback")
     allow_local_shell = _require_bool(payload, "allow_local_shell")
-    if mode == DELIVERY_MODE_BACKGROUND and app is None:
-        raise RequestError("INVALID_REQUEST", "mode 'background' requires app.")
-    if allow_foreground_fallback and mode != DELIVERY_MODE_BACKGROUND:
-        raise RequestError("INVALID_REQUEST", "allow_foreground_fallback requires mode 'background'.")
+    if error := computer_use_constraint_error(
+        app=app, start_url=start_url, mode=mode, allow_foreground_fallback=allow_foreground_fallback
+    ):
+        raise RequestError("INVALID_REQUEST", f"{error}.")
     deadline_ms = _require_positive_int(payload, "deadline_ms")
     max_steps = _require_positive_int(payload, "max_steps")
     # Optional so a protocol-v2 supervisor that predates the field keeps the SDK's default.

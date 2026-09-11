@@ -403,6 +403,30 @@ ComputerUseMode = Literal["foreground", "background"]
 COMPUTER_USE_DEFAULT_MODE: ComputerUseMode = "foreground"
 
 
+def computer_use_constraint_error(
+    *,
+    app: str | None,
+    start_url: str | None,
+    mode: str,
+    allow_foreground_fallback: bool,
+) -> str | None:
+    """The first violated cross-field rule for a computer-use task, or None.
+
+    Shared by ``ComputerUseTaskInput`` below (the MCP tool's client-facing schema) and
+    ``computer_use/runner.py``'s ``parse_request`` (the wire-protocol parser for the JSONL
+    request a validated ``ComputerUseTaskInput.model_dump()`` becomes): both enforce the same
+    three rules on the same fields, so the wording and check order can't drift between the two
+    validation layers.
+    """
+    if start_url is not None and app is None:
+        return "start_url requires app"
+    if mode == "background" and app is None:
+        return "mode='background' requires app"
+    if allow_foreground_fallback and mode != "background":
+        return "allow_foreground_fallback requires mode='background'"
+    return None
+
+
 class ComputerUseTaskInput(ToolInput):
     task: str = Field(..., description="Task to perform on the Mac desktop or in the target app's window")
     app: str | None = Field(default=None, description="Optional application to target")
@@ -444,21 +468,14 @@ class ComputerUseTaskInput(ToolInput):
     )
 
     @model_validator(mode="after")
-    def require_app_for_start_url(self) -> ComputerUseTaskInput:
-        if self.start_url is not None and self.app is None:
-            raise ValueError("start_url requires app")
-        return self
-
-    @model_validator(mode="after")
-    def require_app_for_background(self) -> ComputerUseTaskInput:
-        if self.mode == "background" and self.app is None:
-            raise ValueError("mode='background' requires app")
-        return self
-
-    @model_validator(mode="after")
-    def require_background_for_fallback(self) -> ComputerUseTaskInput:
-        if self.allow_foreground_fallback and self.mode != "background":
-            raise ValueError("allow_foreground_fallback requires mode='background'")
+    def validate_cross_field_constraints(self) -> ComputerUseTaskInput:
+        if error := computer_use_constraint_error(
+            app=self.app,
+            start_url=self.start_url,
+            mode=self.mode,
+            allow_foreground_fallback=self.allow_foreground_fallback,
+        ):
+            raise ValueError(error)
         return self
 
 
