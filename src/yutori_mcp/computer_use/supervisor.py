@@ -34,7 +34,7 @@ from .preflight import (
     child_search_path,
     find_cua_driver,
 )
-from .result import failure, redact
+from .result import compact_json_line, failure, redact
 from .result import remaining_seconds as _remaining_seconds
 from .result import terminal_result
 
@@ -330,7 +330,7 @@ async def _supervise(
         return failure(f"Computer-use runner {detail}", actions=actions, delivery_mode=mode)
 
     try:
-        process.stdin.write(json.dumps(request, separators=(",", ":")).encode() + b"\n")
+        process.stdin.write(compact_json_line(request).encode() + b"\n")
         await process.stdin.drain()
         process.stdin.close()
         await process.stdin.wait_closed()
