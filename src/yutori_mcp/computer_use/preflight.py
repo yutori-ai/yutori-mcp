@@ -31,7 +31,7 @@ from .constants import (
     SDK_VERSION,
     TOOL_SET,
 )
-from .result import structured_content
+from .result import compact_json_line, structured_content
 
 DRIVER_APP = Path("/Applications/CuaDriver.app")
 DRIVER_PATHS = (
@@ -495,7 +495,7 @@ def _embedded_permissions(host: EmbeddedDriverHost) -> dict[str, Any]:
     )
     try:
         assert process.stdin is not None and process.stdout is not None
-        process.stdin.write("".join(json.dumps(message, separators=(",", ":")) + "\n" for message in messages))
+        process.stdin.write("".join(compact_json_line(message) + "\n" for message in messages))
         process.stdin.flush()
         result = _read_rpc_result(process.stdout, request_id=2, timeout=_EMBEDDED_RPC_TIMEOUT_SECONDS)
     finally:

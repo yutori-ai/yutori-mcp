@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import sys
@@ -16,6 +17,21 @@ REDACTED = "[REDACTED]"
 def format_runtime_version(paint: "Terminal") -> str:
     """The exact MCP and SDK packages executing a computer-use run."""
     return f"yutori-mcp {MCP_VERSION}  {paint.glyph('separator')}  yutori {SDK_VERSION}"
+
+
+def compact_json_line(payload: dict[str, Any]) -> str:
+    """Serialize ``payload`` as one compact JSON line, with no trailing newline.
+
+    Single source of truth for the ``separators=(",", ":")`` line-oriented encoding
+    shared by every JSONL protocol boundary in this package: the runner's stdout
+    events (``runner.Emitter.emit``), the supervisor's request write to the runner's
+    stdin (``supervisor._supervise``), the embedded-driver-host RPC messages
+    (``preflight._embedded_permissions``), and the CLI's own ``--json`` output lines
+    (``cli._json_line``). Each independently reconstructed the same ``json.dumps``
+    call before this existed, so the separators argument that keeps every writer
+    compact and newline-safe could drift out of sync across the four call sites.
+    """
+    return json.dumps(payload, separators=(",", ":"))
 
 
 def redact(text: str, secret: str) -> str:

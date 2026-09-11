@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
-import json
 import os
 import subprocess
 import tempfile
@@ -41,6 +40,7 @@ from .preflight import (
 )
 from .result import (
     Terminal,
+    compact_json_line,
     describe_delivery_surface,
     elapsed_ms_since,
     format_duration,
@@ -55,7 +55,7 @@ from .supervisor import run_task_with_resolved_credentials, stop_active_run
 
 def _json_line(payload: dict[str, Any]) -> None:
     """One machine-readable stdout line; the `--json` surface a host application consumes."""
-    print(json.dumps(payload, separators=(",", ":")), flush=True)
+    print(compact_json_line(payload), flush=True)
 
 
 def _doctor(*, json_output: bool = False) -> int:

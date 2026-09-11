@@ -39,7 +39,7 @@ from .constants import (
     SDK_VERSION,
     TOOL_SET,
 )
-from .result import elapsed_ms_since, redact, remaining_seconds
+from .result import compact_json_line, elapsed_ms_since, redact, remaining_seconds
 from .targeting import TargetGuardedMacOSComputer as MacOSComputer
 
 _FOREGROUND_OPENING = "You control the entire macOS screen. "
@@ -237,7 +237,7 @@ class Emitter:
         self._stream = stream
 
     def emit(self, event: dict[str, Any]) -> None:
-        self._stream.write(json.dumps(event, separators=(",", ":")) + "\n")
+        self._stream.write(compact_json_line(event) + "\n")
         self._stream.flush()
 
 
