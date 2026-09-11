@@ -19,6 +19,7 @@ from yutori import AsyncYutoriClient
 from yutori.navigator import N2ComputerAgent, flatten_batch_member
 from yutori.navigator.macos import (
     MacOSPresentationStatus,
+    MacOSStatusMetrics,
     MacOSTargetCrashedError,
     CancellationLatch,
     ShellPresentationEvent,
@@ -453,11 +454,85 @@ class ActionReporter:
 
 
 class ApiCounter:
-    def __init__(self) -> None:
+    def __init__(self, computer: MacOSComputer | None = None, *, clock: Callable[[], float] = time.monotonic) -> None:
         self.calls = 0
+        self._computer = computer
+        self._clock = clock
+        self._request_started_at: float | None = None
+        self._input_tokens: int | None = None
+        self._cached_input_tokens: int | None = None
+        self._output_tokens: int | None = None
+        self._latest_rtt_ms: float | None = None
+        self._rtt_samples_ms: list[float] = []
 
     async def on_api_start(self, _kwargs: dict[str, Any]) -> None:
         self.calls += 1
+        self._request_started_at = self._clock()
+        await self._publish(request_in_flight=True)
+
+    async def on_api_end(self, _kwargs: dict[str, Any], response: Any) -> None:
+        if self._request_started_at is not None:
+            self._latest_rtt_ms = max(0, (self._clock() - self._request_started_at) * 1000)
+            self._rtt_samples_ms.append(self._latest_rtt_ms)
+        self._request_started_at = None
+        input_tokens, cached_input_tokens, output_tokens = _usage_counts(response)
+        self._input_tokens = _add_optional_count(self._input_tokens, input_tokens)
+        self._cached_input_tokens = _add_optional_count(self._cached_input_tokens, cached_input_tokens)
+        self._output_tokens = _add_optional_count(self._output_tokens, output_tokens)
+        await self._publish(request_in_flight=False)
+
+    async def clear_in_flight(self) -> None:
+        if self._request_started_at is None:
+            return
+        self._request_started_at = None
+        await self._publish(request_in_flight=False)
+
+    async def _publish(self, *, request_in_flight: bool) -> None:
+        update = getattr(self._computer, "update_status_metrics", None)
+        if update is None:
+            return
+        try:
+            metrics = MacOSStatusMetrics(
+                input_tokens=self._input_tokens,
+                cached_input_tokens=self._cached_input_tokens,
+                output_tokens=self._output_tokens,
+                latest_rtt_ms=self._latest_rtt_ms,
+                rtt_samples_ms=tuple(self._rtt_samples_ms),
+                request_in_flight=request_in_flight,
+            )
+            await update(metrics)
+        except Exception:  # noqa: BLE001 - status telemetry must never affect the run
+            return
+
+
+def _nonnegative_count(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def _first_count(values: dict[str, Any], names: tuple[str, ...]) -> int | None:
+    for name in names:
+        if name in values:
+            return _nonnegative_count(values[name])
+    return None
+
+
+def _usage_counts(response: Any) -> tuple[int | None, int | None, int | None]:
+    response = _as_dict(response)
+    usage = _as_dict(response.get("usage")) if response is not None else None
+    if usage is None:
+        return None, None, None
+    input_tokens = _first_count(usage, ("input_tokens", "prompt_tokens"))
+    output_tokens = _first_count(usage, ("output_tokens", "completion_tokens"))
+    cached_input_tokens = _first_count(usage, ("cached_input_tokens", "cache_read_input_tokens"))
+    if cached_input_tokens is None:
+        details = _as_dict(usage.get("input_tokens_details")) or _as_dict(usage.get("prompt_tokens_details"))
+        if details is not None:
+            cached_input_tokens = _first_count(details, ("cached_tokens",))
+    return input_tokens, cached_input_tokens, output_tokens
+
+
+def _add_optional_count(total: int | None, value: int | None) -> int | None:
+    return total if value is None else (total or 0) + value
 
 
 class StartupReporter:
@@ -667,10 +742,14 @@ async def _summarize_limit_run(
     model_started_at = time.monotonic()
     try:
         response = await _await_summary_response(agent, completions.create(**api_kwargs), deadline)
+    except BaseException:
+        await api_counter.clear_in_flight()
+        raise
     finally:
         agent.timings["model_ms"] = agent.timings.get("model_ms", 0) + (
             time.monotonic() - model_started_at
         ) * 1000
+    await api_counter.on_api_end(api_kwargs, response)
     await chat.on_api_end(api_kwargs, response)
     return _completion_text(response)
 
@@ -937,7 +1016,6 @@ async def run_request(
     deadline = run_start + remaining_seconds
     guard = RunGuard(request["max_steps"], deadline)
     chat = ChatTracker()
-    api_counter = ApiCounter()
     startup = StartupReporter(emitter, run_start)
     computer = MacOSComputer(
         **_computer_kwargs(
@@ -947,6 +1025,7 @@ async def run_request(
             api_key=api_key,
         )
     )
+    api_counter = ApiCounter(computer)
     reporter = ActionReporter(
         emitter,
         run_start,
@@ -1011,6 +1090,7 @@ async def run_request(
         outcome = "failed"
         final_text = _redacted_error_text(error, api_key)
     finally:
+        await api_counter.clear_in_flight()
         status = computer.presentation_status
         try:
             await computer.aclose()
