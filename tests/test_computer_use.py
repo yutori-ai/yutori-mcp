@@ -2182,7 +2182,7 @@ async def test_api_counter_leaves_missing_usage_absent_and_clears_cancelled_requ
     reporter = runner_module.ApiCounter(computer, clock=lambda: 10.0)
 
     await reporter.on_api_start({})
-    await reporter.clear_in_flight()
+    reporter.clear_in_flight()
     await reporter.flush()
 
     assert reporter.calls == 1
