@@ -44,6 +44,8 @@ from .result import compact_json_line, elapsed_ms_since, redact, remaining_secon
 from .targeting import TargetGuardedMacOSComputer as MacOSComputer
 from ..schemas import computer_use_constraint_error
 
+# Flush at most the queued request-start and settle RPCs (250 ms each) plus scheduling slack.
+_STATUS_METRICS_FLUSH_TIMEOUT_SECONDS = 0.6
 _FOREGROUND_OPENING = "You control the entire macOS screen. "
 _SHARED_CONTEXT = (
     "This is macOS, not Linux: do not use "
@@ -464,6 +466,8 @@ class ApiCounter:
         self._output_tokens: int | None = None
         self._latest_rtt_ms: float | None = None
         self._rtt_samples_ms: list[float] = []
+        self._completed_calls = 0
+        self._metrics_task: asyncio.Task[None] | None = None
 
     async def on_api_start(self, _kwargs: dict[str, Any]) -> None:
         self.calls += 1
@@ -476,9 +480,15 @@ class ApiCounter:
             self._rtt_samples_ms.append(self._latest_rtt_ms)
         self._request_started_at = None
         input_tokens, cached_input_tokens, output_tokens = _usage_counts(response)
-        self._input_tokens = _add_optional_count(self._input_tokens, input_tokens)
-        self._cached_input_tokens = _add_optional_count(self._cached_input_tokens, cached_input_tokens)
-        self._output_tokens = _add_optional_count(self._output_tokens, output_tokens)
+        first_response = self._completed_calls == 0
+        self._input_tokens = _accumulate_count(self._input_tokens, input_tokens, first_response=first_response)
+        self._cached_input_tokens = _accumulate_count(
+            self._cached_input_tokens,
+            cached_input_tokens,
+            first_response=first_response,
+        )
+        self._output_tokens = _accumulate_count(self._output_tokens, output_tokens, first_response=first_response)
+        self._completed_calls += 1
         await self._publish(request_in_flight=False)
 
     async def clear_in_flight(self) -> None:
@@ -486,6 +496,15 @@ class ApiCounter:
             return
         self._request_started_at = None
         await self._publish(request_in_flight=False)
+
+    async def flush(self) -> None:
+        task = self._metrics_task
+        if task is None:
+            return
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=_STATUS_METRICS_FLUSH_TIMEOUT_SECONDS)
+        except Exception:  # noqa: BLE001 - status telemetry must never affect the run
+            return
 
     async def _publish(self, *, request_in_flight: bool) -> None:
         update = getattr(self._computer, "update_status_metrics", None)
@@ -500,9 +519,23 @@ class ApiCounter:
                 rtt_samples_ms=tuple(self._rtt_samples_ms),
                 request_in_flight=request_in_flight,
             )
-            await update(metrics)
         except Exception:  # noqa: BLE001 - status telemetry must never affect the run
             return
+
+        previous = self._metrics_task
+
+        async def deliver() -> None:
+            if previous is not None:
+                try:
+                    await previous
+                except Exception:  # noqa: BLE001 - a prior cosmetic update may be dropped
+                    pass
+            try:
+                await update(metrics)
+            except Exception:  # noqa: BLE001 - status telemetry must never affect the run
+                pass
+
+        self._metrics_task = asyncio.create_task(deliver())
 
 
 def _nonnegative_count(value: Any) -> int | None:
@@ -528,11 +561,17 @@ def _usage_counts(response: Any) -> tuple[int | None, int | None, int | None]:
         details = _as_dict(usage.get("input_tokens_details")) or _as_dict(usage.get("prompt_tokens_details"))
         if details is not None:
             cached_input_tokens = _first_count(details, ("cached_tokens",))
+    if input_tokens is not None and cached_input_tokens is not None and cached_input_tokens > input_tokens:
+        cached_input_tokens = None
     return input_tokens, cached_input_tokens, output_tokens
 
 
-def _add_optional_count(total: int | None, value: int | None) -> int | None:
-    return total if value is None else (total or 0) + value
+def _accumulate_count(total: int | None, value: int | None, *, first_response: bool) -> int | None:
+    if value is None:
+        return None
+    if first_response:
+        return value
+    return None if total is None else total + value
 
 
 class StartupReporter:
@@ -1091,6 +1130,7 @@ async def run_request(
         final_text = _redacted_error_text(error, api_key)
     finally:
         await api_counter.clear_in_flight()
+        await api_counter.flush()
         status = computer.presentation_status
         try:
             await computer.aclose()

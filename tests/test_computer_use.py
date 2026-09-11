@@ -2157,6 +2157,7 @@ async def test_api_counter_publishes_cumulative_usage_and_request_rtt():
         {},
         {"usage": {"input_tokens": 50, "cache_read_input_tokens": 20, "output_tokens": 10}},
     )
+    await reporter.flush()
 
     assert reporter.calls == 2
     assert [(item.input_tokens, item.cached_input_tokens, item.output_tokens) for item in updates] == [
@@ -2182,6 +2183,7 @@ async def test_api_counter_leaves_missing_usage_absent_and_clears_cancelled_requ
 
     await reporter.on_api_start({})
     await reporter.clear_in_flight()
+    await reporter.flush()
 
     assert reporter.calls == 1
     assert len(updates) == 2
@@ -2189,6 +2191,40 @@ async def test_api_counter_leaves_missing_usage_absent_and_clears_cancelled_requ
     assert updates[-1].input_tokens is None
     assert updates[-1].latest_rtt_ms is None
     assert updates[-1].rtt_samples_ms == ()
+
+
+async def test_api_counter_marks_totals_unknown_after_missing_usage():
+    updates = []
+    computer = SimpleNamespace(update_status_metrics=lambda metrics: _record_async(updates, metrics))
+    clock = iter((10.0, 10.1, 11.0, 11.2, 12.0, 12.3)).__next__
+    reporter = runner_module.ApiCounter(computer, clock=clock)
+
+    await reporter.on_api_start({})
+    await reporter.on_api_end({}, {"usage": {"input_tokens": 10, "cached_input_tokens": 3, "output_tokens": 2}})
+    await reporter.on_api_start({})
+    await reporter.on_api_end({}, {"choices": []})
+    await reporter.on_api_start({})
+    await reporter.on_api_end({}, {"usage": {"input_tokens": 5, "cached_input_tokens": 2, "output_tokens": 1}})
+    await reporter.flush()
+
+    assert updates[-1].request_in_flight is False
+    assert updates[-1].input_tokens is None
+    assert updates[-1].cached_input_tokens is None
+    assert updates[-1].output_tokens is None
+
+
+async def test_api_counter_drops_cache_count_that_exceeds_input_count():
+    updates = []
+    computer = SimpleNamespace(update_status_metrics=lambda metrics: _record_async(updates, metrics))
+    reporter = runner_module.ApiCounter(computer, clock=iter((10.0, 10.1)).__next__)
+
+    await reporter.on_api_start({})
+    await reporter.on_api_end({}, {"usage": {"input_tokens": 3, "cached_input_tokens": 4}})
+    await reporter.flush()
+
+    assert updates[-1].request_in_flight is False
+    assert updates[-1].input_tokens == 3
+    assert updates[-1].cached_input_tokens is None
 
 
 async def test_run_request_carries_the_chat_id_on_actions_and_the_result(monkeypatch):
