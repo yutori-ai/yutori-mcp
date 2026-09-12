@@ -399,6 +399,8 @@ Write the prompt so the run has a finish line:
 | `--max-steps N` | `60` | Model turns before stopping; one turn can take several actions |
 | `--mode background` | `foreground` | Drives only `--app`'s window, without taking focus. Requires `--app` |
 | `--allow-foreground-fallback` | off | Background only: retry a missed action with the window briefly fronted |
+| `--json` | off | Emit JSON lines instead of terminal text, for a host application that renders progress itself |
+| `--hide-stop-item` | off | Do not show the SDK's menu bar Stop item; the host application provides its own (the hotkey stays active) |
 | `--env dev` | production | Runs against `platform.dev.yutori.com`. Goes before the subcommand: `yutori-mcp --env dev computer-use run "…"` |
 
 **Foreground** (the default) drives the whole visible desktop — don't touch the Mac while it
