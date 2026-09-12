@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.5.29"
+version = "0.5.30"
 description = "MCP server and workflow skills for building agents with Yutori"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,11 +30,11 @@ dependencies = [
     # breaks the install as soon as 2.x resolves.
     "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
-    # SDK 0.9.26 streams a running shell command's output into that card instead
-    # of holding a spinner for the command's whole duration, and re-bundles
-    # navigator overlay runtime 0.5.1, which grows the card's output block from
-    # two rendered rows to four.
-    "yutori==0.9.26",
+    # SDK 0.9.27 rewrites the three key names n2 spells differently from
+    # cua-driver at the RPC boundary: pageup/pagedown no longer abort a batch
+    # with "Unknown key name", and delete deletes forward instead of erasing
+    # left.
+    "yutori==0.9.27",
 ]
 
 [project.optional-dependencies]
