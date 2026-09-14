@@ -2171,6 +2171,33 @@ async def test_api_counter_publishes_cumulative_usage_and_request_rtt():
     assert updates[-1].rtt_samples_ms == pytest.approx((250, 400))
 
 
+def test_usage_counts_reads_production_cached_token_usage():
+    assert runner_module._usage_counts(
+        {
+            "usage": {
+                "input_tokens": 100,
+                "billed_cached_input_tokens": 30,
+                "output_tokens": 20,
+            }
+        }
+    ) == (100, 30, 20)
+
+
+def test_usage_counts_skips_invalid_preferred_alias():
+    assert runner_module._usage_counts(
+        {
+            "usage": {
+                "input_tokens": None,
+                "prompt_tokens": 100,
+                "billed_cached_input_tokens": None,
+                "cached_input_tokens": 30,
+                "output_tokens": None,
+                "completion_tokens": 20,
+            }
+        }
+    ) == (100, 30, 20)
+
+
 async def _record_async(values: list[Any], value: Any) -> bool:
     values.append(value)
     return True

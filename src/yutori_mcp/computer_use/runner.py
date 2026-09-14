@@ -11,7 +11,7 @@ import signal
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from importlib import metadata
 from typing import Any, TextIO
 
@@ -19,12 +19,25 @@ from yutori import AsyncYutoriClient
 from yutori.navigator import N2ComputerAgent, flatten_batch_member
 from yutori.navigator.macos import (
     MacOSPresentationStatus,
-    MacOSStatusMetrics,
     MacOSTargetCrashedError,
     CancellationLatch,
     ShellPresentationEvent,
     sanitize_command_preview,
 )
+
+try:
+    from yutori.navigator.macos import MacOSStatusMetrics
+except ImportError:
+    # SDK 0.9.27 predates status metrics; its MacOSComputer also lacks the update method,
+    # so this shape is used only by tests and keeps all other computer-use commands importable.
+    @dataclass(frozen=True)
+    class MacOSStatusMetrics:
+        input_tokens: int | None = None
+        cached_input_tokens: int | None = None
+        output_tokens: int | None = None
+        latest_rtt_ms: float | None = None
+        rtt_samples_ms: tuple[float, ...] = ()
+        request_in_flight: bool = False
 
 from .app import prepare_app
 from .constants import (
@@ -545,7 +558,9 @@ def _nonnegative_count(value: Any) -> int | None:
 def _first_count(values: dict[str, Any], names: tuple[str, ...]) -> int | None:
     for name in names:
         if name in values:
-            return _nonnegative_count(values[name])
+            count = _nonnegative_count(values[name])
+            if count is not None:
+                return count
     return None
 
 
@@ -556,7 +571,10 @@ def _usage_counts(response: Any) -> tuple[int | None, int | None, int | None]:
         return None, None, None
     input_tokens = _first_count(usage, ("input_tokens", "prompt_tokens"))
     output_tokens = _first_count(usage, ("output_tokens", "completion_tokens"))
-    cached_input_tokens = _first_count(usage, ("cached_input_tokens", "cache_read_input_tokens"))
+    cached_input_tokens = _first_count(
+        usage,
+        ("billed_cached_input_tokens", "cached_input_tokens", "cache_read_input_tokens"),
+    )
     if cached_input_tokens is None:
         details = _as_dict(usage.get("input_tokens_details")) or _as_dict(usage.get("prompt_tokens_details"))
         if details is not None:
