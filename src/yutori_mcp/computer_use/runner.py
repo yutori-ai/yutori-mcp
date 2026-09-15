@@ -182,13 +182,13 @@ def _require_optional_string(request: dict[str, Any], field: str) -> str | None:
     )
 
 
+def _is_positive_int(value: Any) -> bool:
+    """True for a real positive int. `bool` is an int subclass, so it is excluded."""
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
 def _require_positive_int(request: dict[str, Any], field: str) -> int:
-    return _require_field(
-        request,
-        field,
-        valid=lambda v: isinstance(v, int) and not isinstance(v, bool) and v > 0,
-        expected="a positive integer",
-    )
+    return _require_field(request, field, valid=_is_positive_int, expected="a positive integer")
 
 
 def _require_mode(request: dict[str, Any]) -> str:
@@ -205,8 +205,7 @@ def _require_window_ids(request: dict[str, Any], field: str) -> list[int]:
     return _require_field(
         request,
         field,
-        valid=lambda v: isinstance(v, list)
-        and all(isinstance(item, int) and not isinstance(item, bool) and item > 0 for item in v),
+        valid=lambda v: isinstance(v, list) and all(_is_positive_int(item) for item in v),
         expected="a list of positive integer window ids",
     )
 
