@@ -26,6 +26,7 @@ from .constants import (
     DELIVERY_MODES,
     DRIVER_INSTALLER_SHA256,
     DRIVER_VERSION,
+    HOST_ONLY_EVENT_TYPES,
 )
 from .lock import ComputerUseBusyError, DesktopLock
 from .preflight import (
@@ -262,7 +263,7 @@ def _event_printer(
     started_at = clock() if started_at is None else started_at
 
     async def print_event(event: dict) -> None:
-        if event.get("type") in _HOST_ONLY_EVENT_TYPES:
+        if event.get("type") in HOST_ONLY_EVENT_TYPES:
             return
         if event.get("type") == "ready":
             _print_milestone(paint, "runner process ready", started_at, clock=clock)
@@ -277,11 +278,6 @@ def _event_printer(
         print("\n".join(format_terminal_action(event, paint)), flush=True)
 
     return print_event
-
-
-# Streamed for a host application's own rendering (`--json`); the terminal printer and the
-# MCP progress reporter have nothing to show for them.
-_HOST_ONLY_EVENT_TYPES = frozenset({"frame", "activity"})
 
 
 def _json_event_printer():
