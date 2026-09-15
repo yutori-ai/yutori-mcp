@@ -1,1 +1,531 @@
-FILE_CONTENT_FROM_LOCAL_PATH
+# Yutori MCP
+
+MCP tools and workflow skills for building agents that operate computers as well as browse, research, and monitor the web with [Yutori](https://yutori.com/api).
+
+You can use it with Claude Code, Codex, Cursor, VS Code, ChatGPT, OpenClaw, and other MCP hosts.
+
+## Features
+
+**Capabilities:**
+- **Computer use** — Operate apps on your Mac (macOS 15+)
+- **iPhone Mirroring (experimental)** — Experimentally control a nearby iPhone through Apple's iPhone Mirroring app
+- **Browsing** — Automate websites with an AI navigator
+- **Research** — Run one-time deep web research tasks
+- **Scouting** — Monitor the web continuously for anything you care about at a desired frequency
+
+**Workflow skills** (for clients that support slash commands):
+- [`/yutori-computer-use`](skills/06-computer-use/SKILL.md) — Local Mac desktop automation
+- [`/yutori-iphone-mirroring`](skills/07-iphone-mirroring/SKILL.md) — Experimental control of a nearby iPhone through Apple's iPhone Mirroring app
+- [`/yutori-browse`](skills/03-browse/SKILL.md) — Browser automation
+- [`/yutori-research`](skills/02-research/SKILL.md) — Deep web research (async, 5–10 min)
+- [`/yutori-scout`](skills/01-scout/SKILL.md) — Set up continuous web monitoring
+- [`/yutori-competitor-watch`](skills/04-competitor-watch/SKILL.md) — Competitor monitoring template
+- [`/yutori-api-monitor`](skills/05-api-monitor/SKILL.md) — API/changelog monitoring template
+
+## Installation
+
+<details>
+<summary>Requirements</summary>
+
+If you don't already have `uv` installed, install it (it includes `uvx`):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Or with Homebrew:
+
+```bash
+brew install uv
+```
+
+Python 3.10 or higher is required (`uv` manages this automatically for most installs).
+
+For the quickstart below, Node.js is also required (for `npx`).
+</details>
+
+### AI agent install (recommended)
+
+Paste this into Claude Code, Codex, Cursor, Windsurf, or another coding agent:
+
+```text
+Use https://yutori.com/api/llms.txt and set up Yutori for me.
+```
+
+### Manual quick install
+
+![MCP server installation](assets/mcp-server-install.gif)
+
+1. Run in terminal:
+
+    ```bash
+    uvx yutori-mcp login
+    ```
+    This will open Yutori Platform in your browser and save your API key locally.
+
+    <details>
+    <summary>Or, manually add your API key</summary>
+
+    Go to (https://platform.yutori.com) and add your key to the config file:
+    ```bash
+    mkdir -p ~/.yutori
+    cat > ~/.yutori/config.json << 'EOF'
+    {"api_key": "yt-your-api-key"}
+    EOF
+    ```
+    </details>
+
+
+
+
+2. Install MCP using [add-mcp](https://neon.com/blog/add-mcp) (requires Node.js):
+   ```
+   npx -y add-mcp -n yutori "uvx yutori-mcp"
+   ```
+
+    Pick the clients you want to configure.
+
+3. Install workflow skills using [skills.sh](https://skills.sh) (requires Node.js):
+   ```
+   npx skills add yutori-ai/yutori-mcp -g
+   ```
+
+    Adds slash-command shortcuts like `/yutori-scout`, `/yutori-research`, and more.
+
+    `-g` installs them at user scope. Omit `-g` if you want a project-local install instead.
+
+   <details>
+   <summary>To list or remove skills later:</summary>
+
+   ```bash
+   npx skills ls -g
+   npx skills remove -g yutori-login
+   ```
+   </details>
+
+4. Restart the tool you are using.
+
+
+### Manual per-client install
+
+<details>
+<summary>Claude Code</summary>
+
+1. **Plugin (Recommended)** - Includes MCP tools + workflow skills
+
+   Type these commands in Claude Code's input (not in a terminal):
+   ```
+   /plugin marketplace add yutori-ai/yutori-mcp
+   /plugin install yutori@yutori-plugins
+   ```
+
+   This installs both the MCP tools and workflow skills:
+
+   | Skill | Description |
+   |-------|-------------|
+   | `/yutori-computer-use` | Local Mac desktop automation |
+   | `/yutori-iphone-mirroring` | Experimental control of a nearby iPhone through Apple's iPhone Mirroring app |
+   | `/yutori-browse` | Browser automation tasks |
+   | `/yutori-research` | Deep web research workflow (async, 5-10 min) |
+   | `/yutori-scout` | Set up continuous web monitoring with comprehensive queries |
+   | `/yutori-competitor-watch` | Quick competitor monitoring template |
+   | `/yutori-api-monitor` | API/changelog monitoring template |
+
+   > **Already have the MCP server installed?** Remove it first to avoid duplicate configurations:
+   > ```bash
+   > claude mcp remove yutori -s user   # if installed at user scope
+   > claude mcp remove yutori -s local  # if installed at local/project scope
+   > ```
+
+   To uninstall the plugin later:
+   ```
+   /plugin uninstall yutori@yutori-plugins -s user
+   ```
+
+2. **MCP Only** (if you prefer not to use the plugin)
+
+   ```bash
+   claude mcp add --scope user yutori -- uvx yutori-mcp
+   ```
+
+   The server reads your API key from `~/.yutori/config.json` (set up via `uvx yutori-mcp login`).
+</details>
+
+<details>
+<summary>Claude Desktop</summary>
+
+Add to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "yutori": {
+      "command": "uvx",
+      "args": ["yutori-mcp"]
+    }
+  }
+}
+```
+
+The server reads your API key from `~/.yutori/config.json`.
+
+For setup details, see the [Claude Desktop MCP install guide](https://modelcontextprotocol.io/docs/develop/connect-local-servers).
+</details>
+
+<details>
+<summary>Cursor</summary>
+
+**Click the button to install:**
+
+[<img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Install in Cursor">](https://cursor.com/en/install-mcp?name=Yutori&config=eyJjb21tYW5kIjoidXZ4IHl1dG9yaS1tY3AifQ%3D%3D)
+
+**Or install manually:**
+
+Go to Cursor Settings → MCP → Add new MCP Server, then add:
+
+```json
+{
+  "mcpServers": {
+    "yutori": {
+      "command": "uvx",
+      "args": ["yutori-mcp"]
+    }
+  }
+}
+```
+
+The server reads your API key from `~/.yutori/config.json`.
+
+See the [Cursor MCP guide](https://cursor.com/docs/context/mcp) for setup details.
+</details>
+
+<details>
+<summary>VS Code</summary>
+
+**Click the button to install:**
+
+[<img src="https://img.shields.io/badge/VS_Code-VS_Code?style=flat-square&label=Install%20Server&color=0098FF" alt="Install in VS Code">](https://insiders.vscode.dev/redirect?url=vscode%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522yutori%2522%252C%2522command%2522%253A%2522uvx%2522%252C%2522args%2522%253A%255B%2522yutori-mcp%2522%255D%257D) [<img alt="Install in VS Code Insiders" src="https://img.shields.io/badge/VS_Code_Insiders-VS_Code_Insiders?style=flat-square&label=Install%20Server&color=24bfa5">](https://insiders.vscode.dev/redirect?url=vscode-insiders%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522yutori%2522%252C%2522command%2522%253A%2522uvx%2522%252C%2522args%2522%253A%255B%2522yutori-mcp%2522%255D%257D)
+
+**Or install manually:**
+
+```bash
+code --add-mcp '{"name":"yutori","command":"uvx","args":["yutori-mcp"]}'
+```
+
+The server reads your API key from `~/.yutori/config.json`.
+</details>
+
+<details>
+<summary>ChatGPT</summary>
+
+Open ChatGPT Desktop and go to Settings -> Connectors -> MCP Servers -> Add server.
+
+```json
+{
+  "mcpServers": {
+    "yutori": {
+      "command": "uvx",
+      "args": ["yutori-mcp"]
+    }
+  }
+}
+```
+
+The server reads your API key from `~/.yutori/config.json`.
+
+For setup details, see the [OpenAI MCP guide](https://platform.openai.com/docs/mcp).
+</details>
+
+<details>
+<summary>Codex</summary>
+
+1. **MCP Server:**
+
+   ```bash
+   codex mcp add yutori -- uvx yutori-mcp
+   ```
+
+   Or add to `~/.codex/config.toml`:
+
+   ```toml
+   [mcp_servers.yutori]
+   command = "uvx"
+   args = ["yutori-mcp"]
+   ```
+
+   The server reads your API key from `~/.yutori/config.json`.
+
+2. **Skills** (optional, for workflow guidance):
+
+   Install skills using `$skill-installer` inside Codex:
+
+   ```
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-computer-use
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-iphone-mirroring
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-browse
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-research
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-scout
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-competitor-watch
+   $skill-installer install https://github.com/yutori-ai/yutori-mcp/tree/main/.agents/skills/yutori-api-monitor
+   ```
+
+   Or manually copy skills to your user directory (use `-L` so symlinks are dereferenced and real files are copied):
+
+   ```bash
+   git clone https://github.com/yutori-ai/yutori-mcp /tmp/yutori-mcp
+   cp -rL /tmp/yutori-mcp/.agents/skills/* ~/.agents/skills/
+   ```
+
+   To uninstall manually copied skills, delete the matching directories from `~/.agents/skills/`. When updating this way, remove old Yutori skill directories first, since `cp -rL` will not delete renamed or removed skills.
+
+   Restart Codex after installing skills.
+
+   | Skill | Command | Description |
+   |-------|---------|-------------|
+   | Computer Use | `$yutori-computer-use` | Local Mac desktop automation |
+   | iPhone Mirroring (experimental) | `$yutori-iphone-mirroring` | Experimental control of a nearby iPhone through Apple's iPhone Mirroring app |
+   | Browse | `$yutori-browse` | Browser automation with AI navigator |
+   | Research | `$yutori-research` | Deep web research (async, 5-10 min) |
+   | Scout | `$yutori-scout` | Set up continuous web monitoring |
+   | Competitor Watch | `$yutori-competitor-watch` | Quick competitor monitoring template |
+   | API Monitor | `$yutori-api-monitor` | API/changelog monitoring template |
+
+   See the [Codex Skills docs](https://developers.openai.com/codex/skills/) for more on skills.
+</details>
+
+<details>
+<summary>OpenClaw</summary>
+
+Follow the **Quickstart** above:
+
+1. Install skills and MCP for OpenClaw (and optionally other tools) via [skills.sh](https://skills.sh):
+   ```bash
+   npx skills add yutori-ai/yutori-mcp
+   ```
+   When prompted, choose which Yutori skills to install and select **OpenClaw** as the tool.
+
+</details>
+
+<details>
+<summary>Gemini CLI</summary>
+
+Add to `~/.gemini/settings.json`. If you already have `mcp` or `mcpServers`, merge these keys into your existing config:
+
+```json
+{
+  "mcp": {
+    "allowed": ["yutori"]
+  },
+  "mcpServers": {
+    "yutori": {
+      "command": "uvx",
+      "args": ["yutori-mcp"]
+    }
+  }
+}
+```
+
+The server reads your API key from `~/.yutori/config.json`.
+
+Add `"yutori"` to `mcp.allowed` if you already list other MCPs there. For more details, see the [Gemini CLI MCP settings guide](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md#configure-the-mcp-server-in-settingsjson).
+</details>
+
+<details>
+<summary>Run with pip</summary>
+
+Install the package to run the MCP server (e.g. for custom or self-hosted setups):
+
+```bash
+pip install yutori-mcp
+```
+</details>
+
+### macOS computer use
+
+Optional, macOS 15+ only. Computer use operates the visible desktop, or a single app window in
+the background while you keep working, so it needs a local driver and system permissions on top
+of the install above:
+
+```bash
+uvx yutori-mcp computer-use setup    # installs CuaDriver.app, requests Screen Recording + Accessibility
+```
+
+`setup` finishes by running the readiness checks and reports anything still missing. Re-run
+those checks any time with `uvx yutori-mcp computer-use doctor`.
+
+#### Prompting a task from the terminal
+
+The task is one quoted positional argument — plain English, in the imperative, as if you
+were handing the Mac to someone else:
+
+```bash
+uvx yutori-mcp computer-use run "<what to do, and what to report back>"
+```
+
+Everything else is optional. The three that matter most:
+
+```bash
+# Name the app you want driven, so the run starts in the right place
+uvx yutori-mcp computer-use run "Compute 17 * 23 and report the result." --app Calculator
+
+# Start a browser task on a specific page (--start-url requires --app)
+uvx yutori-mcp computer-use run "List every person on the team page and save them to ~/Desktop/team.txt." \
+  --app Safari --start-url https://yutori.com/company
+
+# Drive one window in the background and keep working (--mode background requires --app)
+uvx yutori-mcp computer-use run "Add a note titled Standup with today's three agenda items." \
+  --app Notes --mode background
+```
+
+Write the prompt so the run has a finish line:
+
+- **Say what "done" looks like.** "…and report the list" or "…and save it to
+  `~/Desktop/team.txt`" gives the model something to stop at; "look at the team page" does not.
+- **Name the app and the starting page** with `--app` / `--start-url` instead of describing
+  them in the prompt. The runner opens them before the model's first screenshot, which saves
+  turns and avoids the model guessing at which window to use.
+- **Spell out the constraints you care about** — which account to use, which folder to write
+  to, what to do when something is ambiguous ("if the page asks to log in, stop and say so").
+- **Keep it one task.** One run holds a machine-wide lock; chain separate runs rather than
+  packing five errands into one prompt.
+- **Don't put secrets in the prompt.** Have the model use an already-signed-in app or an
+  entry in Keychain; typed text shows up (scrubbed and truncated) in the action log.
+
+| Flag | Default | What it does |
+|------|---------|--------------|
+| `--app NAME` | none | App to target; opened and readied before the first screenshot |
+| `--start-url URL` | none | Page to open in `--app` first. Requires `--app` |
+| `--minutes N` | `30` | Absolute deadline, 1–60. The run stops here regardless of progress |
+| `--max-steps N` | `60` | Model turns before stopping; one turn can take several actions |
+| `--mode background` | `foreground` | Drives only `--app`'s window, without taking focus. Requires `--app` |
+| `--allow-foreground-fallback` | off | Background only: retry a missed action with the window briefly fronted |
+| `--json` | off | Emit JSON lines instead of terminal text, for a host application that renders progress itself |
+| `--hide-stop-item` | off | Do not show the SDK's menu bar Stop item; the host application provides its own (the hotkey stays active) |
+| `--no-presentation` | off | Show none of the SDK's surfaces (overlay, menu bar item, activity window, hotkey); the host application renders the run itself from the `--json` `frame` and `activity` events |
+| `--exclude-capture-window WINDOW_ID` | none | CGWindowID of a host application window to keep out of the model's desktop frames (foreground runs); it stays on screen and in recordings. Repeatable |
+| `--env dev` | production | Runs against `platform.dev.yutori.com`. Goes before the subcommand: `yutori-mcp --env dev computer-use run "…"` |
+
+**Foreground** (the default) drives the whole visible desktop — don't touch the Mac while it
+runs. **Background** drives one app's window and captures only that window, so you can keep
+working; leave that window alone. Some apps accept background clicks but not typed keys
+(Calculator, for one), and the run reports the refusal rather than typing blind — add
+`--allow-foreground-fallback` for typing-heavy background tasks.
+
+During a foreground run, the overlay (cursor, click pulses, shell rail, activity window) stays
+visible in screen recordings, screen shares, and VNC by default — only the model's own frames
+exclude it. Set `YUTORI_RECORDABLE_OVERLAY=0` to make the overlay leave screen capture
+altogether instead, hidden from recorders around every capture as before.
+
+`uvx yutori-mcp computer-use stop` ends the active run from another terminal (background runs
+have no on-screen Stop button). `uvx yutori-mcp computer-use smoke` is an end-to-end check: it
+types into Calculator to confirm the permissions took effect, then has the agent compute 9 * 9.
+
+While a task runs, `run` prints each action as the agent takes it — including the individual
+clicks, keystrokes, and scrolls inside each `computer_batch` — and closes with the model's
+answer in a labeled `FINAL OUTPUT` block. Before the first model request it also prints elapsed
+timers for preflight, runner startup, API-client setup, the computer session, and target-app
+preparation. Output is colorized when stdout is a terminal; set `NO_COLOR=1` to turn that off,
+or `FORCE_COLOR=1` to keep it through a pipe.
+
+The harness in this repository is minimal: one task at a time (a machine-wide lock), either on
+the visible desktop or targeting one app window in the background, with no multiplexing. For
+scalable sandbox runs, see [n2 on Daytona](https://docs.yutori.com/reference/n2-daytona).
+
+#### Input delivery probe
+
+This repository includes a small native macOS app that records exactly what AppKit receives from
+the local driver. It shows raw key codes and modifiers, interpreted commands, inserted text,
+pointer events, the current first responder, and whether the app and target window were active at
+the moment of delivery. Its JSON Lines log makes the app-side evidence easy to compare with the
+runner's delivery route, effect, refusal, and foreground-escalation telemetry.
+
+Build and open the app for manual testing:
+
+```bash
+./scripts/run-input-probe.sh
+```
+
+The launcher prints the session log under `.context/input-probe/`. The probe needs no permissions
+of its own because it observes only events delivered to its process; CuaDriver still needs Screen
+Recording and Accessibility as described above.
+
+For an exact, model-independent mapping test, quit any existing copy of Yutori Input Probe and run:
+
+```bash
+./scripts/build-input-probe.sh
+uv run python scripts/run-input-probe.py --mode both
+```
+
+The deterministic runner exercises ASCII and Unicode typing, command/control/option/shift aliases,
+navigation keys, window-relative clicks, and modified-click refusal. It writes `driver-report.json`
+beside the app log and exits nonzero when observed AppKit behavior does not match the expected
+delivery. `--mode background` avoids foreground control; `--allow-foreground-fallback` explicitly
+tests brief foreground escalation, and `--keep-open` leaves the probe visible afterward.
+
+Foreground mode takes over the visible desktop during its part of the test. Do not interact with
+the Mac until the command finishes. The runner aborts instead of sending input if the probe loses
+foreground ownership. Background mode leaves the current app focused, but leave the probe window
+alone while it runs.
+
+### iPhone Mirroring (experimental)
+
+> **This capability is purely experimental.** It is intended for evaluation and low-risk
+> testing only. Background typing, scrolling, app switching, and reconnection may fail; do not
+> rely on it for production workflows or sensitive tasks.
+
+On a Mac with Apple's iPhone Mirroring already paired, the same computer-use tool can operate
+the mirrored phone. Install the workflow skills and invoke `/yutori-iphone-mirroring` (or
+`$yutori-iphone-mirroring`) with the iPhone task. The skill scopes screenshots to the iPhone
+Mirroring window, uses iPhone navigation shortcuts, and applies phone-specific privacy guidance.
+
+The iPhone must stay nearby and locked. Mirrored Home screens, widgets, notifications, and app
+content are visible to the model during the run, so close sensitive content first. This is a
+local Mac-to-iPhone bridge, not remote or standalone iPhone automation. See the initial
+[benchmark results](benchmarks/iphone-mirroring/2026-09-04.md).
+
+## Tools
+
+See [TOOLS.md](TOOLS.md) for the full tool reference — computer use, Browsing, Research, and Scout tools with parameters, examples, and response formats.
+
+## Development
+
+### Setup
+
+```bash
+git clone https://github.com/yutori-ai/yutori-mcp
+cd yutori-mcp
+pip install -e ".[dev]"
+```
+
+### Testing
+
+```bash
+pytest
+```
+
+### Running locally
+
+```bash
+yutori-mcp login    # authenticate (one-time)
+yutori-mcp          # run the server (or: python -m yutori_mcp.server)
+```
+
+### Computer-use runtime
+
+`computer-use doctor` verifies the pinned `yutori` SDK install against the published wheel.
+SDK contributors testing an editable checkout can override that with
+`YUTORI_MCP_ALLOW_EDITABLE_SDK=1`.
+
+### Debugging with MCP Inspector
+
+```bash
+npx @modelcontextprotocol/inspector yutori-mcp
+```
+
+## API Documentation
+
+For full API documentation, visit [docs.yutori.com](https://docs.yutori.com).
+
+## License
+
+Apache 2.0
