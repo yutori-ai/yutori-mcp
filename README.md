@@ -401,6 +401,8 @@ Write the prompt so the run has a finish line:
 | `--allow-foreground-fallback` | off | Background only: retry a missed action with the window briefly fronted |
 | `--json` | off | Emit JSON lines instead of terminal text, for a host application that renders progress itself |
 | `--hide-stop-item` | off | Do not show the SDK's menu bar Stop item; the host application provides its own (the hotkey stays active) |
+| `--no-presentation` | off | Show none of the SDK's surfaces (overlay, menu bar item, activity window, hotkey); the host application renders the run itself from the `--json` `frame` and `activity` events |
+| `--exclude-capture-window WINDOW_ID` | none | CGWindowID of a host application window to keep out of the model's desktop frames (foreground runs); it stays on screen and in recordings. Repeatable |
 | `--env dev` | production | Runs against `platform.dev.yutori.com`. Goes before the subcommand: `yutori-mcp --env dev computer-use run "…"` |
 
 **Foreground** (the default) drives the whole visible desktop — don't touch the Mac while it
