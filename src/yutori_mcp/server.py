@@ -615,6 +615,9 @@ def _progress_reporter(
     from .computer_use.result import describe_delivery_surface, format_action_line, format_startup_line
 
     async def on_event(event: dict[str, Any]) -> None:
+        if event.get("type") in {"frame", "activity"}:
+            # Host-rendering streams (thumbnails, transcript rows); not progress.
+            return
         if event.get("type") == "ready":
             surface = describe_delivery_surface(mode, app)
             message = f"Computer-use runner ready; driving {surface} (up to {max_steps} model turns)."
