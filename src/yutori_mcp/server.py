@@ -612,10 +612,11 @@ def _progress_reporter(
     is not an upper bound for it. The human-readable message carries the model-turn
     budget instead.
     """
+    from .computer_use.constants import HOST_ONLY_EVENT_TYPES
     from .computer_use.result import describe_delivery_surface, format_action_line, format_startup_line
 
     async def on_event(event: dict[str, Any]) -> None:
-        if event.get("type") in {"frame", "activity"}:
+        if event.get("type") in HOST_ONLY_EVENT_TYPES:
             # Host-rendering streams (thumbnails, transcript rows); not progress.
             return
         if event.get("type") == "ready":
