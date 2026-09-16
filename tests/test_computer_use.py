@@ -1842,6 +1842,7 @@ class _FakeComputer:
         self.closed = False
         self.screenshots = 0
         self.window_targets: list[Any] = []
+        self.status_metrics: list[Any] = []
         self.action_outcomes: tuple[Any, ...] = ()
         self.focus_guard_trips = 0
         self.delivery_counts = {
@@ -1865,6 +1866,10 @@ class _FakeComputer:
 
     async def set_window_target(self, target):
         self.window_targets.append(target)
+
+    async def update_status_metrics(self, metrics):
+        self.status_metrics.append(metrics)
+        return True
 
     async def aclose(self):
         self.closed = True
@@ -1959,6 +1964,9 @@ async def test_run_request_wires_sdk_runtime_and_reports_effective_state(monkeyp
     assert "Never ask them to give you a password" in agent.kwargs["system_prompt"]
     assert "Do not install software or packages" in agent.kwargs["system_prompt"]
     assert computer.closed
+    assert len(computer.status_metrics) == 2
+    assert computer.status_metrics[0].request_in_flight is True
+    assert computer.status_metrics[-1].request_in_flight is False
     startup_events = [json.loads(line) for line in stream.lines if json.loads(line)["type"] == "startup"]
     assert [event["phase"] for event in startup_events] == ["api_client", "computer", "model"]
     result = json.loads(stream.lines[-1])
@@ -2144,6 +2152,125 @@ async def test_chat_tracker_keeps_the_first_request_id_from_dict_or_model_respon
     await tracker.on_api_end({}, _PydanticLikeResponse("req-1"))
     await tracker.on_api_end({}, {"request_id": "req-2", "choices": []})
     assert tracker.chat_id == "req-1"
+
+
+async def test_api_counter_publishes_cumulative_usage_and_request_rtt():
+    updates = []
+    computer = SimpleNamespace(update_status_metrics=lambda metrics: _record_async(updates, metrics))
+    clock = iter((10.0, 10.25, 11.0, 11.4)).__next__
+    reporter = runner_module.ApiCounter(computer, clock=clock)
+
+    await reporter.on_api_start({})
+    await reporter.on_api_end(
+        {},
+        {
+            "usage": {
+                "prompt_tokens": 100,
+                "prompt_tokens_details": {"cached_tokens": 30},
+                "completion_tokens": 20,
+            }
+        },
+    )
+    await reporter.on_api_start({})
+    await reporter.on_api_end(
+        {},
+        {"usage": {"input_tokens": 50, "cache_read_input_tokens": 20, "output_tokens": 10}},
+    )
+    await reporter.flush()
+
+    assert reporter.calls == 2
+    assert [(item.input_tokens, item.cached_input_tokens, item.output_tokens) for item in updates] == [
+        (None, None, None),
+        (100, 30, 20),
+        (100, 30, 20),
+        (150, 50, 30),
+    ]
+    assert [item.request_in_flight for item in updates] == [True, False, True, False]
+    assert updates[-1].latest_rtt_ms == pytest.approx(400)
+    assert updates[-1].rtt_samples_ms == pytest.approx((250, 400))
+
+
+def test_usage_counts_reads_production_cached_token_usage():
+    assert runner_module._usage_counts(
+        {
+            "usage": {
+                "input_tokens": 100,
+                "billed_cached_input_tokens": 30,
+                "output_tokens": 20,
+            }
+        }
+    ) == (100, 30, 20)
+
+
+def test_usage_counts_skips_invalid_preferred_alias():
+    assert runner_module._usage_counts(
+        {
+            "usage": {
+                "input_tokens": None,
+                "prompt_tokens": 100,
+                "billed_cached_input_tokens": None,
+                "cached_input_tokens": 30,
+                "output_tokens": None,
+                "completion_tokens": 20,
+            }
+        }
+    ) == (100, 30, 20)
+
+
+async def _record_async(values: list[Any], value: Any) -> bool:
+    values.append(value)
+    return True
+
+
+async def test_api_counter_leaves_missing_usage_absent_and_clears_cancelled_request():
+    updates = []
+    computer = SimpleNamespace(update_status_metrics=lambda metrics: _record_async(updates, metrics))
+    reporter = runner_module.ApiCounter(computer, clock=lambda: 10.0)
+
+    await reporter.on_api_start({})
+    reporter.clear_in_flight()
+    await reporter.flush()
+
+    assert reporter.calls == 1
+    assert len(updates) == 2
+    assert updates[-1].request_in_flight is False
+    assert updates[-1].input_tokens is None
+    assert updates[-1].latest_rtt_ms is None
+    assert updates[-1].rtt_samples_ms == ()
+
+
+async def test_api_counter_marks_totals_unknown_after_missing_usage():
+    updates = []
+    computer = SimpleNamespace(update_status_metrics=lambda metrics: _record_async(updates, metrics))
+    clock = iter((10.0, 10.1, 11.0, 11.2, 12.0, 12.3)).__next__
+    reporter = runner_module.ApiCounter(computer, clock=clock)
+
+    await reporter.on_api_start({})
+    await reporter.on_api_end({}, {"usage": {"input_tokens": 10, "cached_input_tokens": 3, "output_tokens": 2}})
+    await reporter.on_api_start({})
+    await reporter.on_api_end({}, {"choices": []})
+    await reporter.on_api_start({})
+    await reporter.on_api_end({}, {"usage": {"input_tokens": 5, "cached_input_tokens": 2, "output_tokens": 1}})
+    await reporter.flush()
+
+    assert updates[-1].request_in_flight is False
+    assert updates[-1].input_tokens is None
+    assert updates[-1].cached_input_tokens is None
+    assert updates[-1].output_tokens is None
+
+
+async def test_api_counter_drops_cache_count_that_exceeds_input_count():
+    updates = []
+    computer = SimpleNamespace(update_status_metrics=lambda metrics: _record_async(updates, metrics))
+    reporter = runner_module.ApiCounter(computer, clock=iter((10.0, 10.1)).__next__)
+
+    await reporter.on_api_start({})
+    await reporter.on_api_end({}, {"usage": {"input_tokens": 3, "cached_input_tokens": 4}})
+    await reporter.flush()
+
+    assert updates[-1].request_in_flight is False
+    assert updates[-1].input_tokens == 3
+    assert updates[-1].cached_input_tokens is None
 
 
 async def test_run_request_carries_the_chat_id_on_actions_and_the_result(monkeypatch):

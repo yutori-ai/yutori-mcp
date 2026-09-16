@@ -12,7 +12,7 @@ import signal
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from importlib import metadata
 from typing import Any, TextIO
 
@@ -30,6 +30,20 @@ from yutori.navigator.macos import (
 # stream shows exactly the conversation the SDK's activity window shows. Private to the SDK,
 # which this package pins by exact version and hash; tests guard the import.
 from yutori.navigator.macos.presentation import _transcript_entry as transcript_entry
+
+try:
+    from yutori.navigator.macos import MacOSStatusMetrics
+except ImportError:
+    # SDK 0.9.27 predates status metrics; its MacOSComputer also lacks the update method,
+    # so this shape is used only by tests and keeps all other computer-use commands importable.
+    @dataclass(frozen=True)
+    class MacOSStatusMetrics:
+        input_tokens: int | None = None
+        cached_input_tokens: int | None = None
+        output_tokens: int | None = None
+        latest_rtt_ms: float | None = None
+        rtt_samples_ms: tuple[float, ...] = ()
+        request_in_flight: bool = False
 
 from .app import prepare_app
 from .constants import (
@@ -49,6 +63,8 @@ from .result import compact_json_line, elapsed_ms_since, redact, remaining_secon
 from .targeting import TargetGuardedMacOSComputer as MacOSComputer
 from ..schemas import computer_use_constraint_error
 
+# Flush at most the queued request-start and settle RPCs (250 ms each) plus scheduling slack.
+_STATUS_METRICS_FLUSH_TIMEOUT_SECONDS = 0.6
 _FOREGROUND_OPENING = "You control the entire macOS screen. "
 _SHARED_CONTEXT = (
     "This is macOS, not Linux: do not use "
@@ -560,11 +576,127 @@ class ActivityReporter:
 
 
 class ApiCounter:
-    def __init__(self) -> None:
+    def __init__(self, computer: MacOSComputer | None = None, *, clock: Callable[[], float] = time.monotonic) -> None:
         self.calls = 0
+        self._computer = computer
+        self._clock = clock
+        self._request_started_at: float | None = None
+        self._input_tokens: int | None = None
+        self._cached_input_tokens: int | None = None
+        self._output_tokens: int | None = None
+        self._latest_rtt_ms: float | None = None
+        self._rtt_samples_ms: list[float] = []
+        self._completed_calls = 0
+        self._metrics_task: asyncio.Task[None] | None = None
 
     async def on_api_start(self, _kwargs: dict[str, Any]) -> None:
         self.calls += 1
+        self._request_started_at = self._clock()
+        self._publish(request_in_flight=True)
+
+    async def on_api_end(self, _kwargs: dict[str, Any], response: Any) -> None:
+        if self._request_started_at is not None:
+            self._latest_rtt_ms = max(0, (self._clock() - self._request_started_at) * 1000)
+            self._rtt_samples_ms.append(self._latest_rtt_ms)
+        self._request_started_at = None
+        input_tokens, cached_input_tokens, output_tokens = _usage_counts(response)
+        first_response = self._completed_calls == 0
+        self._input_tokens = _accumulate_count(self._input_tokens, input_tokens, first_response=first_response)
+        self._cached_input_tokens = _accumulate_count(
+            self._cached_input_tokens,
+            cached_input_tokens,
+            first_response=first_response,
+        )
+        self._output_tokens = _accumulate_count(self._output_tokens, output_tokens, first_response=first_response)
+        self._completed_calls += 1
+        self._publish(request_in_flight=False)
+
+    def clear_in_flight(self) -> None:
+        if self._request_started_at is None:
+            return
+        self._request_started_at = None
+        self._publish(request_in_flight=False)
+
+    async def flush(self) -> None:
+        task = self._metrics_task
+        if task is None:
+            return
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=_STATUS_METRICS_FLUSH_TIMEOUT_SECONDS)
+        except Exception:  # noqa: BLE001 - status telemetry must never affect the run
+            return
+
+    def _publish(self, *, request_in_flight: bool) -> None:
+        update = getattr(self._computer, "update_status_metrics", None)
+        if update is None:
+            return
+        try:
+            metrics = MacOSStatusMetrics(
+                input_tokens=self._input_tokens,
+                cached_input_tokens=self._cached_input_tokens,
+                output_tokens=self._output_tokens,
+                latest_rtt_ms=self._latest_rtt_ms,
+                rtt_samples_ms=tuple(self._rtt_samples_ms),
+                request_in_flight=request_in_flight,
+            )
+        except Exception:  # noqa: BLE001 - status telemetry must never affect the run
+            return
+
+        previous = self._metrics_task
+
+        async def deliver() -> None:
+            if previous is not None:
+                try:
+                    await previous
+                except Exception:  # noqa: BLE001 - a prior cosmetic update may be dropped
+                    pass
+            try:
+                await update(metrics)
+            except Exception:  # noqa: BLE001 - status telemetry must never affect the run
+                pass
+
+        self._metrics_task = asyncio.create_task(deliver())
+
+
+def _nonnegative_count(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def _first_count(values: dict[str, Any], names: tuple[str, ...]) -> int | None:
+    for name in names:
+        if name in values:
+            count = _nonnegative_count(values[name])
+            if count is not None:
+                return count
+    return None
+
+
+def _usage_counts(response: Any) -> tuple[int | None, int | None, int | None]:
+    response = _as_dict(response)
+    usage = _as_dict(response.get("usage")) if response is not None else None
+    if usage is None:
+        return None, None, None
+    input_tokens = _first_count(usage, ("input_tokens", "prompt_tokens"))
+    output_tokens = _first_count(usage, ("output_tokens", "completion_tokens"))
+    cached_input_tokens = _first_count(
+        usage,
+        ("billed_cached_input_tokens", "cached_input_tokens", "cache_read_input_tokens"),
+    )
+    if cached_input_tokens is None:
+        details = _as_dict(usage.get("input_tokens_details")) or _as_dict(usage.get("prompt_tokens_details"))
+        if details is not None:
+            cached_input_tokens = _first_count(details, ("cached_tokens",))
+    if input_tokens is not None and cached_input_tokens is not None and cached_input_tokens > input_tokens:
+        cached_input_tokens = None
+    return input_tokens, cached_input_tokens, output_tokens
+
+
+def _accumulate_count(total: int | None, value: int | None, *, first_response: bool) -> int | None:
+    if value is None:
+        return None
+    if first_response:
+        return value
+    return None if total is None else total + value
 
 
 class StartupReporter:
@@ -774,10 +906,14 @@ async def _summarize_limit_run(
     model_started_at = time.monotonic()
     try:
         response = await _await_summary_response(agent, completions.create(**api_kwargs), deadline)
+    except BaseException:
+        api_counter.clear_in_flight()
+        raise
     finally:
         agent.timings["model_ms"] = agent.timings.get("model_ms", 0) + (
             time.monotonic() - model_started_at
         ) * 1000
+    await api_counter.on_api_end(api_kwargs, response)
     await chat.on_api_end(api_kwargs, response)
     return _completion_text(response)
 
@@ -1060,7 +1196,6 @@ async def run_request(
     deadline = run_start + remaining_seconds
     guard = RunGuard(request["max_steps"], deadline)
     chat = ChatTracker()
-    api_counter = ApiCounter()
     startup = StartupReporter(emitter, run_start)
     computer = MacOSComputer(
         **_computer_kwargs(
@@ -1070,6 +1205,7 @@ async def run_request(
             api_key=api_key,
         )
     )
+    api_counter = ApiCounter(computer)
     reporter = ActionReporter(
         emitter,
         run_start,
@@ -1136,6 +1272,8 @@ async def run_request(
         outcome = "failed"
         final_text = _redacted_error_text(error, api_key)
     finally:
+        api_counter.clear_in_flight()
+        await api_counter.flush()
         status = computer.presentation_status
         try:
             await computer.aclose()
