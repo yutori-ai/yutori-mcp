@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import functools
 import hashlib
 import os
 import subprocess
@@ -326,33 +327,28 @@ async def _run_custom(args: argparse.Namespace) -> int:
         allow_local_shell=args.allow_local_shell,
     )
     json_output = bool(getattr(args, "json", False))
-    show_stop_button = not getattr(args, "hide_stop_item", False)
-    presentation = not getattr(args, "no_presentation", False)
-    exclude_capture_window_ids = tuple(getattr(args, "exclude_capture_windows", None) or ())
     paint = Terminal.detect()
     preflight_started = time.monotonic()
     if _blocked(json_output=json_output):
         return 1
+    # Both branches below run the identical request through the supervisor, differing only
+    # in which `on_event` callback renders progress; bound here once as the single source of
+    # truth for the request's fixed display flags.
+    run_task = functools.partial(
+        run_task_with_resolved_credentials,
+        **params.model_dump(),
+        show_stop_button=not getattr(args, "hide_stop_item", False),
+        presentation=not getattr(args, "no_presentation", False),
+        exclude_capture_window_ids=tuple(getattr(args, "exclude_capture_windows", None) or ()),
+    )
     if json_output:
-        result = await run_task_with_resolved_credentials(
-            **params.model_dump(),
-            show_stop_button=show_stop_button,
-            presentation=presentation,
-            exclude_capture_window_ids=exclude_capture_window_ids,
-            on_event=_json_event_printer(),
-        )
+        result = await run_task(on_event=_json_event_printer())
         _json_line({"type": "result", **result})
         return _exit_code(result)
     _print_milestone(paint, "preflight ready", preflight_started)
     print(format_run_header(params, paint))
     runner_started = time.monotonic()
-    result = await run_task_with_resolved_credentials(
-        **params.model_dump(),
-        show_stop_button=show_stop_button,
-        presentation=presentation,
-        exclude_capture_window_ids=exclude_capture_window_ids,
-        on_event=_event_printer(params.mode, params.app, paint, started_at=runner_started),
-    )
+    result = await run_task(on_event=_event_printer(params.mode, params.app, paint, started_at=runner_started))
     return _report(result, include_actions=False)
 
 
