@@ -522,12 +522,21 @@ def check_daemon_identity() -> CheckResult:
     )
 
 
+def _permissions_ok(info: dict[str, Any]) -> bool:
+    """Whether a `permissions`-shaped payload grants both required TCC permissions.
+
+    Shared by both branches of ``check_permissions`` below (embedded host and
+    standalone driver), which previously computed this identical expression
+    from two differently-sourced payloads.
+    """
+    return bool(info.get("accessibility")) and bool(info.get("screen_recording"))
+
+
 def check_permissions() -> CheckResult:
     host = _configured_embedded_host()
     if host is not None:
         try:
-            info = _embedded_permissions(host)
-            ok = bool(info.get("accessibility")) and bool(info.get("screen_recording"))
+            ok = _permissions_ok(_embedded_permissions(host))
         except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
             ok = False
         return _result(
@@ -537,8 +546,7 @@ def check_permissions() -> CheckResult:
             _EMBEDDED_PERMISSIONS_REMEDIATION,
         )
     try:
-        info = _driver_json("permissions")
-        ok = bool(info.get("accessibility")) and bool(info.get("screen_recording"))
+        ok = _permissions_ok(_driver_json("permissions"))
     except (OSError, subprocess.SubprocessError, ValueError):
         ok = False
     return _result(
