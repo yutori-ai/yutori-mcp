@@ -9,7 +9,7 @@ from yutori.navigator import N2ComputerAgent
 from yutori.navigator.macos import MacOSWindowTarget
 
 from .app import prepare_app
-from .result import structured_content
+from .result import is_positive_int, structured_content
 from .targeting import TargetGuardedMacOSComputer
 
 SELECT_APP_TOOL = {
@@ -62,7 +62,7 @@ class AppSelectingComputer(TargetGuardedMacOSComputer):
     async def select_app(self, app: str, *, window_id: int | None = None, url: str | None = None) -> dict[str, Any]:
         if not isinstance(app, str) or not app.strip():
             raise ValueError("select_app requires an application name or bundle identifier")
-        if window_id is not None and (isinstance(window_id, bool) or not isinstance(window_id, int) or window_id <= 0):
+        if window_id is not None and not is_positive_int(window_id):
             raise ValueError("window_id must be a positive integer")
         if url is not None and (not isinstance(url, str) or not url.startswith(("https://", "http://"))):
             raise ValueError("url must be an http(s) URL")

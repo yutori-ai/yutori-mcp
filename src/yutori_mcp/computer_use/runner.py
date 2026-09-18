@@ -46,7 +46,7 @@ from .constants import (
     SDK_VERSION,
     TOOL_SET,
 )
-from .result import compact_json_line, elapsed_ms_since, redact, remaining_seconds
+from .result import compact_json_line, elapsed_ms_since, is_positive_int, redact, remaining_seconds
 from .targeting import TargetGuardedMacOSComputer as MacOSComputer
 from ..schemas import computer_use_constraint_error
 
@@ -183,13 +183,8 @@ def _require_optional_string(request: dict[str, Any], field: str) -> str | None:
     )
 
 
-def _is_positive_int(value: Any) -> bool:
-    """True for a real positive int. `bool` is an int subclass, so it is excluded."""
-    return isinstance(value, int) and not isinstance(value, bool) and value > 0
-
-
 def _require_positive_int(request: dict[str, Any], field: str) -> int:
-    return _require_field(request, field, valid=_is_positive_int, expected="a positive integer")
+    return _require_field(request, field, valid=is_positive_int, expected="a positive integer")
 
 
 def _require_mode(request: dict[str, Any]) -> str:
@@ -206,7 +201,7 @@ def _require_window_ids(request: dict[str, Any], field: str) -> list[int]:
     return _require_field(
         request,
         field,
-        valid=lambda v: isinstance(v, list) and all(_is_positive_int(item) for item in v),
+        valid=lambda v: isinstance(v, list) and all(is_positive_int(item) for item in v),
         expected="a list of positive integer window ids",
     )
 

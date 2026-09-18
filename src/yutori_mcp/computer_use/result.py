@@ -43,6 +43,17 @@ def redact(text: str, secret: str) -> str:
     return text.replace(secret, REDACTED)
 
 
+def is_positive_int(value: Any) -> bool:
+    """True for a real positive int. `bool` is an int subclass, so it is excluded.
+
+    Shared by the runner's request-field validators and by app-selection's window_id
+    check; lives here rather than in ``runner`` because ``runner`` imports from
+    ``app_selection``, and ``app_selection`` importing back from ``runner`` would be
+    circular.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
 def structured_content(result: dict[str, Any]) -> dict[str, Any]:
     """The structured payload of an MCP tool result, tolerating either key casing.
 
