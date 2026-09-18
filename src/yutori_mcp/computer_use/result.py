@@ -149,7 +149,9 @@ def describe_delivery_surface(mode: str, app: str | None) -> str:
     window in the background") when a run starts, so the phrase lives here once rather than
     as two independently-typed string literals that could drift.
     """
-    return f"the {app} window in the background" if mode == DELIVERY_MODE_BACKGROUND else "the desktop"
+    if mode == DELIVERY_MODE_BACKGROUND:
+        return f"the {app} window in the background" if app else "automatically selected app windows in the background"
+    return "the desktop"
 
 
 def format_action_line(event: dict[str, Any], *, index_default: Any = None) -> str:

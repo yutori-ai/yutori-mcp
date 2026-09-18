@@ -400,7 +400,7 @@ COMPUTER_USE_DEFAULT_MAX_STEPS = 60
 # Mirrors computer_use/constants.py DELIVERY_MODES (this module stays free of computer_use
 # imports so the schema can load without the runtime); a test pins the two together.
 ComputerUseMode = Literal["foreground", "background"]
-COMPUTER_USE_DEFAULT_MODE: ComputerUseMode = "foreground"
+COMPUTER_USE_DEFAULT_MODE: ComputerUseMode = "background"
 
 
 def computer_use_constraint_error(
@@ -420,8 +420,6 @@ def computer_use_constraint_error(
     """
     if start_url is not None and app is None:
         return "start_url requires app"
-    if mode == "background" and app is None:
-        return "mode='background' requires app"
     if allow_foreground_fallback and mode != "background":
         return "allow_foreground_fallback requires mode='background'"
     return None
@@ -429,7 +427,9 @@ def computer_use_constraint_error(
 
 class ComputerUseTaskInput(ToolInput):
     task: str = Field(..., description="Task to perform on the Mac desktop or in the target app's window")
-    app: str | None = Field(default=None, description="Optional application to target")
+    app: str | None = Field(
+        default=None, description="Optional initial application; otherwise the model chooses apps for the task"
+    )
     start_url: str | None = Field(
         default=None, description="Optional URL to open in the target app"
     )
@@ -447,9 +447,10 @@ class ComputerUseTaskInput(ToolInput):
     mode: ComputerUseMode = Field(
         default=COMPUTER_USE_DEFAULT_MODE,
         description=(
-            "'foreground' (default) drives the whole visible desktop; the user must not touch the Mac. "
-            "'background' drives only the target app's window without taking focus, so the user can keep "
-            "working; only that window is captured. Requires app."
+            "'foreground' drives the whole visible desktop; the user must not touch the Mac. "
+            "'background' (default) lets the model choose and switch app windows without taking focus, "
+            "so the user can keep "
+            "working; only the selected window is captured. App selection is automatic when app is omitted."
         ),
     )
     allow_foreground_fallback: bool = Field(
