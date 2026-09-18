@@ -372,18 +372,17 @@ uvx yutori-mcp computer-use run "Compute 17 * 23 and report the result." --app C
 uvx yutori-mcp computer-use run "List every person on the team page and save them to ~/Desktop/team.txt." \
   --app Safari --start-url https://yutori.com/company
 
-# Drive one window in the background and keep working (--mode background requires --app)
+# Drive one window in the background and keep working (the model chooses the apps)
 uvx yutori-mcp computer-use run "Add a note titled Standup with today's three agenda items." \
-  --app Notes --mode background
+  --mode background
 ```
 
 Write the prompt so the run has a finish line:
 
 - **Say what "done" looks like.** "…and report the list" or "…and save it to
   `~/Desktop/team.txt`" gives the model something to stop at; "look at the team page" does not.
-- **Name the app and the starting page** with `--app` / `--start-url` instead of describing
-  them in the prompt. The runner opens them before the model's first screenshot, which saves
-  turns and avoids the model guessing at which window to use.
+- **Describe the task naturally.** The model selects and opens the apps it needs. Optionally
+  provide `--app` / `--start-url` to establish an initial app and page.
 - **Spell out the constraints you care about** — which account to use, which folder to write
   to, what to do when something is ambiguous ("if the page asks to log in, stop and say so").
 - **Keep it one task.** One run holds a machine-wide lock; chain separate runs rather than
@@ -393,11 +392,11 @@ Write the prompt so the run has a finish line:
 
 | Flag | Default | What it does |
 |------|---------|--------------|
-| `--app NAME` | none | App to target; opened and readied before the first screenshot |
+| `--app NAME` | none | Optional initial app; otherwise the model selects the apps it needs |
 | `--start-url URL` | none | Page to open in `--app` first. Requires `--app` |
 | `--minutes N` | `30` | Absolute deadline, 1–60. The run stops here regardless of progress |
 | `--max-steps N` | `60` | Model turns before stopping; one turn can take several actions |
-| `--mode background` | `foreground` | Drives only `--app`'s window, without taking focus. Requires `--app` |
+| `--mode MODE` | `background` | Chooses and switches app windows without taking focus. `foreground` controls the whole desktop |
 | `--allow-foreground-fallback` | off | Background only: retry a missed action with the window briefly fronted |
 | `--no-local-shell` | off | Disable the local shell and filesystem tools; drive only the visible desktop or `--app`'s window |
 | `--json` | off | Emit JSON lines instead of terminal text, for a host application that renders progress itself |
@@ -406,8 +405,8 @@ Write the prompt so the run has a finish line:
 | `--exclude-capture-window WINDOW_ID` | none | CGWindowID of a host application window to keep out of the model's desktop frames (foreground runs); it stays on screen and in recordings. Repeatable |
 | `--env dev` | production | Runs against `platform.dev.yutori.com`. Goes before the subcommand: `yutori-mcp --env dev computer-use run "…"` |
 
-**Foreground** (the default) drives the whole visible desktop — don't touch the Mac while it
-runs. **Background** drives one app's window and captures only that window, so you can keep
+**Foreground** drives the whole visible desktop — don't touch the Mac while it
+runs. **Background** (the default) chooses and switches apps automatically, drives one window at a time and captures only that window, so you can keep
 working; leave that window alone. Some apps accept background clicks but not typed keys
 (Calculator, for one), and the run reports the refusal rather than typing blind — add
 `--allow-foreground-fallback` for typing-heavy background tasks.
@@ -429,7 +428,7 @@ preparation. Output is colorized when stdout is a terminal; set `NO_COLOR=1` to 
 or `FORCE_COLOR=1` to keep it through a pipe.
 
 The harness in this repository is minimal: one task at a time (a machine-wide lock), either on
-the visible desktop or targeting one app window in the background, with no multiplexing. For
+the visible desktop or switching between app windows in the background, one at a time. For
 scalable sandbox runs, see [n2 on Daytona](https://docs.yutori.com/reference/n2-daytona).
 
 #### Input delivery probe

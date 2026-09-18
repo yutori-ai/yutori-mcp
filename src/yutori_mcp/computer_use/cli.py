@@ -239,7 +239,7 @@ async def _smoke_live() -> int:
 def hands_off_notice(mode: str) -> str:
     """What the operator must (not) do with the Mac while a run of ``mode`` is in progress."""
     if mode == DELIVERY_MODE_BACKGROUND:
-        return "The model drives only the target app's window in the background; keep working, but leave that window alone."
+        return "The model chooses app windows in the background; keep working, but leave the window being driven alone."
     return "The model takes over this Mac's desktop now; do not touch it during the run."
 
 
@@ -292,7 +292,9 @@ def _json_event_printer():
 
 def format_run_header(params: ComputerUseTaskInput, paint: Terminal) -> str:
     """The block a `run` opens with: what was asked, where it lands, and the limits."""
-    target = params.app or "the visible desktop"
+    target = params.app or (
+        "automatic app selection" if params.mode == DELIVERY_MODE_BACKGROUND else "the visible desktop"
+    )
     if params.start_url:
         target += f"  {params.start_url}"
     limits = f"{params.mode}  {paint.glyph('separator')}  {params.minutes:g} min  "
@@ -420,7 +422,10 @@ def register_parser(
         "--hide-stop-item",
         dest="hide_stop_item",
         action="store_true",
-        help="Do not show the SDK's menu bar Stop item; the host application provides its own (the hotkey stays active)",
+        help=(
+            "Do not show the SDK's menu bar Stop item; "
+            "the host application provides its own (the hotkey stays active)"
+        ),
     )
     run_parser.add_argument(
         "--exclude-capture-window",
@@ -462,7 +467,8 @@ def register_parser(
         "--mode",
         choices=DELIVERY_MODES,
         default=COMPUTER_USE_DEFAULT_MODE,
-        help="foreground drives the visible desktop; background drives only --app's window without taking focus",
+        help=("foreground drives the visible desktop; background (default) chooses and switches app windows "
+              "without taking focus; --app is optional"),
     )
     run_parser.add_argument(
         "--allow-foreground-fallback",

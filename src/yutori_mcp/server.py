@@ -732,11 +732,11 @@ def _register_computer_use_tool() -> None:
         return
     mcp.tool(
         description=(
-            "Operate a Mac with Yutori computer use. mode='foreground' (default) drives the whole "
-            "visible desktop: do not touch the Mac during the run, and visible desktop content is sent "
-            "to Yutori. mode='background' drives only the target app's window without taking focus, so "
-            "the user can keep working; only that window's content is sent. Use it when the user asks to "
-            "run something in the background or while they keep working. Background requires app."
+            "Operate a Mac with Yutori computer use. Background mode is the default: the model chooses "
+            "and switches applications itself, capturing and driving only the selected window without "
+            "taking focus. Describe the task; do not ask the user to choose an app. app is an optional "
+            "initial target. Explicit mode='foreground' drives the whole visible desktop; the user "
+            "must leave the Mac alone during a foreground run."
         ),
         annotations=_DESTRUCTIVE_OPEN_WORLD,
     )(run_computer_use_task)

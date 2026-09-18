@@ -16,6 +16,7 @@ from typing import Any
 
 from .constants import (
     DELIVERY_MODES,
+    DELIVERY_MODE_BACKGROUND,
     DELIVERY_MODE_FOREGROUND,
     DRIVER_VERSION,
     ENV_RECORDABLE_OVERLAY,
@@ -467,7 +468,7 @@ async def run_task(
     api_key: str,
     api_base_url: str,
     platform_url: str | None = None,
-    mode: str = DELIVERY_MODE_FOREGROUND,
+    mode: str = DELIVERY_MODE_BACKGROUND,
     allow_foreground_fallback: bool = False,
     allow_local_shell: bool = True,
     show_stop_button: bool = True,

@@ -12,9 +12,9 @@ Operate a Mac with the computer-use agent - clicking, typing, and driving apps l
 Listed only on macOS, and only once the setup in [README](README.md#macos-computer-use) is done.
 One task controls the Mac at a time, in one of two modes:
 
-- `mode: "foreground"` (default) drives the whole visible desktop. Do not touch the Mac during
+- `mode: "foreground"` drives the whole visible desktop. Do not touch the Mac during
   the run; visible desktop content is sent to Yutori.
-- `mode: "background"` drives only the target `app`'s window without taking focus, so you can
+- `mode: "background"` (default) chooses and switches apps, driving one window at a time without taking focus, so you can
   keep working on the Mac (leave that one window alone). Only that window's content is captured
   and sent to Yutori. A menu bar item (the Yutori mark) stays up for the whole run; its menu
   shows the latest frame the agent saw, its latest action, Show activity, and Stop (also ⇧⌘Esc).
@@ -97,7 +97,7 @@ before the model was called.
 | `start_url` | No | URL to open before the task starts; requires `app` |
 | `minutes` | No | Wall-clock deadline in minutes (1-60). Default: 30 |
 | `max_steps` | No | Max model turns, 1 or more. A turn may contain multiple desktop actions. Default: 60 |
-| `mode` | No | `foreground` (default) drives the visible desktop; `background` drives only `app`'s window without taking focus. Background requires `app` |
+| `mode` | No | `background` (default) chooses and switches app windows without taking focus; `foreground` drives the visible desktop. `app` is an optional initial target |
 | `allow_foreground_fallback` | No | Background only. Retry an action that did not land with the window fronted briefly. Default: false |
 | `allow_local_shell` | No | Allow local shell and filesystem tools. Set false to require visible computer actions only. Default: true |
 

@@ -1617,7 +1617,6 @@ def test_parse_request_accepts_python_only_shape():
         ({"start_url": "https://x", "app": None}, "INVALID_REQUEST"),
         ({"mode": "sideways"}, "INVALID_REQUEST"),
         ({"mode": None}, "INVALID_REQUEST"),
-        ({"mode": "background", "app": None}, "INVALID_REQUEST"),
         ({"allow_foreground_fallback": "yes"}, "INVALID_REQUEST"),
         ({"allow_foreground_fallback": True, "mode": "foreground"}, "INVALID_REQUEST"),
         ({"deadline_ms": 0}, "INVALID_REQUEST"),
@@ -1866,6 +1865,18 @@ class _FakeComputer:
     async def set_window_target(self, target):
         self.window_targets.append(target)
 
+    async def app_inventory(self) -> str:
+        return '[{"name": "Notes"}]'
+
+    async def select_app(self, app: str, *, url: str | None = None) -> dict[str, Any]:
+        target = await runner_module.prepare_app(self, app, url, front=False)
+        self.target_pid = target["pid"]
+        await self.set_window_target(_FakeWindowTarget(target["pid"], target["window_id"], app_name=target["name"]))
+        async def recover() -> int:
+            return (await self.select_app(app))["pid"]
+        self.recover_target = recover
+        return target
+
     async def aclose(self):
         self.closed = True
 
@@ -1913,6 +1924,8 @@ def _patch_runner_sdk(monkeypatch, *, agent_cls: type = _FakeAgent) -> None:
     """
     monkeypatch.setattr(runner_module, "MacOSComputer", _FakeComputer)
     monkeypatch.setattr(runner_module, "N2ComputerAgent", agent_cls)
+    monkeypatch.setattr(runner_module, "AppSelectingAgent", agent_cls)
+    monkeypatch.setattr(runner_module, "AppSelectingComputer", _FakeComputer)
 
 
 def test_presentation_payload_distinguishes_capture_codec_from_n2_request_format():
@@ -2246,12 +2259,11 @@ def _background_request(**overrides):
 
 def test_computer_use_mode_defaults_and_validators():
     params = ComputerUseTaskInput(task="t")
-    assert params.mode == "foreground" and params.allow_foreground_fallback is False
+    assert params.mode == "background" and params.allow_foreground_fallback is False
     assert params.allow_local_shell is True
-    with pytest.raises(ValidationError, match="mode='background' requires app"):
-        ComputerUseTaskInput(task="t", mode="background")
+    assert ComputerUseTaskInput(task="t", mode="background").app is None
     with pytest.raises(ValidationError, match="allow_foreground_fallback requires mode='background'"):
-        ComputerUseTaskInput(task="t", app="Notes", allow_foreground_fallback=True)
+        ComputerUseTaskInput(task="t", app="Notes", mode="foreground", allow_foreground_fallback=True)
     with pytest.raises(ValidationError):
         ComputerUseTaskInput(task="t", app="Notes", mode="sideways")
     background = ComputerUseTaskInput(task="t", app="Notes", mode="background", allow_foreground_fallback=True)
@@ -2274,7 +2286,7 @@ def test_computer_use_mode_literal_matches_runtime_delivery_modes():
         ),
         (
             {"app": None, "start_url": None, "mode": "background", "allow_foreground_fallback": False},
-            "mode='background' requires app",
+            None,
         ),
         (
             {"app": "Notes", "start_url": None, "mode": "foreground", "allow_foreground_fallback": True},
@@ -2289,7 +2301,7 @@ def test_computer_use_mode_literal_matches_runtime_delivery_modes():
 def test_computer_use_constraint_error_matches_both_call_sites(kwargs, expected):
     """ComputerUseTaskInput and runner.parse_request both delegate to this one function."""
     assert computer_use_constraint_error(**kwargs) == expected
-    assert COMPUTER_USE_DEFAULT_MODE == DELIVERY_MODE_FOREGROUND
+    assert COMPUTER_USE_DEFAULT_MODE == DELIVERY_MODE_BACKGROUND
 
 
 def test_run_computer_use_task_signature_mirrors_the_schema_defaults():
@@ -2443,7 +2455,7 @@ def test_hands_off_notice_depends_on_the_mode():
         "The model takes over this Mac's desktop now; do not touch it during the run."
     )
     assert "keep working" in cli.hands_off_notice("background")
-    assert "leave that window alone" in cli.hands_off_notice("background")
+    assert "leave the window being driven alone" in cli.hands_off_notice("background")
 
 
 async def test_cli_run_forwards_the_mode_and_prints_the_matching_notice(monkeypatch, capsys):
@@ -2472,8 +2484,8 @@ async def test_cli_run_forwards_the_mode_and_prints_the_matching_notice(monkeypa
     assert "preflight ready" in out
     assert cli.hands_off_notice("background") in out
     assert "completed" in out and "background" in out
-    with pytest.raises(ValidationError, match="requires app"):
-        await cli._run_custom(SimpleNamespace(**{**vars(args), "app": None}))
+    assert await cli._run_custom(SimpleNamespace(**{**vars(args), "app": None})) == 0
+    assert run.await_args.kwargs["app"] is None
 
 
 async def test_run_task_request_carries_mode_fallback_and_shell_policy(tmp_path):
@@ -2493,10 +2505,10 @@ async def test_run_task_request_carries_mode_fallback_and_shell_policy(tmp_path)
     assert request["allow_local_shell"] is False
 
 
-async def test_run_task_defaults_to_foreground_and_reports_failures_in_the_requested_mode(tmp_path):
+async def test_run_task_defaults_to_background_and_reports_failures_in_the_requested_mode(tmp_path):
     with patch.object(supervisor, "find_cua_driver", return_value=None):
-        foreground = await run_task(**_run_task_kwargs(tmp_path))
-        background = await run_task(**_run_task_kwargs(tmp_path, app="Notes", mode="background"))
+        foreground = await run_task(**_run_task_kwargs(tmp_path, mode="foreground"))
+        background = await run_task(**_run_task_kwargs(tmp_path))
     assert foreground["outcome"] == "failed" and foreground["delivery_mode"] == "foreground"
     assert background["outcome"] == "failed" and background["delivery_mode"] == "background"
 
@@ -2604,14 +2616,14 @@ def test_system_context_varies_only_in_the_mode_specific_parts():
     background = runner_module.system_context("background", "Notes")
     assert foreground == runner_module.SYSTEM_CONTEXT
     assert foreground.startswith("You control the entire macOS screen.")
-    assert background.startswith("You control exactly one application window: Notes.")
-    assert "entire macOS screen" not in background and "bring anything to the front" in background
-    assert "Never use the shell to open, launch, or activate applications" in background
+    assert "Initial application: Notes." in background
+    assert "entire macOS screen" not in background and "Do not bring results to the front" in background
+    assert "shell commands to launch or activate apps" in background
     assert "open -a" not in foreground
     assert "leave that result in view" not in background
     for shared in ("cmd, not ctrl", "Shell commands run headlessly", "Do not open or change System Settings"):
         assert shared in foreground and shared in background
-    assert "the target application" in runner_module.system_context("background")
+    assert "none; choose one" in runner_module.system_context("background")
 
 
 def test_supports_background_mode_reads_the_sdk_signature(monkeypatch):
@@ -2687,7 +2699,7 @@ async def test_run_request_background_binds_the_window_and_never_fronts(monkeypa
     assert prepared.await_args.args[1:] == ("Notes", None) and prepared.await_args.kwargs == {"front": False}
     assert computer.window_targets == [_FakeWindowTarget(42, 7, app_name="Notes")]
     assert computer.target_pid == 42
-    assert agent.kwargs["system_prompt"].startswith("You control exactly one application window: Notes.")
+    assert "Initial application: Notes." in agent.kwargs["system_prompt"]
     # The agent's sink is the activity tee wrapping the SDK's own controller.
     assert isinstance(agent.kwargs["presentation"], runner_module.ActivityReporter)
     assert agent.kwargs["presentation"]._inner is computer.presentation
@@ -3014,7 +3026,7 @@ def test_docs_describe_background_mode():
     assert "no background runs" not in (root / "README.md").read_text()
     skill = " ".join((root / "skills/06-computer-use/SKILL.md").read_text().split())
     assert "--mode background" in skill
-    assert '"in the background"' in skill and "ask which app to target" in skill
+    assert "Do not ask the user to select an app" in skill and "Background mode is the default" in skill
     assert "Claude Code, including Claude sessions hosted by Conductor" in skill
     assert "run the CLI through the Bash tool with stdout attached" in skill
     assert "does not expose MCP progress or log notifications" in skill
@@ -3281,8 +3293,8 @@ def test_cli_run_header_states_the_task_target_and_limits():
     assert "task      list the team" in text
     assert "target    Safari  https://yutori.com" in text
     assert f"version   yutori-mcp {MCP_VERSION}  |  yutori {SDK_VERSION}" in text
-    assert "limits    foreground  |  5 min  |  60 model turns" in text
-    assert cli.hands_off_notice("foreground") in text
+    assert "limits    background  |  5 min  |  60 model turns" in text
+    assert cli.hands_off_notice("background") in text
 
 
 async def test_cli_startup_printer_shows_phase_and_cumulative_timers(capsys):
@@ -3939,3 +3951,28 @@ async def test_run_task_and_cli_carry_host_window_ids(monkeypatch, tmp_path, cap
     assert await cli._run_custom(_run_args(json=True, exclude_capture_windows=[101, 202])) == 0
     assert captured.await_args.kwargs["exclude_capture_window_ids"] == (101, 202)
     capsys.readouterr()
+
+
+async def test_run_request_without_app_starts_background_with_inventory_and_selection_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _FakeComputer.instances.clear()
+    _FakeAgent.instances.clear()
+    _patch_runner_sdk(monkeypatch)
+    monkeypatch.setattr(runner_module, '_supports_background_mode', lambda: True)
+    prepared = AsyncMock()
+    monkeypatch.setattr(runner_module, 'prepare_app', prepared)
+    stream = _CollectStream()
+    request = parse_request(_background_request(app=None))
+
+    assert await runner_module.run_request(request, Emitter(stream), 'yt-secret') == 'completed'
+    prepared.assert_not_awaited()
+    computer = _FakeComputer.instances[-1]
+    agent = _FakeAgent.instances[-1]
+    assert computer.kwargs['scope'] == 'window'
+    assert computer.screenshots == 0
+    assert agent.kwargs['tools'][0]['function']['name'] == 'select_app'
+    assert 'Available apps' in agent.kwargs['system_prompt']
+    assert 'Initial application: none' in agent.kwargs['system_prompt']
+    assert computer in agent.kwargs['callbacks']
+    assert json.loads(stream.lines[-1])['delivery_mode'] == 'background'
