@@ -46,7 +46,7 @@ One task controls the Mac at a time, in one of two modes:
 }
 ```
 
-**Background example (drive one window while you keep working):**
+**Background example (work in app windows while you keep working):**
 
 ```json
 {

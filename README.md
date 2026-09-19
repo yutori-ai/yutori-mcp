@@ -342,7 +342,7 @@ pip install yutori-mcp
 
 ### macOS computer use
 
-Optional, macOS 15+ only. Computer use operates the visible desktop, or a single app window in
+Optional, macOS 15+ only. Computer use operates the visible desktop, or app windows in
 the background while you keep working, so it needs a local driver and system permissions on top
 of the install above:
 
