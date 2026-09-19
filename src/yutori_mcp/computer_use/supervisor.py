@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .constants import (
+    COMPUTER_USE_STATE_DIR,
     DELIVERY_MODES,
     DELIVERY_MODE_BACKGROUND,
     DELIVERY_MODE_FOREGROUND,
@@ -62,7 +63,7 @@ def runner_pid_path() -> Path:
     Next to the desktop lock. Advisory only: the lock stays the concurrency gate, and the
     file names a process group that `stop` verifies is really a runner before signalling.
     """
-    return Path.home() / ".yutori" / "computer-use.pid"
+    return COMPUTER_USE_STATE_DIR / "computer-use.pid"
 
 
 def _record_runner_pid(pid: int) -> None:
