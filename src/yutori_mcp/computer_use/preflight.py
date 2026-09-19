@@ -532,26 +532,31 @@ def _permissions_ok(info: dict[str, Any]) -> bool:
     return bool(info.get("accessibility")) and bool(info.get("screen_recording"))
 
 
+def _safe_permissions_ok(load: Callable[[], dict[str, Any]]) -> bool:
+    """Fail closed if `load` can't reach a permissions payload at all.
+
+    Both branches of ``check_permissions`` below load that payload a different way (an RPC
+    to the embedded host vs. a `cua-driver ... --json` subprocess), but the same "any way this
+    can fail means not granted" fallback previously had to be duplicated at each branch.
+    """
+    try:
+        return _permissions_ok(load())
+    except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
+        return False
+
+
 def check_permissions() -> CheckResult:
     host = _configured_embedded_host()
     if host is not None:
-        try:
-            ok = _permissions_ok(_embedded_permissions(host))
-        except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
-            ok = False
         return _result(
             "permissions",
-            ok,
+            _safe_permissions_ok(lambda: _embedded_permissions(host)),
             "Accessibility and Screen Recording (host application)",
             _EMBEDDED_PERMISSIONS_REMEDIATION,
         )
-    try:
-        ok = _permissions_ok(_driver_json("permissions"))
-    except (OSError, subprocess.SubprocessError, ValueError):
-        ok = False
     return _result(
         "permissions",
-        ok,
+        _safe_permissions_ok(lambda: _driver_json("permissions")),
         "Accessibility and Screen Recording",
         _PERMISSIONS_GRANT_REMEDIATION,
     )

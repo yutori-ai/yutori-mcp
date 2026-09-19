@@ -3471,6 +3471,37 @@ def test_embedded_permissions_proxy_failure_blocks_instead_of_raising(monkeypatc
     assert not preflight.check_permissions().ok
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        OSError("no such file"),
+        subprocess.SubprocessError("timed out"),
+        ValueError("bad json"),
+        RuntimeError("unexpected"),
+    ],
+)
+def test_safe_permissions_ok_fails_closed_on_any_load_error(error):
+    def load():
+        raise error
+
+    assert preflight._safe_permissions_ok(load) is False
+
+
+@pytest.mark.parametrize("payload,expected", [({"accessibility": True, "screen_recording": True}, True), ({}, False)])
+def test_safe_permissions_ok_delegates_to_permissions_ok_on_success(payload, expected):
+    assert preflight._safe_permissions_ok(lambda: payload) is expected
+
+
+def test_check_permissions_standalone_driver_blocks_when_driver_json_raises(monkeypatch):
+    monkeypatch.setattr(preflight, "_configured_embedded_host", lambda: None)
+    monkeypatch.setattr(preflight, "_driver_json", Mock(side_effect=subprocess.CalledProcessError(1, ["cua-driver"])))
+
+    result = preflight.check_permissions()
+
+    assert not result.ok
+    assert result.remediation == preflight._PERMISSIONS_GRANT_REMEDIATION
+
+
 @pytest.mark.parametrize("capture_result", [None, subprocess.CompletedProcess([], 0)])
 def test_embedded_capture_failure_names_the_host_application(monkeypatch, tmp_path, capture_result):
     _configure_embedded_host(monkeypatch, tmp_path)
