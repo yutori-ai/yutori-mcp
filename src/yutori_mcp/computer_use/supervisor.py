@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import signal
-import subprocess
 import sys
 import time
 from collections import deque
@@ -34,6 +33,7 @@ from .preflight import (
     ENV_DRIVER_SOCKET,
     child_search_path,
     find_cua_driver,
+    run_safely,
 )
 from .result import compact_json_line, failure, redact
 from .result import remaining_seconds as _remaining_seconds
@@ -87,17 +87,10 @@ def _discard_stale_pid_file(path: Path) -> str:
 
 
 def _process_command(pid: int) -> str | None:
-    try:
-        listing = subprocess.run(
-            ["/bin/ps", "-o", "command=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=2,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    result = run_safely(["/bin/ps", "-o", "command=", "-p", str(pid)], timeout=2)
+    if result is None or result.returncode != 0:
         return None
-    return listing or None
+    return result.stdout.strip() or None
 
 
 def stop_active_run() -> str:
