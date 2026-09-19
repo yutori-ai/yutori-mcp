@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from .. import __version__
+
+# Where the desktop lock and the runner pid file live. The two files are conceptual
+# siblings (see lock.py's DesktopLock and supervisor.py's runner_pid_path()); centralized
+# so neither call site can drift onto a stray "~/.yutori" literal.
+COMPUTER_USE_STATE_DIR = Path.home() / ".yutori"
 
 PROTOCOL_VERSION = 2
 MCP_VERSION = __version__

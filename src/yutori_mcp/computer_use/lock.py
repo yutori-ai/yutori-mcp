@@ -4,6 +4,8 @@ import fcntl
 from pathlib import Path
 from types import TracebackType
 
+from .constants import COMPUTER_USE_STATE_DIR
+
 
 class ComputerUseBusyError(RuntimeError):
     pass
@@ -11,7 +13,7 @@ class ComputerUseBusyError(RuntimeError):
 
 class DesktopLock:
     def __init__(self, path: Path | None = None):
-        self.path = path or Path.home() / ".yutori" / "computer-use.lock"
+        self.path = path or COMPUTER_USE_STATE_DIR / "computer-use.lock"
         self._file = None
         self._depth = 0
 
