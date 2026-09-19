@@ -60,8 +60,8 @@ For an app-specific task:
 uvx yutori-mcp computer-use run "$ARGUMENTS" --app Safari --start-url https://example.com --minutes 9
 ```
 
-For a background run (the default mode — the CLI process itself can still be a foreground Bash
-call; the model chooses and switches apps automatically):
+For a background run (`--mode background` is the default — the CLI process itself can still be a
+foreground Bash call; the model chooses and switches apps automatically):
 
 ```bash
 uvx yutori-mcp computer-use run "$ARGUMENTS" --minutes 9
