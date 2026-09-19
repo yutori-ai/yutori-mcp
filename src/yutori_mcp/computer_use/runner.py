@@ -898,27 +898,14 @@ def _agent_base_kwargs(
     }
 
 
-async def _bind_window_target(computer: MacOSComputer, target: dict[str, Any]) -> None:
-    """Point a window-scope session at the window prepare_app resolved."""
-    from yutori.navigator.macos import MacOSWindowTarget  # window scope: yutori >= 0.9.11
+async def _prepare_target(computer: MacOSComputer, request: dict[str, Any]) -> dict[str, Any]:
+    """Front ``request["app"]``, for a foreground run.
 
-    window_id = target.get("window_id")
-    if not isinstance(window_id, int):
-        raise RuntimeError(f"{target.get('name')!r} has no window to drive in background mode")
-    await computer.set_window_target(MacOSWindowTarget(target["pid"], window_id, app_name=target.get("name")))
-
-
-async def _prepare_target(computer: MacOSComputer, request: dict[str, Any], *, background: bool) -> dict[str, Any]:
-    """Launch/front ``request["app"]`` and, for a background run, bind its window target.
-
-    Shared by the initial prepare and by ``recover_target``'s post-crash re-resolution — both
-    need the identical launch-then-bind sequence, differing only in what they do with the
-    resolved target afterward.
+    Shared by the initial prepare and by ``recover_target``'s post-crash re-resolution.
+    Background runs target an app through ``AppSelectingComputer.select_app`` instead
+    (see ``app_selection.py``), which owns its own window-target binding.
     """
-    target = await prepare_app(computer, request["app"], request["start_url"], front=not background)
-    if background:
-        await _bind_window_target(computer, target)
-    return target
+    return await prepare_app(computer, request["app"], request["start_url"], front=True)
 
 
 def _action_delivery(computer: MacOSComputer) -> Callable[[], dict[str, Any]]:
@@ -1094,12 +1081,12 @@ async def run_request(
                     await computer.select_app(request["app"], url=request["start_url"])
                     startup.mark("target")
             elif request["app"]:
-                target = await _prepare_target(computer, request, background=False)
+                target = await _prepare_target(computer, request)
                 computer.target_pid = target["pid"]
                 startup.mark("target")
 
                 async def recover_target() -> int | None:
-                    recovered = await _prepare_target(computer, request, background=False)
+                    recovered = await _prepare_target(computer, request)
                     return recovered["pid"]
 
                 computer.recover_target = recover_target

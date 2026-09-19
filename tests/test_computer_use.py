@@ -2641,27 +2641,16 @@ def test_supports_background_mode_reads_the_sdk_signature(monkeypatch):
     assert runner_module._supports_background_mode() is False
 
 
-async def test_prepare_target_binds_the_window_only_in_background_mode(monkeypatch):
+async def test_prepare_target_always_fronts_the_app(monkeypatch):
     prepared = AsyncMock(return_value={"name": "Notes", "pid": 42, "window_id": 7})
-    bind = AsyncMock()
     monkeypatch.setattr(runner_module, "prepare_app", prepared)
-    monkeypatch.setattr(runner_module, "_bind_window_target", bind)
     computer = object()
     request = {"app": "Notes", "start_url": None}
 
-    target = await runner_module._prepare_target(computer, request, background=True)
-
-    assert target == {"name": "Notes", "pid": 42, "window_id": 7}
-    prepared.assert_awaited_once_with(computer, "Notes", None, front=False)
-    bind.assert_awaited_once_with(computer, target)
-
-    prepared.reset_mock()
-    bind.reset_mock()
-    target = await runner_module._prepare_target(computer, request, background=False)
+    target = await runner_module._prepare_target(computer, request)
 
     assert target == {"name": "Notes", "pid": 42, "window_id": 7}
     prepared.assert_awaited_once_with(computer, "Notes", None, front=True)
-    bind.assert_not_awaited()
 
 
 async def test_run_request_background_binds_the_window_and_never_fronts(monkeypatch):
