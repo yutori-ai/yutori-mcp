@@ -3485,7 +3485,7 @@ def test_embedded_permissions_proxy_failure_blocks_instead_of_raising(monkeypatc
 @pytest.mark.parametrize("capture_result", [None, subprocess.CompletedProcess([], 0)])
 def test_embedded_capture_failure_names_the_host_application(monkeypatch, tmp_path, capture_result):
     _configure_embedded_host(monkeypatch, tmp_path)
-    monkeypatch.setattr(preflight, "_run_safely", lambda *_args, **_kwargs: capture_result)
+    monkeypatch.setattr(preflight, "run_safely", lambda *_args, **_kwargs: capture_result)
 
     result = preflight.check_capture()
 

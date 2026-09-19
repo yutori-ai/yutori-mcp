@@ -280,7 +280,7 @@ def check_runtime() -> CheckResult:
     return report(provenance_digest == SDK_PROVENANCE_SHA256, detail)
 
 
-def _run_safely(
+def run_safely(
     command: list[str], *, timeout: float, text: bool = True
 ) -> subprocess.CompletedProcess[Any] | None:
     """Run ``command``, or None if the process could not even be launched/timed out.
@@ -296,7 +296,7 @@ def _run_safely(
 
 
 def check_compiler() -> CheckResult:
-    result = _run_safely(["xcrun", "--sdk", "macosx", "--find", "swiftc"], timeout=10)
+    result = run_safely(["xcrun", "--sdk", "macosx", "--find", "swiftc"], timeout=10)
     if result is None:
         compiler, ok = "not found", False
     else:
@@ -383,7 +383,7 @@ def driver_version() -> str | None:
     driver = find_cua_driver()
     if driver is None:
         return None
-    result = _run_safely([str(driver), "--version"], timeout=10)
+    result = run_safely([str(driver), "--version"], timeout=10)
     if result is None:
         return None
     match = re.search(r"\d+\.\d+\.\d+", result.stdout)
@@ -513,7 +513,7 @@ def check_daemon_identity() -> CheckResult:
             f"embedded daemon at {host.socket}",
             _EMBEDDED_HOST_REMEDIATION,
         )
-    result = _run_safely(["pgrep", "-f", "/Applications/CuaDriver.app/Contents/MacOS/"], timeout=10)
+    result = run_safely(["pgrep", "-f", "/Applications/CuaDriver.app/Contents/MacOS/"], timeout=10)
     return _result(
         "daemon identity",
         result is not None and result.returncode == 0,
@@ -559,7 +559,7 @@ def check_permissions() -> CheckResult:
 
 def _console_lock_state() -> bool | None:
     """Read the machine's lock state without depending on this process's GUI session."""
-    result = _run_safely(["/usr/sbin/ioreg", "-n", "Root", "-d", "1"], timeout=5)
+    result = run_safely(["/usr/sbin/ioreg", "-n", "Root", "-d", "1"], timeout=5)
     if result is None:
         return None
     match = re.search(r'"IOConsoleLocked"\s*=\s*(Yes|No)', result.stdout)
@@ -575,7 +575,7 @@ def check_gui_session() -> CheckResult:
     owner and IORegistry lock state are properties of the machine, so they remain truthful over
     SSH without asking the caller's process whether it has a GUI session.
     """
-    result = _run_safely(["/usr/bin/stat", "-f", "%Su", "/dev/console"], timeout=5)
+    result = run_safely(["/usr/bin/stat", "-f", "%Su", "/dev/console"], timeout=5)
     owner = result.stdout.strip() if result is not None else ""
     # root or _windowserver owns the console at the login window, i.e. nobody is logged in.
     logged_in = bool(owner) and owner not in {"root", "_windowserver"}
@@ -622,7 +622,7 @@ def check_capture() -> CheckResult:
         # Under $TMPDIR, whose /var -> /private/var symlink the driver rejects as an unresolved
         # ancestor, so hand it a fully resolved path.
         target = Path(directory).resolve() / "capture.png"
-        result = _run_safely(
+        result = run_safely(
             [
                 str(driver),
                 "call",
