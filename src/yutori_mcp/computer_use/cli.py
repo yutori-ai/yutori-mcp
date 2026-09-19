@@ -400,7 +400,7 @@ _COMPUTER_USE_SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.Namespace | N
     "doctor": ("Run all computer-use readiness checks", _dispatch_doctor),
     "smoke": ("Run Calculator mechanical and live checks", _dispatch_smoke),
     "stop": ("Stop the active computer-use run (the local stop for background runs)", _dispatch_stop),
-    "run": ("Run one custom task on the visible desktop or in one app window", _dispatch_run),
+    "run": ("Run one custom task on the visible desktop or in app windows", _dispatch_run),
 }
 
 
