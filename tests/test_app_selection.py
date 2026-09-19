@@ -24,6 +24,20 @@ def call(name: str, call_id: str) -> dict:
     return {"type": "function_call", "name": name, "call_id": call_id, "_n2_turn_id": "turn"}
 
 
+def bootstrap_agent(computer: Any = None) -> AppSelectingAgent:
+    """An `AppSelectingAgent` with `__init__` skipped, wired to `computer`.
+
+    `_predict_step`/`_resolve_native_size` only read `self.computer`, so tests that drive them
+    directly don't need the full SDK constructor. `computer` defaults to an unselected
+    `SimpleNamespace`, the shape every window-target check in those methods expects.
+    """
+    agent = object.__new__(AppSelectingAgent)
+    agent.computer = (
+        computer if computer is not None else SimpleNamespace(window_target_info=None, selection_frame_delivered=False)
+    )
+    return agent
+
+
 @pytest.mark.parametrize("selected", [False, True])
 @pytest.mark.parametrize(
     "names",
@@ -39,11 +53,12 @@ async def test_selection_is_a_model_turn_boundary(
 ) -> None:
     output = [call(name, str(i)) for i, name in enumerate(names)]
     monkeypatch.setattr(N2ComputerAgent, "_predict_step", AsyncMock(return_value={"output": output}))
-    agent = object.__new__(AppSelectingAgent)
-    agent.computer = SimpleNamespace(
-        window_target_info={"pid": 1} if selected else None,
-        current_observation=object() if selected else None,
-        selection_frame_delivered=selected,
+    agent = bootstrap_agent(
+        SimpleNamespace(
+            window_target_info={"pid": 1} if selected else None,
+            current_observation=object() if selected else None,
+            selection_frame_delivered=selected,
+        )
     )
     result = await agent._predict_step([])
     refused = {item["call_id"] for item in result["output"] if item["type"] == "function_call_output"}
@@ -56,16 +71,14 @@ async def test_selection_is_a_model_turn_boundary(
 async def test_no_duplicate_results_for_malformed_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     output = [call("select_app", "a"), {"type": "function_call_output", "call_id": "a", "output": "invalid"}]
     monkeypatch.setattr(N2ComputerAgent, "_predict_step", AsyncMock(return_value={"output": output}))
-    agent = object.__new__(AppSelectingAgent)
-    agent.computer = SimpleNamespace(window_target_info=None, selection_frame_delivered=False)
+    agent = bootstrap_agent()
     assert len((await agent._predict_step([]))["output"]) == 2
 
 
 async def test_bootstrap_does_not_capture_the_desktop(monkeypatch: pytest.MonkeyPatch) -> None:
     resolve = AsyncMock(return_value=(600, 800))
     monkeypatch.setattr(N2ComputerAgent, "_resolve_native_size", resolve)
-    agent = object.__new__(AppSelectingAgent)
-    agent.computer = SimpleNamespace(window_target_info=None, selection_frame_delivered=False)
+    agent = bootstrap_agent()
     assert await agent._resolve_native_size() == (1000, 1000)
     resolve.assert_not_awaited()
     agent.computer.window_target_info = {"pid": 42}
@@ -267,8 +280,7 @@ async def test_internal_dimension_capture_cannot_unlock_actions(monkeypatch: pyt
         return {"output": [call("computer_batch", "stale")]}
 
     monkeypatch.setattr(N2ComputerAgent, "_predict_step", predict)
-    agent = object.__new__(AppSelectingAgent)
-    agent.computer = instance
+    agent = bootstrap_agent(instance)
     response = await agent._predict_step([])
     assert response["output"][-1]["type"] == "function_call_output"
     assert "capture failed" in response["output"][-1]["output"]
