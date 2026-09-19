@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.5.32"
+version = "0.5.33"
 description = "MCP server and workflow skills for building agents with Yutori"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,11 +30,11 @@ dependencies = [
     # breaks the install as soon as 2.x resolves.
     "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
-    # SDK 0.9.28 lets a host keep its own windows out of the model's desktop
-    # frames (MacOSComputer(exclude_capture_window_ids=...)), which is what
-    # `computer-use run --exclude-capture-window` feature-detects, and shows
-    # live run metrics in the macOS status item.
-    "yutori==0.9.28",
+    # SDK 0.9.30 retries a background `type_text` the driver refused with
+    # `same_pid_keyboard_ambiguity` (the driven app owns a second window) as an
+    # accessibility write to the exact field under the model's last click, so a
+    # native text field no longer needs the window fronted to be typed into.
+    "yutori==0.9.30",
 ]
 
 [project.optional-dependencies]
