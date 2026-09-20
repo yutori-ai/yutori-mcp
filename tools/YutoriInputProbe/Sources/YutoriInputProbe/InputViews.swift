@@ -41,21 +41,17 @@ final class GeometryReportingView: NSView {
             name: "targetFrame",
             details: [
                 "target": target,
-                "windowX": Self.decimal(topLeftRect.minX),
-                "windowY": Self.decimal(topLeftRect.minY),
-                "width": Self.decimal(topLeftRect.width),
-                "height": Self.decimal(topLeftRect.height),
-                "windowWidth": Self.decimal(windowFrame.width),
-                "windowHeight": Self.decimal(windowFrame.height),
-                "screenX": Self.decimal(screenRect.minX),
-                "screenY": Self.decimal(screenRect.minY),
+                "windowX": ProbeNumberFormatter.decimal(topLeftRect.minX),
+                "windowY": ProbeNumberFormatter.decimal(topLeftRect.minY),
+                "width": ProbeNumberFormatter.decimal(topLeftRect.width),
+                "height": ProbeNumberFormatter.decimal(topLeftRect.height),
+                "windowWidth": ProbeNumberFormatter.decimal(windowFrame.width),
+                "windowHeight": ProbeNumberFormatter.decimal(windowFrame.height),
+                "screenX": ProbeNumberFormatter.decimal(screenRect.minX),
+                "screenY": ProbeNumberFormatter.decimal(screenRect.minY),
             ],
             window: window
         )
-    }
-
-    private static func decimal(_ value: CGFloat) -> String {
-        String(format: "%.2f", Double(value))
     }
 }
 
@@ -199,8 +195,8 @@ struct DragProbe: View {
                                 category: "gesture",
                                 name: "dragEnded",
                                 details: [
-                                    "translationX": String(format: "%.2f", value.translation.width),
-                                    "translationY": String(format: "%.2f", value.translation.height),
+                                    "translationX": ProbeNumberFormatter.decimal(value.translation.width),
+                                    "translationY": ProbeNumberFormatter.decimal(value.translation.height),
                                 ]
                             )
                         }
