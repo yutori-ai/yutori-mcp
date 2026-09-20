@@ -91,6 +91,10 @@ async def wait_for_events(
     return latest
 
 
+def describe_exception(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {exc}"
+
+
 def event_sequence(event: dict[str, Any]) -> int:
     value = event.get("sequence")
     return value if isinstance(value, int) else -1
@@ -177,7 +181,7 @@ async def run_case(
     except MacOSFocusChangedError:
         raise
     except Exception as exc:  # the report must preserve driver refusals verbatim
-        error = f"{type(exc).__name__}: {exc}"
+        error = describe_exception(exc)
     events = await wait_for_events(
         log_path,
         lambda values: matches([event for event in values if event_sequence(event) > starting_sequence]),
@@ -376,7 +380,7 @@ async def run_mode(mode: str, log_path: Path, allow_fallback: bool) -> tuple[dic
             try:
                 await computer.click(*button_point, modifier=["cmd"])
             except Exception as exc:
-                modified_error = f"{type(exc).__name__}: {exc}"
+                modified_error = describe_exception(exc)
             await asyncio.sleep(0.2)
             modified_events = [
                 event for event in read_events(log_path) if event_sequence(event) > starting_sequence
