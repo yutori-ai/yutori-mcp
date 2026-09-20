@@ -3826,12 +3826,35 @@ def test_parse_request_defaults_presentation_and_validates_it():
         parse_request(_valid_request(presentation="off"))
 
 
+def test_parse_request_defaults_and_validates_background_focus_overlay():
+    assert parse_request(_valid_request())["background_focus_overlay"] is False
+    parsed = parse_request(_valid_request(mode="background", background_focus_overlay=True))
+    assert parsed["background_focus_overlay"] is True
+    with pytest.raises(RequestError, match="background_focus_overlay must be a boolean"):
+        parse_request(_valid_request(background_focus_overlay="on"))
+    with pytest.raises(RequestError, match="requires mode='background'"):
+        parse_request(_valid_request(background_focus_overlay=True))
+    with pytest.raises(RequestError, match="requires presentation"):
+        parse_request(_valid_request(mode="background", presentation=False, background_focus_overlay=True))
+
+
 def test_computer_kwargs_forward_the_presentation_choice():
     request = parse_request(_valid_request(presentation=False))
     kwargs = runner_module._computer_kwargs(
         request, deadline=time.monotonic() + 60, cancellation=runner_module.CancellationLatch(), api_key="k"
     )
     assert kwargs["presentation"] is False
+
+
+def test_computer_kwargs_enable_only_the_hosted_background_focus_overlay():
+    request = parse_request(_valid_request(mode="background", background_focus_overlay=True))
+    kwargs = runner_module._computer_kwargs(
+        request, deadline=time.monotonic() + 60, cancellation=runner_module.CancellationLatch(), api_key="k"
+    )
+    assert kwargs["background_focus_overlay"] is True
+    assert kwargs["show_status_item"] is False
+    assert kwargs["show_stop_button"] is False
+    assert kwargs["presentation"] is True
 
 
 def test_agent_kwargs_route_presentation_through_the_activity_sink():
@@ -3869,6 +3892,22 @@ async def test_run_task_request_carries_presentation(tmp_path):
     assert supervise.await_args.kwargs["request"]["presentation"] is True
 
 
+async def test_run_task_request_carries_background_focus_overlay(tmp_path):
+    with _patched_run_task_supervise(tmp_path) as supervise:
+        await run_task(**_run_task_kwargs(tmp_path, mode="background", background_focus_overlay=True))
+    request = supervise.await_args.kwargs["request"]
+    assert request["background_focus_overlay"] is True
+
+    result = await run_task(
+        **_run_task_kwargs(
+            tmp_path,
+            mode="foreground",
+            background_focus_overlay=True,
+        )
+    )
+    assert result["outcome"] == "failed" and "requires mode='background'" in result["final_text"]
+
+
 def test_cli_run_parser_accepts_no_presentation():
     from yutori_mcp.computer_use import cli
 
@@ -3876,6 +3915,32 @@ def test_cli_run_parser_accepts_no_presentation():
     cli.register_parser(parser.add_subparsers(dest="command"))
     assert parser.parse_args(["computer-use", "run", "x", "--no-presentation"]).no_presentation is True
     assert parser.parse_args(["computer-use", "run", "x"]).no_presentation is False
+
+
+def test_cli_run_parser_accepts_background_focus_overlay():
+    from yutori_mcp.computer_use import cli
+
+    parser = argparse.ArgumentParser()
+    cli.register_parser(parser.add_subparsers(dest="command"))
+    enabled = parser.parse_args(["computer-use", "run", "x", "--mode", "background", "--background-focus-overlay"])
+    assert enabled.background_focus_overlay is True
+    assert parser.parse_args(["computer-use", "run", "x"]).background_focus_overlay is False
+
+
+async def test_cli_background_focus_overlay_forwards_and_rejects_incompatible_modes(monkeypatch):
+    from yutori_mcp.computer_use import cli
+
+    captured = AsyncMock(return_value={"outcome": "completed", "delivery_mode": "background", "final_text": "ok"})
+    monkeypatch.setattr(cli, "_blocked", lambda **_kwargs: False)
+    monkeypatch.setattr(supervisor, "run_task", captured)
+    _patch_run_credentials(monkeypatch)
+
+    assert await cli._run_custom(_run_args(mode="background", background_focus_overlay=True)) == 0
+    assert captured.await_args.kwargs["background_focus_overlay"] is True
+    with pytest.raises(ValueError, match="requires --mode background"):
+        await cli._run_custom(_run_args(background_focus_overlay=True))
+    with pytest.raises(ValueError, match="cannot be combined"):
+        await cli._run_custom(_run_args(mode="background", background_focus_overlay=True, no_presentation=True))
 
 
 async def test_cli_run_forwards_presentation_and_json_streams_host_only_events(monkeypatch, capsys):
