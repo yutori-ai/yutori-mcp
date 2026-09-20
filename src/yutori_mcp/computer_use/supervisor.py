@@ -20,6 +20,7 @@ from .constants import (
     DELIVERY_MODE_FOREGROUND,
     DRIVER_VERSION,
     ENV_RECORDABLE_OVERLAY,
+    MAX_CREDENTIAL_CHARACTERS,
     MCP_VERSION,
     MODEL,
     PROTOCOL_VERSION,
@@ -178,11 +179,10 @@ class _EventNotifier:
             logger.debug("Dropped %d stale computer-use progress event(s)", self._dropped)
 
 
-def _child_environment(api_key: str) -> dict[str, str]:
+def _child_environment() -> dict[str, str]:
     # PATH is required because the SDK resolves cua-driver by name and model-run
     # shell commands must retain the host's standard utilities.
     env = {
-        "YUTORI_API_KEY": api_key,
         "PATH": child_search_path(),
     }
     # The embedded-host variables let the SDK's transport attach to the host application's
@@ -203,6 +203,18 @@ def _child_environment(api_key: str) -> dict[str, str]:
         if value := os.environ.get(name):
             env[name] = value
     return env
+
+
+def _credential_frame(api_key: str) -> bytes:
+    if (
+        not api_key
+        or len(api_key) > MAX_CREDENTIAL_CHARACTERS
+        or api_key != api_key.strip()
+        or "\n" in api_key
+        or "\r" in api_key
+    ):
+        raise ValueError("API credential must be one non-empty line.")
+    return api_key.encode("utf-8") + b"\n"
 
 
 async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
@@ -296,12 +308,13 @@ async def _supervise(
     deadline: float,
     on_event: EventCallback | None = None,
 ) -> dict[str, Any]:
+    credential_frame = _credential_frame(api_key)
     process = await asyncio.create_subprocess_exec(
         *command,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        env=_child_environment(api_key),
+        env=_child_environment(),
         start_new_session=True,
         limit=RUNNER_FRAME_LIMIT_BYTES,
         # Never the caller's directory: `python -m` puts the child's cwd on
@@ -330,6 +343,7 @@ async def _supervise(
         return failure(f"Computer-use runner {detail}", actions=actions, delivery_mode=mode)
 
     try:
+        process.stdin.write(credential_frame)
         process.stdin.write(compact_json_line(request).encode() + b"\n")
         await process.stdin.drain()
         process.stdin.close()
@@ -463,6 +477,7 @@ async def run_task(
     api_key: str,
     api_base_url: str,
     platform_url: str | None = None,
+    vm_run_id: str | None = None,
     mode: str = DELIVERY_MODE_BACKGROUND,
     allow_foreground_fallback: bool = False,
     allow_local_shell: bool = True,
@@ -507,6 +522,8 @@ async def run_task(
                 "model": MODEL,
                 "api_base_url": api_base_url,
             }
+            if vm_run_id is not None:
+                request["vm_run_id"] = vm_run_id
             if find_cua_driver() is None:  # Kept defensive; preflight already checked it.
                 return failure("cua-driver not found. Run: yutori-mcp computer-use setup", delivery_mode=mode)
             result = await _supervise(
@@ -521,14 +538,26 @@ async def run_task(
         return failure(str(error), delivery_mode=mode)
 
 
-async def run_task_with_resolved_credentials(**kwargs: Any) -> dict[str, Any]:
-    """run_task(), resolving api_key/api_base_url/platform_url from the environment first.
+async def run_task_with_resolved_credentials(
+    *, api_key_override: str | None = None, **kwargs: Any
+) -> dict[str, Any]:
+    """Run a task with resolved URLs and either a supplied or resolved API credential.
 
     Consolidates the "resolve_run_credentials_and_platform_url() then forward as kwargs"
     boilerplate duplicated at the three places a computer-use run is launched: the MCP tool
-    handler (server.py) and both CLI entry points (computer_use/cli.py).
+    handler (server.py) and both CLI entry points (computer_use/cli.py). ``api_key_override``
+    is the stdin-only VM path and deliberately bypasses environment/config key resolution.
     """
-    from ..adapter import resolve_run_credentials_and_platform_url
+    from ..adapter import (
+        resolve_base_url,
+        resolve_platform_url,
+        resolve_run_credentials_and_platform_url,
+    )
 
-    api_key, api_base_url, platform_url = resolve_run_credentials_and_platform_url()
+    if api_key_override is None:
+        api_key, api_base_url, platform_url = resolve_run_credentials_and_platform_url()
+    else:
+        api_key = api_key_override
+        api_base_url = resolve_base_url()
+        platform_url = resolve_platform_url()
     return await run_task(api_key=api_key, api_base_url=api_base_url, platform_url=platform_url, **kwargs)

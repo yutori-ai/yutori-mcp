@@ -1,4 +1,4 @@
-"""Isolated protocol-v1 child for the SDK-owned macOS computer-use runtime."""
+"""Isolated protocol-v3 child for the SDK-owned macOS computer-use runtime."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import re
 import signal
 import sys
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import asdict
 from importlib import metadata
@@ -39,12 +40,14 @@ from .constants import (
     DELIVERY_MODE_FOREGROUND,
     DRIVER_VERSION,
     ENV_RECORDABLE_OVERLAY,
+    MAX_CREDENTIAL_CHARACTERS,
     OBSERVATION_FORMAT,
     PROTOCOL_VERSION,
     SDK_ARTIFACT_SHA256,
     SDK_PROVENANCE_SHA256,
     SDK_VERSION,
     TOOL_SET,
+    VM_RUN_ID_HEADER,
 )
 from .result import compact_json_line, elapsed_ms_since, is_positive_int, redact, remaining_seconds
 from .targeting import TargetGuardedMacOSComputer as MacOSComputer
@@ -225,7 +228,7 @@ def parse_request(payload: Any) -> dict[str, Any]:
         raise RequestError("INVALID_REQUEST", f"{error}.")
     deadline_ms = _require_positive_int(payload, "deadline_ms")
     max_steps = _require_positive_int(payload, "max_steps")
-    # Optional so a protocol-v2 supervisor that predates the fields keeps the SDK's defaults.
+    # Optional so a supervisor that predates these fields keeps the SDK's defaults.
     show_stop_button = _require_bool(payload, "show_stop_button") if "show_stop_button" in payload else True
     presentation = _require_bool(payload, "presentation") if "presentation" in payload else True
     background_focus_overlay = (
@@ -238,7 +241,7 @@ def parse_request(payload: Any) -> dict[str, Any]:
     exclude_capture_window_ids = (
         _require_window_ids(payload, "exclude_capture_window_ids") if "exclude_capture_window_ids" in payload else []
     )
-    return {
+    parsed = {
         "task": task,
         "app": app,
         "start_url": start_url,
@@ -254,6 +257,13 @@ def parse_request(payload: Any) -> dict[str, Any]:
         "model": _require_string(payload, "model"),
         "api_base_url": _require_string(payload, "api_base_url"),
     }
+    if "vm_run_id" in payload:
+        value = _require_string(payload, "vm_run_id")
+        try:
+            parsed["vm_run_id"] = str(uuid.UUID(value))
+        except ValueError:
+            raise RequestError("INVALID_REQUEST", "vm_run_id must be a UUID.") from None
+    return parsed
 
 
 class Emitter:
@@ -263,6 +273,17 @@ class Emitter:
     def emit(self, event: dict[str, Any]) -> None:
         self._stream.write(compact_json_line(event) + "\n")
         self._stream.flush()
+
+
+class _RunBoundCompletions:
+    def __init__(self, completions: Any, run_id: str) -> None:
+        self._completions = completions
+        self._run_id = run_id
+
+    async def create(self, *args: Any, **kwargs: Any) -> Any:
+        headers = dict(kwargs.pop("extra_headers", None) or {})
+        headers[VM_RUN_ID_HEADER] = self._run_id
+        return await self._completions.create(*args, extra_headers=headers, **kwargs)
 
 
 def _package_version() -> str:
@@ -1094,6 +1115,8 @@ async def run_request(
     try:
         async with AsyncYutoriClient(api_key=api_key, base_url=request["api_base_url"]) as client:
             completions = client.chat.completions
+            if run_id := request.get("vm_run_id"):
+                completions = _RunBoundCompletions(completions, run_id)
             # AsyncOpenAI constructs its HTTP/SSL client synchronously. Do that
             # before the desktop session and overlay take control rather than
             # making the user wait for it after the target app is ready.
@@ -1185,16 +1208,21 @@ def _claim_protocol_stream() -> TextIO:
     return os.fdopen(protocol_fd, "w", buffering=1)
 
 
-def _read_request_line() -> str:
-    lines = [line for line in sys.stdin.read().splitlines() if line.strip()]
-    if len(lines) != 1:
-        raise RequestError("INVALID_REQUEST", "Expected exactly one JSONL request line.")
-    return lines[0]
-
-
-def _take_api_key() -> str | None:
-    """Move the API key out of the environment before model-owned shells exist."""
-    return os.environ.pop("YUTORI_API_KEY", None)
+def _read_protocol_input() -> tuple[str, str]:
+    credential_frame = sys.stdin.readline(MAX_CREDENTIAL_CHARACTERS + 2)
+    request_frame = sys.stdin.readline()
+    trailing = sys.stdin.read()
+    if (
+        not credential_frame.endswith("\n")
+        or len(credential_frame) > MAX_CREDENTIAL_CHARACTERS + 1
+        or not request_frame.endswith("\n")
+        or trailing.strip()
+    ):
+        raise RequestError("INVALID_REQUEST", "Expected one credential frame and one JSONL request frame.")
+    api_key = credential_frame[:-1]
+    if not api_key or api_key != api_key.strip() or "\r" in api_key:
+        raise RequestError("INVALID_REQUEST", "Credential frame was invalid.")
+    return api_key, request_frame
 
 
 async def _run_until_terminated(
@@ -1256,7 +1284,6 @@ async def _run_until_terminated(
 
 
 def main() -> int:
-    api_key = _take_api_key()
     emitter = Emitter(_claim_protocol_stream())
     termination = {"requested": False}
 
@@ -1283,15 +1310,13 @@ def main() -> int:
         )
         try:
             try:
-                payload = json.loads(_read_request_line())
+                api_key, request_line = _read_protocol_input()
+                payload = json.loads(request_line)
             except json.JSONDecodeError:
                 raise RequestError("INVALID_JSON", "Request was not valid JSON.") from None
             request = parse_request(payload)
         except RequestError as error:
             emitter.emit(_error_event(error.code, str(error)))
-            return 1
-        if not api_key:
-            emitter.emit(_error_event("MISSING_API_KEY", "YUTORI_API_KEY is not set in the runner environment."))
             return 1
         try:
             outcome = asyncio.run(

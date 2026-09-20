@@ -802,7 +802,7 @@ def run_checks() -> list[CheckResult]:
     return [*platform_results, runtime, *(check() for check in _ENVIRONMENT_CHECKS[1:])]
 
 
-def first_blocker() -> CheckResult | None:
+def first_blocker(*, api_key_provided: bool = False) -> CheckResult | None:
     """Return the first safety blocker without running diagnostic-only probes.
 
     ``run_checks()`` remains the exhaustive readiness audit used by
@@ -811,6 +811,8 @@ def first_blocker() -> CheckResult | None:
     model request is the authoritative API-access check.
     """
     for check in _RUN_BLOCKING_CHECKS:
+        if api_key_provided and check is check_api_key:
+            continue
         result = check()
         if not result.ok:
             return result

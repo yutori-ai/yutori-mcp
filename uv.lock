@@ -1386,7 +1386,7 @@ wheels = [
 
 [[package]]
 name = "yutori-mcp"
-version = "0.5.35"
+version = "0.5.36"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },

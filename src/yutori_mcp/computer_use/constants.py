@@ -11,7 +11,9 @@ from .. import __version__
 # so neither call site can drift onto a stray "~/.yutori" literal.
 COMPUTER_USE_STATE_DIR = Path.home() / ".yutori"
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
+MAX_CREDENTIAL_CHARACTERS = 4096
+VM_RUN_ID_HEADER = "x-yutori-vm-run-id"
 MCP_VERSION = __version__
 MODEL = "n2"
 # The eval-exact n2 desktop surface, and the SDK's TOOL_SET_COMPUTER_USE_LATEST:
