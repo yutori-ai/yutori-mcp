@@ -132,6 +132,12 @@ enum ProbeKeyFormatter {
     }
 }
 
+enum ProbeNumberFormatter {
+    static func decimal(_ value: CGFloat) -> String {
+        String(format: "%.2f", Double(value))
+    }
+}
+
 enum ProbeEventTypeFormatter {
     static func name(_ type: NSEvent.EventType) -> String {
         switch type {

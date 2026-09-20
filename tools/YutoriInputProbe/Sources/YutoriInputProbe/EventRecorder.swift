@@ -163,8 +163,8 @@ final class EventRecorder: NSObject, ObservableObject {
             "eventType": eventType,
             "modifierFlags": ProbeKeyFormatter.modifierNames(event.modifierFlags).joined(separator: "+"),
             "windowNumber": "\(event.windowNumber)",
-            "locationX": Self.decimal(event.locationInWindow.x),
-            "locationY": Self.decimal(event.locationInWindow.y),
+            "locationX": ProbeNumberFormatter.decimal(event.locationInWindow.x),
+            "locationY": ProbeNumberFormatter.decimal(event.locationInWindow.y),
         ]
 
         switch event.type {
@@ -178,15 +178,15 @@ final class EventRecorder: NSObject, ObservableObject {
             )
             details["isRepeat"] = "\(event.isARepeat)"
         case .scrollWheel:
-            details["deltaX"] = Self.decimal(event.scrollingDeltaX)
-            details["deltaY"] = Self.decimal(event.scrollingDeltaY)
+            details["deltaX"] = ProbeNumberFormatter.decimal(event.scrollingDeltaX)
+            details["deltaY"] = ProbeNumberFormatter.decimal(event.scrollingDeltaY)
             details["precise"] = "\(event.hasPreciseScrollingDeltas)"
             details["phase"] = "\(event.phase.rawValue)"
             details["momentumPhase"] = "\(event.momentumPhase.rawValue)"
         default:
             details["buttonNumber"] = "\(event.buttonNumber)"
             details["clickCount"] = "\(event.clickCount)"
-            details["pressure"] = Self.decimal(CGFloat(event.pressure))
+            details["pressure"] = ProbeNumberFormatter.decimal(CGFloat(event.pressure))
         }
 
         record(category: "nsevent", name: eventType, details: details, window: event.window)
@@ -259,10 +259,6 @@ final class EventRecorder: NSObject, ObservableObject {
             windowOccluded: resolvedWindow?.occlusionState.contains(.visible) == false,
             firstResponder: responder
         )
-    }
-
-    private static func decimal(_ value: CGFloat) -> String {
-        String(format: "%.2f", Double(value))
     }
 
     private static func recognizedCommand(_ event: NSEvent) -> String? {
