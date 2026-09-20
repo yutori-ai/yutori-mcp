@@ -228,6 +228,13 @@ def parse_request(payload: Any) -> dict[str, Any]:
     # Optional so a protocol-v2 supervisor that predates the fields keeps the SDK's defaults.
     show_stop_button = _require_bool(payload, "show_stop_button") if "show_stop_button" in payload else True
     presentation = _require_bool(payload, "presentation") if "presentation" in payload else True
+    background_focus_overlay = (
+        _require_bool(payload, "background_focus_overlay") if "background_focus_overlay" in payload else False
+    )
+    if background_focus_overlay and mode != DELIVERY_MODE_BACKGROUND:
+        raise RequestError("INVALID_REQUEST", "background_focus_overlay requires mode='background'.")
+    if background_focus_overlay and not presentation:
+        raise RequestError("INVALID_REQUEST", "background_focus_overlay requires presentation.")
     exclude_capture_window_ids = (
         _require_window_ids(payload, "exclude_capture_window_ids") if "exclude_capture_window_ids" in payload else []
     )
@@ -242,6 +249,7 @@ def parse_request(payload: Any) -> dict[str, Any]:
         "allow_local_shell": allow_local_shell,
         "show_stop_button": show_stop_button,
         "presentation": presentation,
+        "background_focus_overlay": background_focus_overlay,
         "exclude_capture_window_ids": exclude_capture_window_ids,
         "model": _require_string(payload, "model"),
         "api_base_url": _require_string(payload, "api_base_url"),
@@ -829,6 +837,10 @@ def _supports_background_mode() -> bool:
     return _computer_accepts("scope")
 
 
+def _supports_background_focus_overlay() -> bool:
+    return _computer_accepts("background_focus_overlay") and _computer_accepts("show_status_item")
+
+
 def _computer_accepts(parameter: str) -> bool:
     try:
         return parameter in inspect.signature(MacOSComputer.__init__).parameters
@@ -862,6 +874,12 @@ def _computer_kwargs(
             scope="window",
             allow_foreground_fallback=request["allow_foreground_fallback"],
         )
+        if request.get("background_focus_overlay", False):
+            kwargs.update(
+                background_focus_overlay=True,
+                show_status_item=False,
+                show_stop_button=False,
+            )
     else:
         kwargs["exclude_overlay_from_capture"] = os.environ.get(ENV_RECORDABLE_OVERLAY) == "0"
         # A host application's own panels, kept out of the model's desktop frames by the SDK's
@@ -1037,6 +1055,14 @@ async def run_request(
             _error_event(
                 "UNSUPPORTED_MODE",
                 f"mode 'background' needs a yutori SDK with window scope; the pinned SDK {SDK_VERSION} has none.",
+            )
+        )
+        return "failed"
+    if request.get("background_focus_overlay", False) and not _supports_background_focus_overlay():
+        emitter.emit(
+            _error_event(
+                "UNSUPPORTED_PRESENTATION",
+                f"background_focus_overlay needs a newer yutori SDK; the pinned SDK {SDK_VERSION} has none.",
             )
         )
         return "failed"

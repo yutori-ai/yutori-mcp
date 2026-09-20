@@ -318,6 +318,11 @@ async def _run_custom(args: argparse.Namespace) -> int:
     # (minutes 1-60, positive steps, start_url requires app) with the same
     # messages; the resulting ValidationError is a ValueError, so dispatch's
     # handler prints it as a message rather than a traceback.
+    background_focus_overlay = bool(getattr(args, "background_focus_overlay", False))
+    if background_focus_overlay and args.mode != DELIVERY_MODE_BACKGROUND:
+        raise ValueError("--background-focus-overlay requires --mode background")
+    if background_focus_overlay and getattr(args, "no_presentation", False):
+        raise ValueError("--background-focus-overlay cannot be combined with --no-presentation")
     params = ComputerUseTaskInput(
         task=args.task,
         app=args.app,
@@ -341,6 +346,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
         **params.model_dump(),
         show_stop_button=not getattr(args, "hide_stop_item", False),
         presentation=not getattr(args, "no_presentation", False),
+        background_focus_overlay=background_focus_overlay,
         exclude_capture_window_ids=tuple(getattr(args, "exclude_capture_windows", None) or ()),
     )
     if json_output:
@@ -445,6 +451,14 @@ def register_parser(
         help=(
             "Show none of the SDK's surfaces (overlay, menu bar item, activity window, hotkey); "
             "the host application renders the run from the --json frame and activity events"
+        ),
+    )
+    run_parser.add_argument(
+        "--background-focus-overlay",
+        action="store_true",
+        help=(
+            "Background only: show the Navigator pointer/reasoning/action overlay when the target app is frontmost; "
+            "the embedding host owns status, activity, Stop, and hotkey surfaces"
         ),
     )
     run_parser.add_argument("task", help="Task for the model to perform")

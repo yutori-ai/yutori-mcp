@@ -467,6 +467,7 @@ async def run_task(
     allow_local_shell: bool = True,
     show_stop_button: bool = True,
     presentation: bool = True,
+    background_focus_overlay: bool = False,
     exclude_capture_window_ids: Sequence[int] = (),
     lock: DesktopLock | None = None,
     on_event: EventCallback | None = None,
@@ -474,6 +475,10 @@ async def run_task(
     deadline = time.monotonic() + minutes * 60
     deadline_ms = int((time.time() + minutes * 60) * 1000)
     try:
+        if background_focus_overlay and mode != DELIVERY_MODE_BACKGROUND:
+            raise ValueError("background_focus_overlay requires mode='background'")
+        if background_focus_overlay and not presentation:
+            raise ValueError("background_focus_overlay requires presentation")
         with lock or DesktopLock():
             request = {
                 "protocol_version": PROTOCOL_VERSION,
@@ -492,6 +497,9 @@ async def run_task(
                 # False when the host application renders the run itself (from the `frame` and
                 # `activity` events) and wants no SDK overlay, status item, or hotkey.
                 "presentation": presentation,
+                # Hosted background runs can retain the target-window Navigator overlay while
+                # the host application owns every status/activity/Stop/hotkey surface.
+                "background_focus_overlay": background_focus_overlay,
                 # CGWindowIDs of the host application's own panels to keep out of the model's
                 # desktop frames (foreground runs); they stay on screen and in recordings.
                 "exclude_capture_window_ids": [int(window_id) for window_id in exclude_capture_window_ids],
