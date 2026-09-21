@@ -1,5 +1,6 @@
 @preconcurrency import AppKit
 import SwiftUI
+@preconcurrency import WebKit
 
 @MainActor
 final class GeometryReportingView: NSView {
@@ -206,5 +207,75 @@ struct DragProbe: View {
         }
         .frame(height: 105)
         .accessibilityIdentifier("probe.drag.area")
+    }
+}
+
+/// One `<input>` inside a `<form>`, filling the whole web view so any pointer inside the
+/// reported frame lands in the field. The page reports key, input, focus, and submit events
+/// back through a script message handler; `submit` is the web analogue of Enter landing.
+@MainActor
+final class WebFormBridge: NSObject, WKScriptMessageHandler {
+    weak var recorder: EventRecorder?
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any] else { return }
+        var details: [String: String] = [:]
+        for (key, value) in body {
+            details[key] = String(describing: value)
+        }
+        let name = details.removeValue(forKey: "name") ?? "message"
+        recorder?.recordWebEvent(name: name, details: details)
+    }
+}
+
+struct ProbeWebForm: NSViewRepresentable {
+    let recorder: EventRecorder
+
+    static let html = """
+    <!doctype html>
+    <html><head><meta charset="utf-8"></head>
+    <body style="margin:0;background:#fff">
+    <form id="f" style="margin:0;height:100vh;display:flex">
+      <input id="q" name="q" autocomplete="off" autocapitalize="off" spellcheck="false"
+             placeholder="web form: type, then Enter submits"
+             style="flex:1;font:14px Menlo,monospace;padding:0 8px;border:0;outline:1px solid #c8c8c8">
+    </form>
+    <script>
+    const post = (name, extra) => window.webkit.messageHandlers.probe.postMessage(Object.assign({name}, extra || {}));
+    const q = document.getElementById('q');
+    const f = document.getElementById('f');
+    for (const type of ['keydown', 'keyup', 'keypress']) {
+      q.addEventListener(type, (e) => post(type, {key: e.key, code: e.code, keyCode: String(e.keyCode)}));
+    }
+    q.addEventListener('input', () => post('input', {value: q.value}));
+    document.addEventListener('keydown', (e) => post('documentKeydown', {
+      key: e.key, code: e.code, keyCode: String(e.keyCode),
+      activeElement: document.activeElement ? (document.activeElement.id || document.activeElement.tagName) : 'none',
+    }));
+    q.addEventListener('focus', () => post('focus'));
+    q.addEventListener('blur', () => post('blur'));
+    f.addEventListener('submit', (e) => { e.preventDefault(); post('submit', {value: q.value}); });
+    post('ready');
+    </script>
+    </body></html>
+    """
+
+    func makeCoordinator() -> WebFormBridge {
+        let bridge = WebFormBridge()
+        bridge.recorder = recorder
+        return bridge
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController.add(context.coordinator, name: "probe")
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.setAccessibilityIdentifier("probe.webForm")
+        webView.loadHTMLString(Self.html, baseURL: nil)
+        return webView
+    }
+
+    func updateNSView(_ view: WKWebView, context: Context) {
+        context.coordinator.recorder = recorder
     }
 }

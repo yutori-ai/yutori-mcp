@@ -15,6 +15,20 @@ struct ProbeModelTests {
 
         #expect(configuration.sessionID == "session-7")
         #expect(configuration.logURL.path == "/tmp/probe-session.jsonl")
+        #expect(configuration.secondaryWindow == false)
+    }
+
+    @Test("Configuration accepts the secondary window flag anywhere in the argument list")
+    func configurationSecondaryWindow() throws {
+        let leading = try ProbeConfiguration.parse(arguments: [
+            "YutoriInputProbe", "--secondary-window", "--session-id", "s",
+        ])
+        let trailing = try ProbeConfiguration.parse(arguments: [
+            "YutoriInputProbe", "--session-id", "s", "--secondary-window",
+        ])
+        #expect(leading.secondaryWindow)
+        #expect(trailing.secondaryWindow)
+        #expect(leading.sessionID == "s")
     }
 
     @Test("Configuration rejects malformed arguments")

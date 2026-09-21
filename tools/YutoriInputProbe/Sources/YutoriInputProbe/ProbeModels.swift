@@ -4,6 +4,9 @@ import Foundation
 struct ProbeConfiguration: Equatable {
     let sessionID: String
     let logURL: URL
+    /// Open a second, untitled window at launch so the probe owns two keyboard destinations,
+    /// the shape that trips the driver's same-pid keyboard gate (Chrome, Safari Technology Preview).
+    let secondaryWindow: Bool
 
     static func parse(
         arguments: [String],
@@ -12,10 +15,16 @@ struct ProbeConfiguration: Equatable {
     ) throws -> ProbeConfiguration {
         var sessionID: String?
         var logPath: String?
+        var secondaryWindow = false
         var index = arguments.first?.hasPrefix("--") == true ? 0 : 1
 
         while index < arguments.count {
             let argument = arguments[index]
+            if argument == "--secondary-window" {
+                secondaryWindow = true
+                index += 1
+                continue
+            }
             guard argument == "--session-id" || argument == "--log-path" else {
                 throw ProbeConfigurationError.unknownArgument(argument)
             }
@@ -41,7 +50,7 @@ struct ProbeConfiguration: Equatable {
         ).first!.appendingPathComponent("YutoriInputProbe/Sessions", isDirectory: true)
         let logURL = logPath.map { URL(fileURLWithPath: $0).standardizedFileURL }
             ?? directory.appendingPathComponent("\(resolvedSessionID).jsonl")
-        return ProbeConfiguration(sessionID: resolvedSessionID, logURL: logURL)
+        return ProbeConfiguration(sessionID: resolvedSessionID, logURL: logURL, secondaryWindow: secondaryWindow)
     }
 }
 

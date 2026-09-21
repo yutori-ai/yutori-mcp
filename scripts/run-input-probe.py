@@ -32,7 +32,9 @@ from yutori_mcp.computer_use.targeting import (  # noqa: E402
 BUNDLE_ID = "ai.yutori.input-probe"
 EXECUTABLE_NAME = "YutoriInputProbe"
 DEFAULT_APP = REPOSITORY / "tools" / "YutoriInputProbe" / ".build" / "YutoriInputProbe.app"
-INPUT_EVENT_CATEGORIES = {"nsevent", "text", "command", "control", "responder"}
+INPUT_EVENT_CATEGORIES = {"nsevent", "text", "command", "control", "responder", "web"}
+# Web `ready`/`focus`/`blur` are surface bookkeeping, not evidence that a driver action landed.
+WEB_INPUT_EVENTS = {"keydown", "keyup", "keypress", "input", "submit"}
 KEY_SEQUENCE_SETTLE_MS = 75
 
 
@@ -55,6 +57,14 @@ def parse_args() -> argparse.Namespace:
         "--allow-foreground-fallback",
         action="store_true",
         help="Allow background actions to front the probe briefly when the driver cannot deliver them.",
+    )
+    parser.add_argument(
+        "--sibling-window",
+        action="store_true",
+        help=(
+            "Launch the probe with a second untitled window, the shape (Chrome, Safari Technology Preview) "
+            "that makes the driver refuse pid-addressed background keystrokes."
+        ),
     )
     parser.add_argument("--app", type=Path, default=DEFAULT_APP, help="Path to YutoriInputProbe.app")
     parser.add_argument("--keep-open", action="store_true", help="Leave the probe running after the test.")
@@ -220,11 +230,50 @@ def has_event(events: list[dict[str, Any]], category: str, name: str | None = No
     )
 
 
-def has_text(events: list[dict[str, Any]], text: str) -> bool:
+def has_text(events: list[dict[str, Any]], text: str, target: str | None = None) -> bool:
     return any(
-        event.get("category") == "text" and text in details(event).get("value", "")
+        event.get("category") == "text"
+        and text in details(event).get("value", "")
+        and (target is None or details(event).get("target") == target)
         for event in events
     )
+
+
+def has_submit(events: list[dict[str, Any]], target: str) -> bool:
+    return any(
+        event.get("category") == "control"
+        and event.get("name") == "submitted"
+        and details(event).get("target") == target
+        for event in events
+    )
+
+
+def has_web_event(events: list[dict[str, Any]], name: str, **expected: str) -> bool:
+    return any(
+        event.get("category") == "web"
+        and event.get("name") == name
+        and all(details(event).get(key) == value for key, value in expected.items())
+        for event in events
+    )
+
+
+def has_web_value(events: list[dict[str, Any]], text: str) -> bool:
+    return any(
+        event.get("category") == "web"
+        and event.get("name") == "input"
+        and text in details(event).get("value", "")
+        for event in events
+    )
+
+
+def latest_window_inventory(events: list[dict[str, Any]], *, background_only: bool) -> dict[str, str] | None:
+    for event in reversed(events):
+        if event.get("category") != "windows" or event.get("name") != "inventory":
+            continue
+        if background_only and event.get("state", {}).get("appActive") is not False:
+            continue
+        return details(event)
+    return None
 
 
 def has_key_down_sequence(events: list[dict[str, Any]], key_codes: list[str]) -> bool:
@@ -250,8 +299,69 @@ def has_modified_click(events: list[dict[str, Any]], modifier: str) -> bool:
 
 
 def stayed_in_background(events: list[dict[str, Any]]) -> bool:
-    meaningful = [event for event in events if event.get("category") in {"nsevent", "text", "command", "control"}]
-    return bool(meaningful) and all(event.get("state", {}).get("appActive") is False for event in meaningful)
+    """Whether every delivered input arrived while another app still owned the foreground.
+
+    The driver activates the target process without raising it (AppKit reports `isActive` and
+    hands out a key window) so pointer clicks and keystrokes are accepted; what the user sees is
+    `NSWorkspace.frontmostApplication`, which must never become the probe.
+    """
+    meaningful = [
+        event
+        for event in events
+        if event.get("category") in {"nsevent", "text", "command", "control"}
+        or (event.get("category") == "web" and event.get("name") in WEB_INPUT_EVENTS)
+    ]
+    return bool(meaningful) and all(
+        event.get("state", {}).get("frontmostBundleID") not in (None, BUNDLE_ID) for event in meaningful
+    )
+
+
+def enter_verdict(case: dict[str, Any]) -> str:
+    """One word per Enter-matrix case: landed, refused (with the driver's code), or a silent miss."""
+    if case["passed"] and not case["error"]:
+        return "landed"
+    delivery = case.get("delivery") or {}
+    if delivery.get("effect") == "refused":
+        return f"refused ({delivery.get('refusal_code') or 'no code'})"
+    if case["error"]:
+        return "error"
+    route = delivery.get("route") or "?"
+    return f"no effect (driver said {delivery.get('effect') or '?'} via {route})"
+
+
+async def click_then_type(
+    computer: MacOSComputer, point: tuple[int, int], text: str, size: tuple[int, int]
+) -> None:
+    """Focus a field the way the model does (pointer click), then type into it."""
+    await computer.click(*point)
+    await computer.wait(KEY_SEQUENCE_SETTLE_MS)
+    await dispatch_n2(computer, "type", {"text": text}, size)
+
+
+async def background_input_routes(computer: MacOSComputer) -> dict[str, Any] | None:
+    """The driver's own verdict on which background routes the target window still has."""
+    target = computer._target_window  # noqa: SLF001 - diagnostic read of the SDK's bound window
+    if target is None:
+        return None
+    try:
+        result = await computer._call_tool(  # noqa: SLF001
+            "get_window_state",
+            {
+                "session": computer.session,
+                "pid": target.pid,
+                "window_id": target.window_id,
+                "include_screenshot": False,
+                "max_elements": 1,
+            },
+            read_only=True,
+        )
+    except Exception:  # diagnostics must never fail the matrix
+        return None
+    structured = result.get("structuredContent") or result.get("structured_content")
+    if not isinstance(structured, dict):
+        return None
+    background_input = structured.get("background_input")
+    return background_input if isinstance(background_input, dict) else None
 
 
 async def run_mode(mode: str, log_path: Path, allow_fallback: bool) -> tuple[dict[str, Any], int]:
@@ -409,15 +519,97 @@ async def run_mode(mode: str, log_path: Path, allow_fallback: bool) -> tuple[dic
                 )
             )
 
+        cases.extend(await run_enter_cases(computer, log_path, mode, size, requires_background_receipt))
+        routes = await background_input_routes(computer) if background else None
+
     return (
         {
             "mode": mode,
             "captureSize": {"width": size[0], "height": size[1]},
             "deliveryCounts": computer.delivery_counts,
+            "backgroundInput": routes,
             "cases": [asdict(case) for case in cases],
         },
         target_pid,
     )
+
+
+async def run_enter_cases(
+    computer: MacOSComputer,
+    log_path: Path,
+    mode: str,
+    size: tuple[int, int],
+    requires_background_receipt: bool,
+) -> list[CaseResult]:
+    """Enter on the two surfaces a model actually submits into: an NSTextField and a web form.
+
+    Each surface gets the two ways n2 asks for Enter -- `key_press enter` and a trailing `\\n`
+    inside `type` -- and the typing case that precedes them, so a failure is attributed to the
+    Enter delivery rather than to focus or text entry.
+    """
+    cases: list[CaseResult] = []
+
+    def receipt(values: list[dict[str, Any]]) -> bool:
+        return not requires_background_receipt or stayed_in_background(values)
+
+    surfaces = [
+        (
+            "native field",
+            "submitField",
+            lambda values, marker: has_text(values, marker, target="submitField"),
+            lambda values: has_submit(values, "submitField"),
+            "NSTextField fires its submit action",
+        ),
+        (
+            "web form",
+            "webForm",
+            lambda values, marker: has_web_value(values, marker),
+            lambda values: has_web_event(values, "submit"),
+            "the page's <form> submit handler runs",
+        ),
+    ]
+    for label, target, typed, submitted, submit_effect in surfaces:
+        point = target_center(read_events(log_path), target, size)
+        marker = f"{label.split()[0]}-{mode}"
+        cases.append(
+            await run_case(
+                computer,
+                log_path,
+                f"{label}: typing",
+                f"The {label} receives {marker!r}, or the driver refuses without partial delivery.",
+                lambda point=point, marker=marker: click_then_type(computer, point, marker, size),
+                lambda values, typed=typed, marker=marker: typed(values, marker) and receipt(values),
+                allow_explicit_refusal=requires_background_receipt,
+            )
+        )
+        cases.append(
+            await run_case(
+                computer,
+                log_path,
+                f"{label}: key_press enter",
+                f"key_press enter reaches the focused {label} and {submit_effect}, "
+                "or the driver refuses without partial delivery.",
+                lambda: dispatch_n2(computer, "key_press", {"key": "enter"}, size),
+                lambda values, submitted=submitted: submitted(values) and receipt(values),
+                allow_explicit_refusal=requires_background_receipt,
+            )
+        )
+        newline_marker = f"{marker}-newline"
+        cases.append(
+            await run_case(
+                computer,
+                log_path,
+                f"{label}: trailing newline in type",
+                f"type {newline_marker + chr(10)!r} inserts the text and {submit_effect}, like Enter would, "
+                "or the driver refuses without partial delivery.",
+                lambda point=point, text=newline_marker + "\n": click_then_type(computer, point, text, size),
+                lambda values, typed=typed, submitted=submitted, marker=newline_marker: typed(values, marker)
+                and submitted(values)
+                and receipt(values),
+                allow_explicit_refusal=requires_background_receipt,
+            )
+        )
+    return cases
 
 
 def ensure_probe_is_not_running() -> None:
@@ -429,17 +621,13 @@ def ensure_probe_is_not_running() -> None:
         )
 
 
-def launch_probe(app_path: Path, session_id: str, log_path: Path) -> None:
+def launch_probe(app_path: Path, session_id: str, log_path: Path, *, sibling_window: bool) -> None:
     if not app_path.is_dir():
         raise FileNotFoundError(f"App bundle not found at {app_path}. Run scripts/build-input-probe.sh first.")
-    subprocess.run(
-        [
-            "open", "-g", "-n", str(app_path), "--args",
-            "--session-id", session_id,
-            "--log-path", str(log_path),
-        ],
-        check=True,
-    )
+    arguments = ["--session-id", session_id, "--log-path", str(log_path)]
+    if sibling_window:
+        arguments.append("--secondary-window")
+    subprocess.run(["open", "-g", "-n", str(app_path), "--args", *arguments], check=True)
 
 
 async def async_main(args: argparse.Namespace) -> int:
@@ -452,7 +640,7 @@ async def async_main(args: argparse.Namespace) -> int:
     output_directory = REPOSITORY / ".context" / "input-probe" / session_id
     output_directory.mkdir(parents=True, exist_ok=False)
     log_path = output_directory / "app-events.jsonl"
-    launch_probe(args.app.resolve(), session_id, log_path)
+    launch_probe(args.app.resolve(), session_id, log_path, sibling_window=args.sibling_window)
     events = await wait_for_events(log_path, lambda values: has_event(values, "session", "ready"), timeout=8)
     if not has_event(events, "session", "ready"):
         raise RuntimeError(f"The probe did not become ready; expected an event at {log_path}.")
@@ -473,11 +661,14 @@ async def async_main(args: argparse.Namespace) -> int:
             except ProcessLookupError:
                 pass
 
+    all_events = read_events(log_path)
     result = {
         "sessionID": session_id,
         "app": str(args.app.resolve()),
         "appEventLog": str(log_path),
         "allowForegroundFallback": args.allow_foreground_fallback,
+        "siblingWindow": args.sibling_window,
+        "backgroundWindowInventory": latest_window_inventory(all_events, background_only=True),
         "modes": reports,
     }
     report_path = output_directory / "driver-report.json"
@@ -494,6 +685,19 @@ async def async_main(args: argparse.Namespace) -> int:
             else:
                 suffix = f" — {case['error']}" if case["error"] else ""
             print(f"  {'PASS' if passed else 'FAIL'}  {case['name']}{suffix}")
+        routes = (mode_report.get("backgroundInput") or {}).get("routes")
+        if routes:
+            print(f"  driver background routes: {json.dumps(routes, sort_keys=True)}")
+        enter_cases = [case for case in mode_report["cases"] if ": " in case["name"]]
+        if enter_cases:
+            print("  Enter delivery:")
+            for case in enter_cases:
+                print(f"    {case['name']:<40} {enter_verdict(case)}")
+    inventory = result["backgroundWindowInventory"]
+    if inventory:
+        print("\nWindow key/main flags while the app was in the background:")
+        for key in sorted(inventory):
+            print(f"  {key}: {inventory[key]}")
     print(f"\nApp events: {log_path}")
     print(f"Report:     {report_path}")
     return 1 if failures else 0

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var recorder: EventRecorder
+    @State private var submitFieldText = ""
 
     private let scenarios = ["Freeform", "Keyboard", "Pointer", "Background", "Fallback", "Window recovery"]
 
@@ -64,8 +65,31 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
 
                 ProbeKeySink(recorder: recorder)
-                    .frame(height: 150)
+                    .frame(height: 110)
                     .reportProbeGeometry("keySink", recorder: recorder)
+
+                Text("NSTextField: Enter (or a trailing \\n in type) must fire its submit action.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("submit field: type, then Enter submits", text: $submitFieldText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 13, design: .monospaced))
+                    .autocorrectionDisabled()
+                    .accessibilityIdentifier("probe.submitField")
+                    .onChange(of: submitFieldText) { _, value in
+                        recorder.recordTextChange(target: "submitField", value: value)
+                    }
+                    .onSubmit {
+                        recorder.recordSubmit(target: "submitField", value: submitFieldText)
+                    }
+                    .reportProbeGeometry("submitField", recorder: recorder)
+
+                Text("WKWebView form: the same two actions must submit the page's <form>.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ProbeWebForm(recorder: recorder)
+                    .frame(height: 64)
+                    .reportProbeGeometry("webForm", recorder: recorder)
 
                 HStack {
                     ShortcutChip(keys: "⌘ K", label: "Command")

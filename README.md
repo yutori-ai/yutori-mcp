@@ -463,6 +463,31 @@ beside the app log and exits nonzero when observed AppKit behavior does not matc
 delivery. `--mode background` avoids foreground control; `--allow-foreground-fallback` explicitly
 tests brief foreground escalation, and `--keep-open` leaves the probe visible afterward.
 
+The runner also drives an Enter matrix on the two surfaces a model submits into: a native
+`NSTextField` whose submit action must fire, and a `WKWebView` `<form>` whose submit handler must
+run. Each surface gets the typing that precedes Enter, `key_press enter`, and a trailing `\n`
+inside `type` (the two ways n2 asks for Enter). The summary prints one verdict per case: `landed`,
+`refused (<driver code>)`, or `no effect` when the driver reported the action as delivered but the
+surface never submitted. A clean refusal still counts as a passing case, because the driver leaked
+no partial input; the verdict line is what tells you Enter did not happen.
+
+```bash
+uv run python scripts/run-input-probe.py --mode background --sibling-window
+```
+
+`--sibling-window` launches the probe with a second, untitled window, the shape Chrome and Safari
+Technology Preview have in practice. The driver then refuses every pid-addressed background
+keystroke with `same_pid_keyboard_ambiguity`; the matrix shows which routes survive (the
+accessibility write the SDK falls back to for native text fields) and which do not (`key_press`,
+and anything inside web content). Background runs also print each window's key/main flags as
+AppKit saw them while another app was frontmost, and the driver's own `background_input.routes`
+verdict for the driven window.
+
+Background input never makes the probe the frontmost application. The driver does activate the
+target process without raising it, so the probe reports `appActive: true` and a key window during
+pointer clicks; the runner therefore judges "stayed in background" by
+`NSWorkspace.frontmostApplication`, which every delivered event records.
+
 Foreground mode takes over the visible desktop during its part of the test. Do not interact with
 the Mac until the command finishes. The runner aborts instead of sending input if the probe loses
 foreground ownership. Background mode leaves the current app focused, but leave the probe window

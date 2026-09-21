@@ -16,6 +16,7 @@ final class EventRecorder: NSObject, ObservableObject {
     private var sequence = 0
     private var installed = false
     private var localMonitor: Any?
+    private var secondaryWindow: NSWindow?
     private let timestampFormatter = ISO8601DateFormatter()
 
     init(configuration: ProbeConfiguration) {
@@ -70,6 +71,9 @@ final class EventRecorder: NSObject, ObservableObject {
             object: nil
         )
 
+        if configuration.secondaryWindow {
+            openSecondaryWindow()
+        }
         record(
             category: "session",
             name: "ready",
@@ -78,8 +82,54 @@ final class EventRecorder: NSObject, ObservableObject {
                 "logPath": configuration.logURL.path,
                 "osVersion": ProcessInfo.processInfo.operatingSystemVersionString,
                 "pid": "\(ProcessInfo.processInfo.processIdentifier)",
+                "secondaryWindow": "\(configuration.secondaryWindow)",
             ]
         )
+        recordWindowInventory(reason: "ready")
+    }
+
+    /// A sibling keyboard destination: an untitled, visible window ordered behind the content
+    /// window, never made key. Chrome and Safari Technology Preview own such windows, and the
+    /// driver refuses pid-addressed keystrokes whenever one exists.
+    private func openSecondaryWindow() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 60, y: 60, width: 360, height: 200),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = ""
+        window.isReleasedWhenClosed = false
+        let label = NSTextField(wrappingLabelWithString: "Secondary window: a sibling keyboard destination in the same process.")
+        label.frame = NSRect(x: 16, y: 16, width: 328, height: 168)
+        label.isSelectable = false
+        window.contentView?.addSubview(label)
+        window.orderBack(nil)
+        secondaryWindow = window
+        record(
+            category: "windows",
+            name: "secondaryOpened",
+            details: ["windowNumber": "\(window.windowNumber)"],
+            window: window
+        )
+    }
+
+    /// Every window's key/main flags plus the app-level key and main windows. AppKit resigns key
+    /// on deactivation, so this is the ground truth for what AX `AXFocused`/`AXMain` can report
+    /// while the app is driven in the background.
+    func recordWindowInventory(reason: String) {
+        var details: [String: String] = [
+            "reason": reason,
+            "keyWindow": NSApp.keyWindow.map { "\($0.windowNumber)" } ?? "none",
+            "mainWindow": NSApp.mainWindow.map { "\($0.windowNumber)" } ?? "none",
+        ]
+        for window in NSApp.windows where window.isVisible || window.isMiniaturized {
+            let title = window.title.isEmpty ? "(untitled)" : window.title
+            details["window.\(window.windowNumber)"] =
+                "title=\(title) key=\(window.isKeyWindow) main=\(window.isMainWindow) "
+                + "visible=\(window.isVisible) miniaturized=\(window.isMiniaturized)"
+        }
+        record(category: "windows", name: "inventory", details: details)
     }
 
     func reset() {
@@ -118,6 +168,18 @@ final class EventRecorder: NSObject, ObservableObject {
         guard !keySinkText.isEmpty else { return }
         keySinkText.removeLast()
         recordTextChange(target: "keySink", value: keySinkText)
+    }
+
+    func recordSubmit(target: String, value: String) {
+        record(
+            category: "control",
+            name: "submitted",
+            details: ["target": target, "value": value, "length": "\(value.count)"]
+        )
+    }
+
+    func recordWebEvent(name: String, details: [String: String]) {
+        record(category: "web", name: name, details: details)
     }
 
     func recordClick(target: String) {
@@ -203,6 +265,9 @@ final class EventRecorder: NSObject, ObservableObject {
             details: window.map { ["title": $0.title, "windowNumber": "\($0.windowNumber)"] } ?? [:],
             window: window
         )
+        if window == nil {
+            recordWindowInventory(reason: notification.name.rawValue)
+        }
     }
 
     @objc private func handleWorkspaceActivation(_ notification: Notification) {
