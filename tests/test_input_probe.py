@@ -6,6 +6,8 @@ from pathlib import Path
 import sys
 from unittest.mock import AsyncMock
 
+from dataclasses import dataclass
+
 
 def _load_probe_runner():
     path = Path(__file__).resolve().parents[1] / "scripts" / "run-input-probe.py"
@@ -21,6 +23,13 @@ probe = _load_probe_runner()
 
 
 OTHER_APP = "com.example.frontmost"
+
+
+@dataclass
+class FakeOutcome:
+    effect: str
+    recommended: str | None
+    escalated: bool
 
 
 def _event(
@@ -165,6 +174,47 @@ def test_clean_refusal_rejects_partial_or_misdirected_input():
     assert probe.is_clean_refusal("delivery failed", [_event(1, "layout")], delivery) is True
     assert probe.is_clean_refusal("delivery failed", [_event(1, "text")], delivery) is False
     assert probe.is_clean_refusal(None, [], delivery) is False
+
+
+def test_clean_refusal_ignores_web_bookkeeping_but_not_web_input():
+    delivery = {"effect": "refused", "recommended": "accessibility"}
+    bookkeeping = [_event(1, "web", name="ready"), _event(2, "web", name="focus"), _event(3, "web", name="blur")]
+
+    assert probe.is_clean_refusal("refused", bookkeeping, delivery) is True
+    assert probe.is_clean_refusal("refused", bookkeeping + [_event(4, "web", name="input", value="x")], delivery) is False
+    assert probe.is_clean_refusal("refused", [_event(1, "web", name="documentKeydown", key="a")], delivery) is False
+
+
+async def test_run_case_excludes_setup_events_from_the_measured_action(tmp_path):
+    """A focusing click's pointer events must not count against the action that follows it."""
+    log_path = tmp_path / "events.jsonl"
+    outcomes: list[FakeOutcome] = []
+    computer = type("FakeComputer", (), {"action_outcomes": outcomes})()
+
+    async def setup() -> None:
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(_event(1, "nsevent", name="leftMouseDown")) + "\n")
+        outcomes.append(FakeOutcome("unverifiable", None, False))
+
+    async def action() -> None:
+        outcomes.append(FakeOutcome("refused", "accessibility", False))
+        raise RuntimeError("refused")
+
+    result = await probe.run_case(
+        computer,
+        log_path,
+        "typing",
+        "text lands or is cleanly refused",
+        action,
+        lambda values: probe.has_text(values, "never"),
+        allow_explicit_refusal=True,
+        setup=setup,
+    )
+
+    assert result.received_events == []
+    assert result.passed is True
+    assert result.error == "RuntimeError: refused"
+    assert result.delivery == {"effect": "refused", "recommended": "accessibility", "escalated": False, "escalated_in_case": False}
 
 
 def test_key_down_sequence_requires_exact_order_without_duplicates():

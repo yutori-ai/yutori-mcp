@@ -32,9 +32,12 @@ from yutori_mcp.computer_use.targeting import (  # noqa: E402
 BUNDLE_ID = "ai.yutori.input-probe"
 EXECUTABLE_NAME = "YutoriInputProbe"
 DEFAULT_APP = REPOSITORY / "tools" / "YutoriInputProbe" / ".build" / "YutoriInputProbe.app"
-INPUT_EVENT_CATEGORIES = {"nsevent", "text", "command", "control", "responder", "web"}
+INPUT_EVENT_CATEGORIES = {"nsevent", "text", "command", "control", "responder"}
 # Web `ready`/`focus`/`blur` are surface bookkeeping, not evidence that a driver action landed.
-WEB_INPUT_EVENTS = {"keydown", "keyup", "keypress", "input", "submit"}
+WEB_INPUT_EVENTS = {"keydown", "keyup", "keypress", "input", "submit", "documentKeydown"}
+# Evidence that input was delivered while the app was in the background; `responder` focus
+# changes are bookkeeping here too.
+BACKGROUND_EVIDENCE_CATEGORIES = {"nsevent", "text", "command", "control"}
 KEY_SEQUENCE_SETTLE_MS = 75
 
 
@@ -124,12 +127,18 @@ def delivery_dict(computer: MacOSComputer, starting_count: int) -> dict[str, Any
     return latest
 
 
+def is_input_evidence(event: dict[str, Any]) -> bool:
+    if event.get("category") == "web":
+        return event.get("name") in WEB_INPUT_EVENTS
+    return event.get("category") in INPUT_EVENT_CATEGORIES
+
+
 def is_clean_refusal(
     error: str | None,
     events: list[dict[str, Any]],
     delivery: dict[str, Any] | None,
 ) -> bool:
-    received_input = any(event.get("category") in INPUT_EVENT_CATEGORIES for event in events)
+    received_input = any(is_input_evidence(event) for event in events)
     return bool(
         error
         and not received_input
@@ -183,7 +192,16 @@ async def run_case(
     matches: Callable[[list[dict[str, Any]]], bool],
     *,
     allow_explicit_refusal: bool = False,
+    setup: Callable[[], Any] | None = None,
 ) -> CaseResult:
+    """Run one action and judge only the events it produced.
+
+    ``setup`` (a focusing click, for example) runs before the baseline is captured, so its own
+    pointer events and outcome are never attributed to the measured action and cannot turn a
+    clean keyboard refusal into a failure.
+    """
+    if setup is not None:
+        await setup()
     starting_sequence, starting_outcomes = capture_baseline(log_path, computer)
     error: str | None = None
     try:
@@ -308,8 +326,8 @@ def stayed_in_background(events: list[dict[str, Any]]) -> bool:
     meaningful = [
         event
         for event in events
-        if event.get("category") in {"nsevent", "text", "command", "control"}
-        or (event.get("category") == "web" and event.get("name") in WEB_INPUT_EVENTS)
+        if event.get("category") in BACKGROUND_EVIDENCE_CATEGORIES
+        or (event.get("category") == "web" and is_input_evidence(event))
     ]
     return bool(meaningful) and all(
         event.get("state", {}).get("frontmostBundleID") not in (None, BUNDLE_ID) for event in meaningful
@@ -329,13 +347,10 @@ def enter_verdict(case: dict[str, Any]) -> str:
     return f"no effect (driver said {delivery.get('effect') or '?'} via {route})"
 
 
-async def click_then_type(
-    computer: MacOSComputer, point: tuple[int, int], text: str, size: tuple[int, int]
-) -> None:
-    """Focus a field the way the model does (pointer click), then type into it."""
+async def focus_by_click(computer: MacOSComputer, point: tuple[int, int]) -> None:
+    """Focus a field the way the model does: a pointer click, then a short settle."""
     await computer.click(*point)
     await computer.wait(KEY_SEQUENCE_SETTLE_MS)
-    await dispatch_n2(computer, "type", {"text": text}, size)
 
 
 async def background_input_routes(computer: MacOSComputer) -> dict[str, Any] | None:
@@ -577,9 +592,10 @@ async def run_enter_cases(
                 log_path,
                 f"{label}: typing",
                 f"The {label} receives {marker!r}, or the driver refuses without partial delivery.",
-                lambda point=point, marker=marker: click_then_type(computer, point, marker, size),
+                lambda marker=marker: dispatch_n2(computer, "type", {"text": marker}, size),
                 lambda values, typed=typed, marker=marker: typed(values, marker) and receipt(values),
                 allow_explicit_refusal=requires_background_receipt,
+                setup=lambda point=point: focus_by_click(computer, point),
             )
         )
         cases.append(
@@ -602,11 +618,12 @@ async def run_enter_cases(
                 f"{label}: trailing newline in type",
                 f"type {newline_marker + chr(10)!r} inserts the text and {submit_effect}, like Enter would, "
                 "or the driver refuses without partial delivery.",
-                lambda point=point, text=newline_marker + "\n": click_then_type(computer, point, text, size),
+                lambda text=newline_marker + "\n": dispatch_n2(computer, "type", {"text": text}, size),
                 lambda values, typed=typed, submitted=submitted, marker=newline_marker: typed(values, marker)
                 and submitted(values)
                 and receipt(values),
                 allow_explicit_refusal=requires_background_receipt,
+                setup=lambda point=point: focus_by_click(computer, point),
             )
         )
     return cases
