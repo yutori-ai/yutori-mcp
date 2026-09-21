@@ -43,6 +43,22 @@ def redact(text: str, secret: str) -> str:
     return text.replace(secret, REDACTED)
 
 
+def read_bounded_line(stream: TextIO, max_chars: int) -> str | None:
+    """Read one newline-terminated line off ``stream``, capped at ``max_chars``.
+
+    Returns the line (with its trailing ``\\n``) if it is properly framed, or ``None``
+    if the stream ran out or the line exceeded the cap before a newline arrived.
+    Shared by the runner's stdin credential-frame read (``_read_protocol_input``) and
+    the CLI's stdin VM-token read (``cli._read_vm_run_token``) so the
+    ``readline(max_chars + 2)`` bound-and-check trick lives in one place instead of
+    two independently hand-rolled copies.
+    """
+    line = stream.readline(max_chars + 2)
+    if not line.endswith("\n") or len(line) > max_chars + 1:
+        return None
+    return line
+
+
 def is_positive_int(value: Any) -> bool:
     """True for a real positive int. `bool` is an int subclass, so it is excluded.
 
