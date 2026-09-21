@@ -52,6 +52,7 @@ from .result import (
     format_runtime_version,
     format_terminal_action,
     format_terminal_result,
+    read_bounded_line,
     structured_content,
 )
 from .supervisor import run_task_with_resolved_credentials, stop_active_run
@@ -152,8 +153,8 @@ def _blocked(*, json_output: bool = False, api_key_provided: bool = False) -> bo
 
 def _read_vm_run_token(stream: TextIO | None = None) -> str:
     source = stream or sys.stdin
-    credential_frame = source.readline(MAX_CREDENTIAL_CHARACTERS + 2)
-    if not credential_frame.endswith("\n") or len(credential_frame) > MAX_CREDENTIAL_CHARACTERS + 1:
+    credential_frame = read_bounded_line(source, MAX_CREDENTIAL_CHARACTERS)
+    if credential_frame is None:
         raise ValueError("Expected one newline-terminated VM run token on stdin.")
     token = credential_frame[:-1]
     if token != token.strip() or not token.startswith(VM_RUN_TOKEN_PREFIX):

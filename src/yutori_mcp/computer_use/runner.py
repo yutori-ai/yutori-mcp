@@ -49,7 +49,7 @@ from .constants import (
     TOOL_SET,
     VM_RUN_ID_HEADER,
 )
-from .result import compact_json_line, elapsed_ms_since, is_positive_int, redact, remaining_seconds
+from .result import compact_json_line, elapsed_ms_since, is_positive_int, read_bounded_line, redact, remaining_seconds
 from .targeting import TargetGuardedMacOSComputer as MacOSComputer
 from ..schemas import background_focus_overlay_constraint_error, computer_use_constraint_error
 
@@ -1209,15 +1209,10 @@ def _claim_protocol_stream() -> TextIO:
 
 
 def _read_protocol_input() -> tuple[str, str]:
-    credential_frame = sys.stdin.readline(MAX_CREDENTIAL_CHARACTERS + 2)
+    credential_frame = read_bounded_line(sys.stdin, MAX_CREDENTIAL_CHARACTERS)
     request_frame = sys.stdin.readline()
     trailing = sys.stdin.read()
-    if (
-        not credential_frame.endswith("\n")
-        or len(credential_frame) > MAX_CREDENTIAL_CHARACTERS + 1
-        or not request_frame.endswith("\n")
-        or trailing.strip()
-    ):
+    if credential_frame is None or not request_frame.endswith("\n") or trailing.strip():
         raise RequestError("INVALID_REQUEST", "Expected one credential frame and one JSONL request frame.")
     api_key = credential_frame[:-1]
     if not api_key or api_key != api_key.strip() or "\r" in api_key:
