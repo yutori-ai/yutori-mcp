@@ -48,7 +48,7 @@ from .constants import (
 )
 from .result import compact_json_line, elapsed_ms_since, is_positive_int, redact, remaining_seconds
 from .targeting import TargetGuardedMacOSComputer as MacOSComputer
-from ..schemas import computer_use_constraint_error
+from ..schemas import background_focus_overlay_constraint_error, computer_use_constraint_error
 
 _FOREGROUND_OPENING = "You control the entire macOS screen. "
 _SHARED_CONTEXT = (
@@ -231,10 +231,10 @@ def parse_request(payload: Any) -> dict[str, Any]:
     background_focus_overlay = (
         _require_bool(payload, "background_focus_overlay") if "background_focus_overlay" in payload else False
     )
-    if background_focus_overlay and mode != DELIVERY_MODE_BACKGROUND:
-        raise RequestError("INVALID_REQUEST", "background_focus_overlay requires mode='background'.")
-    if background_focus_overlay and not presentation:
-        raise RequestError("INVALID_REQUEST", "background_focus_overlay requires presentation.")
+    if error := background_focus_overlay_constraint_error(
+        mode=mode, presentation=presentation, background_focus_overlay=background_focus_overlay
+    ):
+        raise RequestError("INVALID_REQUEST", f"{error}.")
     exclude_capture_window_ids = (
         _require_window_ids(payload, "exclude_capture_window_ids") if "exclude_capture_window_ids" in payload else []
     )
