@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -448,7 +449,22 @@ async def test_supervisor_redacts_key_and_keeps_it_out_of_argv():
         )
     assert secret not in json.dumps(result)
     assert secret not in " ".join(create.await_args.args)
-    assert process.stdin.data.count(b"\n") == 1
+    assert secret not in create.await_args.kwargs["env"].values()
+    assert process.stdin.data.splitlines() == [secret.encode(), b'{"type":"run"}']
+
+
+@pytest.mark.parametrize("api_key", ["", " key", "key ", "key\nsecond", "key\rsecond"])
+async def test_supervisor_rejects_invalid_credential_frames_before_spawn(api_key):
+    create = AsyncMock()
+    with patch("asyncio.create_subprocess_exec", create):
+        with pytest.raises(ValueError, match="one non-empty line"):
+            await _supervise(
+                command=python_runner_command(),
+                request={"type": "run"},
+                api_key=api_key,
+                deadline=time.monotonic() + 1,
+            )
+    create.assert_not_awaited()
 
 
 async def test_supervisor_forwards_ready_and_action_events():
@@ -774,12 +790,24 @@ async def test_runner_honors_sigterm_during_signal_handler_handoff(monkeypatch):
     assert json.loads(stream.lines[-1])["outcome"] == "aborted"
 
 
-def test_runner_removes_api_key_before_spawning_a_real_shell(monkeypatch):
+def test_runner_reads_api_key_from_stdin_without_exporting_it(monkeypatch):
     secret = "yt-child-shell-secret"
-    monkeypatch.setenv("YUTORI_API_KEY", secret)
-    assert runner_module._take_api_key() == secret
-    assert "YUTORI_API_KEY" not in os.environ
+    monkeypatch.delenv("YUTORI_API_KEY", raising=False)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f'{secret}\n{{"type":"run"}}\n'))
+    api_key, request = runner_module._read_protocol_input()
+    assert api_key == secret
+    assert json.loads(request) == {"type": "run"}
     subprocess.run(["/bin/sh", "-c", 'test -z "${YUTORI_API_KEY+x}"'], check=True)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ["", "key-only\n", "\n{}\n", "key\n{}\nextra\n", " key\n{}\n", "key\r\n{}\n"],
+)
+def test_runner_rejects_malformed_stdin_protocol(monkeypatch, payload):
+    monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
+    with pytest.raises(RequestError, match="frame"):
+        runner_module._read_protocol_input()
 
 
 def test_python_runner_is_isolated_and_has_no_node_path():
@@ -845,6 +873,33 @@ async def test_run_task_uses_only_python_runner_and_sdk_driver_discovery(tmp_pat
     request = supervise.await_args.kwargs["request"]
     assert request["model"] == "n2"
     assert "driver_path" not in request and "harness" not in request
+
+
+async def test_resolved_run_credentials_use_stdin_override_without_reading_stored_key(monkeypatch):
+    from yutori_mcp import adapter
+
+    run = AsyncMock(return_value={"outcome": "completed"})
+    monkeypatch.setattr(supervisor, "run_task", run)
+    monkeypatch.setattr(
+        adapter,
+        "resolve_run_credentials_and_platform_url",
+        lambda: pytest.fail("stdin credentials must not resolve the stored key"),
+    )
+    monkeypatch.setattr(adapter, "resolve_base_url", lambda: "https://api.yutori.com/v1")
+    monkeypatch.setattr(adapter, "resolve_platform_url", lambda: "https://platform.yutori.com")
+
+    result = await supervisor.run_task_with_resolved_credentials(
+        api_key_override="yvm_token",
+        task="open calculator",
+    )
+
+    assert result == {"outcome": "completed"}
+    assert run.await_args.kwargs == {
+        "api_key": "yvm_token",
+        "api_base_url": "https://api.yutori.com/v1",
+        "platform_url": "https://platform.yutori.com",
+        "task": "open calculator",
+    }
 
 
 async def test_run_task_links_the_run_to_the_platform_chat_page(tmp_path):
@@ -1109,6 +1164,19 @@ def test_first_blocker_uses_only_the_live_run_safety_checks(monkeypatch):
     monkeypatch.setattr(preflight, "_RUN_BLOCKING_CHECKS", (ok, blocker, never))
     assert preflight.first_blocker().name == "driver"
     assert calls == ["ok", "blocker"]
+
+
+def test_first_blocker_skips_stored_key_check_for_stdin_credentials(monkeypatch):
+    from yutori_mcp import adapter
+
+    def blocker():
+        return preflight.CheckResult("driver", False, "missing", "setup")
+
+    monkeypatch.setattr(adapter, "resolve_run_credentials", lambda _environment: (None, "https://example.test"))
+    monkeypatch.setattr(preflight, "_RUN_BLOCKING_CHECKS", (preflight.check_api_key, blocker))
+
+    assert preflight.first_blocker().name == "API key"
+    assert preflight.first_blocker(api_key_provided=True).name == "driver"
 
 
 def test_live_run_preflight_leaves_diagnostic_and_synthetic_api_probes_to_doctor():
@@ -1726,12 +1794,11 @@ def test_runner_main_unexpected_failure_preserves_the_requested_background_mode(
     async def fail(_request, _emitter, _api_key, _termination_requested):
         raise RuntimeError("unexpected runner failure")
 
-    monkeypatch.setattr(runner_module, "_take_api_key", lambda: "yt-key")
     monkeypatch.setattr(runner_module, "_claim_protocol_stream", lambda: stream)
     monkeypatch.setattr(
         runner_module,
-        "_read_request_line",
-        lambda: json.dumps(_valid_request(app="Notes", mode="background")),
+        "_read_protocol_input",
+        lambda: ("yt-key", json.dumps(_valid_request(app="Notes", mode="background"))),
     )
     monkeypatch.setattr(runner_module, "_run_until_terminated", fail)
 
@@ -2500,9 +2567,18 @@ async def test_run_task_request_carries_mode_fallback_and_shell_policy(tmp_path)
             )
         )
     request = supervise.await_args.kwargs["request"]
-    assert request["protocol_version"] == PROTOCOL_VERSION == 2
+    assert request["protocol_version"] == PROTOCOL_VERSION == 3
     assert request["mode"] == "background" and request["allow_foreground_fallback"] is True
     assert request["allow_local_shell"] is False
+
+
+async def test_run_task_carries_only_the_vm_run_id_to_the_runner(tmp_path):
+    run_id = str(uuid.uuid4())
+    with _patched_run_task_supervise(tmp_path) as supervise:
+        await run_task(**_run_task_kwargs(tmp_path, vm_run_id=run_id))
+    request = supervise.await_args.kwargs["request"]
+    assert request["vm_run_id"] == run_id
+    assert "api_key" not in request
 
 
 async def test_run_task_defaults_to_background_and_reports_failures_in_the_requested_mode(tmp_path):
@@ -2543,6 +2619,25 @@ def test_parse_request_accepts_background_with_app():
     assert parsed["mode"] == "background" and parsed["allow_foreground_fallback"] is True
     assert parsed["allow_local_shell"] is True
     assert parse_request(_valid_request())["mode"] == "foreground"
+
+
+def test_parse_request_validates_vm_run_id():
+    run_id = uuid.uuid4()
+    assert parse_request(_valid_request(vm_run_id=str(run_id)))["vm_run_id"] == str(run_id)
+    with pytest.raises(RequestError, match="vm_run_id must be a UUID"):
+        parse_request(_valid_request(vm_run_id="not-a-uuid"))
+
+
+async def test_run_bound_completions_adds_the_vm_run_header_to_every_request():
+    create = AsyncMock(return_value={"ok": True})
+    completions = runner_module._RunBoundCompletions(SimpleNamespace(create=create), "run-123")
+
+    assert await completions.create([], model="n2", extra_headers={"x-existing": "value"}) == {"ok": True}
+
+    assert create.await_args.kwargs["extra_headers"] == {
+        "x-existing": "value",
+        runner_module.VM_RUN_ID_HEADER: "run-123",
+    }
 
 
 def test_computer_kwargs_keep_the_foreground_shape_and_add_window_scope_for_background(monkeypatch):
@@ -2597,9 +2692,9 @@ def test_computer_kwargs_recordable_overlay_switch(monkeypatch):
 
 def test_child_environment_forwards_the_recordable_overlay_switch(monkeypatch):
     monkeypatch.delenv(runner_module.ENV_RECORDABLE_OVERLAY, raising=False)
-    assert runner_module.ENV_RECORDABLE_OVERLAY not in supervisor._child_environment("k")
+    assert runner_module.ENV_RECORDABLE_OVERLAY not in supervisor._child_environment()
     monkeypatch.setenv(runner_module.ENV_RECORDABLE_OVERLAY, "0")
-    assert supervisor._child_environment("k")[runner_module.ENV_RECORDABLE_OVERLAY] == "0"
+    assert supervisor._child_environment()[runner_module.ENV_RECORDABLE_OVERLAY] == "0"
 
 
 def test_computer_kwargs_can_disable_local_shell():
@@ -3521,7 +3616,7 @@ def test_child_environment_forwards_the_embedded_host_configuration(monkeypatch,
     monkeypatch.setenv("CUA_DRIVER_HOST_BUNDLE_ID", "com.yutori.desktop")
     monkeypatch.setenv("UNRELATED_SECRET", "no")
 
-    env = supervisor._child_environment("yt-key")
+    env = supervisor._child_environment()
 
     assert env[preflight.ENV_DRIVER_BINARY] == str(binary)
     assert env[preflight.ENV_DRIVER_SOCKET] == str(sock)
@@ -3592,6 +3687,90 @@ def test_cli_run_and_doctor_parsers_accept_json_and_hide_stop_item():
     assert default.json is False and default.hide_stop_item is False
     assert parser.parse_args(["computer-use", "doctor", "--json"]).json is True
     assert parser.parse_args(["computer-use", "doctor"]).json is False
+
+
+def test_cli_run_parser_accepts_paired_stdin_token_arguments():
+    from yutori_mcp.computer_use import cli
+
+    parser = argparse.ArgumentParser()
+    cli.register_parser(parser.add_subparsers(dest="command"))
+    run_id = uuid.uuid4()
+    args = parser.parse_args(
+        ["computer-use", "run", "add a note", "--api-key-stdin", "--vm-run-id", str(run_id)]
+    )
+    assert args.api_key_stdin is True
+    assert args.vm_run_id == run_id
+
+
+def test_cli_reads_one_newline_terminated_vm_token_without_waiting_for_eof():
+    from yutori_mcp.computer_use import cli
+
+    stream = io.StringIO("yvm_token\nstream-remains-open")
+    assert cli._read_vm_run_token(stream) == "yvm_token"
+    assert stream.read() == "stream-remains-open"
+    with pytest.raises(ValueError, match="newline-terminated"):
+        cli._read_vm_run_token(io.StringIO("yvm_token"))
+
+
+async def test_cli_run_streams_vm_token_without_resolving_a_stored_key(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    token = "yvm_test-token"
+    run_id = uuid.uuid4()
+    run = AsyncMock(return_value={"outcome": "completed", "delivery_mode": "foreground", "final_text": "done"})
+    blocker_calls: list[bool] = []
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"{token}\n"))
+    monkeypatch.setattr(cli, "run_task_with_resolved_credentials", run)
+    monkeypatch.setattr(
+        cli,
+        "_blocked",
+        lambda **kwargs: blocker_calls.append(kwargs["api_key_provided"]) or False,
+    )
+
+    assert await cli._run_custom(_run_args(api_key_stdin=True, vm_run_id=run_id, json=True)) == 0
+
+    assert blocker_calls == [True]
+    assert run.await_args.kwargs["api_key_override"] == token
+    assert run.await_args.kwargs["vm_run_id"] == str(run_id)
+    assert token not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("api_key_stdin", "vm_run_id"),
+    [(True, None), (False, uuid.uuid4())],
+)
+async def test_cli_run_requires_stdin_token_and_run_id_together(api_key_stdin, vm_run_id):
+    from yutori_mcp.computer_use import cli
+
+    with pytest.raises(ValueError, match="must be provided together"):
+        await cli._run_custom(_run_args(api_key_stdin=api_key_stdin, vm_run_id=vm_run_id))
+
+
+@pytest.mark.parametrize(
+    ("overrides", "stdin", "message"),
+    [
+        (
+            {"api_key_stdin": True, "vm_run_id": None},
+            "",
+            "--api-key-stdin and --vm-run-id must be provided together.",
+        ),
+        (
+            {"api_key_stdin": True, "vm_run_id": uuid.uuid4()},
+            "not-a-vm-token\n",
+            "Expected a VM run token on stdin.",
+        ),
+    ],
+)
+async def test_cli_run_reports_stdin_credential_errors_as_json(monkeypatch, capsys, overrides, stdin, message):
+    from yutori_mcp.computer_use import cli
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
+
+    assert await cli._run_custom(_run_args(json=True, **overrides)) == 1
+    assert _json_lines(capsys.readouterr().out) == [
+        {"type": "error", "code": "INVALID_CREDENTIAL_INPUT", "message": message}
+    ]
 
 
 def _run_args(**overrides) -> SimpleNamespace:

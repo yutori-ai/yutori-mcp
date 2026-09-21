@@ -6,13 +6,14 @@ import functools
 import hashlib
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 from urllib.request import urlopen
 
 from ..schemas import (
@@ -28,6 +29,7 @@ from .constants import (
     DRIVER_INSTALLER_SHA256,
     DRIVER_VERSION,
     HOST_ONLY_EVENT_TYPES,
+    MAX_CREDENTIAL_CHARACTERS,
 )
 from .lock import ComputerUseBusyError, DesktopLock
 from .preflight import (
@@ -53,6 +55,8 @@ from .result import (
     structured_content,
 )
 from .supervisor import run_task_with_resolved_credentials, stop_active_run
+
+VM_RUN_TOKEN_PREFIX = "yvm_"
 
 
 def _json_line(payload: dict[str, Any]) -> None:
@@ -134,9 +138,9 @@ def _setup() -> int:
     return _doctor()
 
 
-def _blocked(*, json_output: bool = False) -> bool:
+def _blocked(*, json_output: bool = False, api_key_provided: bool = False) -> bool:
     """Print and return True if a blocking preflight check fails; False if ready to run."""
-    blocker = first_blocker()
+    blocker = first_blocker(api_key_provided=True) if api_key_provided else first_blocker()
     if blocker is None:
         return False
     if json_output:
@@ -144,6 +148,24 @@ def _blocked(*, json_output: bool = False) -> bool:
     else:
         print(blocker_message(blocker))
     return True
+
+
+def _read_vm_run_token(stream: TextIO | None = None) -> str:
+    source = stream or sys.stdin
+    credential_frame = source.readline(MAX_CREDENTIAL_CHARACTERS + 2)
+    if not credential_frame.endswith("\n") or len(credential_frame) > MAX_CREDENTIAL_CHARACTERS + 1:
+        raise ValueError("Expected one newline-terminated VM run token on stdin.")
+    token = credential_frame[:-1]
+    if token != token.strip() or not token.startswith(VM_RUN_TOKEN_PREFIX):
+        raise ValueError("Expected a VM run token on stdin.")
+    return token
+
+
+def _credential_input_error(message: str, *, json_output: bool) -> int:
+    if json_output:
+        _json_line({"type": "error", "code": "INVALID_CREDENTIAL_INPUT", "message": message})
+        return 1
+    raise ValueError(message)
 
 
 def _exit_code(result: dict[str, Any]) -> int:
@@ -334,9 +356,20 @@ async def _run_custom(args: argparse.Namespace) -> int:
         allow_local_shell=args.allow_local_shell,
     )
     json_output = bool(getattr(args, "json", False))
+    api_key_stdin = bool(getattr(args, "api_key_stdin", False))
+    vm_run_id = getattr(args, "vm_run_id", None)
+    if api_key_stdin != (vm_run_id is not None):
+        return _credential_input_error(
+            "--api-key-stdin and --vm-run-id must be provided together.",
+            json_output=json_output,
+        )
+    try:
+        api_key_override = _read_vm_run_token() if api_key_stdin else None
+    except ValueError as error:
+        return _credential_input_error(str(error), json_output=json_output)
     paint = Terminal.detect()
     preflight_started = time.monotonic()
-    if _blocked(json_output=json_output):
+    if _blocked(json_output=json_output, api_key_provided=api_key_override is not None):
         return 1
     # Both branches below run the identical request through the supervisor, differing only
     # in which `on_event` callback renders progress; bound here once as the single source of
@@ -348,6 +381,8 @@ async def _run_custom(args: argparse.Namespace) -> int:
         presentation=not getattr(args, "no_presentation", False),
         background_focus_overlay=background_focus_overlay,
         exclude_capture_window_ids=tuple(getattr(args, "exclude_capture_windows", None) or ()),
+        api_key_override=api_key_override,
+        vm_run_id=str(vm_run_id) if vm_run_id is not None else None,
     )
     if json_output:
         result = await run_task(on_event=_json_event_printer())
@@ -462,6 +497,17 @@ def register_parser(
         ),
     )
     run_parser.add_argument("task", help="Task for the model to perform")
+    run_parser.add_argument(
+        "--api-key-stdin",
+        action="store_true",
+        help="Read one VM run token from stdin (requires --vm-run-id)",
+    )
+    run_parser.add_argument(
+        "--vm-run-id",
+        type=uuid.UUID,
+        default=None,
+        help="Run ID bound to the stdin VM token (requires --api-key-stdin)",
+    )
     run_parser.add_argument("--app", default=None, help="Application to target")
     run_parser.add_argument("--start-url", dest="start_url", default=None, help="URL to open in the app")
     run_parser.add_argument(
