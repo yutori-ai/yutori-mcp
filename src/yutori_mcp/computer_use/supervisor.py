@@ -39,6 +39,7 @@ from .preflight import (
 from .result import compact_json_line, failure, redact
 from .result import remaining_seconds as _remaining_seconds
 from .result import terminal_result
+from ..schemas import background_focus_overlay_constraint_error
 
 logger = logging.getLogger(__name__)
 
@@ -475,10 +476,10 @@ async def run_task(
     deadline = time.monotonic() + minutes * 60
     deadline_ms = int((time.time() + minutes * 60) * 1000)
     try:
-        if background_focus_overlay and mode != DELIVERY_MODE_BACKGROUND:
-            raise ValueError("background_focus_overlay requires mode='background'")
-        if background_focus_overlay and not presentation:
-            raise ValueError("background_focus_overlay requires presentation")
+        if error := background_focus_overlay_constraint_error(
+            mode=mode, presentation=presentation, background_focus_overlay=background_focus_overlay
+        ):
+            raise ValueError(error)
         with lock or DesktopLock():
             request = {
                 "protocol_version": PROTOCOL_VERSION,

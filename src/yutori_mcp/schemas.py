@@ -425,6 +425,28 @@ def computer_use_constraint_error(
     return None
 
 
+def background_focus_overlay_constraint_error(
+    *,
+    mode: str,
+    presentation: bool,
+    background_focus_overlay: bool,
+) -> str | None:
+    """The first violated background_focus_overlay cross-field rule, or None.
+
+    Shared by ``computer_use/runner.py``'s ``parse_request`` (the wire-protocol parser) and
+    ``computer_use/supervisor.py``'s ``run_task`` (the direct Python entry point): both enforce
+    the same two rules on the same fields, so the wording and check order can't drift between
+    the two. Unlike ``computer_use_constraint_error`` above, this isn't part of
+    ``ComputerUseTaskInput`` — the flag is a CLI/host-embedding option, not part of the public
+    MCP tool schema.
+    """
+    if background_focus_overlay and mode != "background":
+        return "background_focus_overlay requires mode='background'"
+    if background_focus_overlay and not presentation:
+        return "background_focus_overlay requires presentation"
+    return None
+
+
 class ComputerUseTaskInput(ToolInput):
     task: str = Field(..., description="Task to perform on the Mac desktop or in the target app's window")
     app: str | None = Field(
