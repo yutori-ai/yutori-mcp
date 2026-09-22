@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.5.39"
+version = "0.5.40"
 description = "MCP server and workflow skills for building agents with Yutori"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,11 +30,10 @@ dependencies = [
     # breaks the install as soon as 2.x resolves.
     "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
-    # SDK 0.9.35 keeps a selected app bound while it has no windows (MacOSAppState,
-    # set_app_target, get_app_state, invoke_app_menu): menus are read from the window's
-    # own AX snapshot and pressed by element token in background mode, screenshots carry
-    # only the window list, and the runner emits app_state events with a nullable window.
-    "yutori==0.9.35",
+    # SDK 0.9.36 shows the run-command card (command plus streamed output) by the pointer in
+    # background runs with the focus overlay; 0.9.35 routed shell events past it, so a run
+    # with the status item off -- how the desktop app embeds this runtime -- showed commands nowhere.
+    "yutori==0.9.36",
 ]
 
 [project.optional-dependencies]
