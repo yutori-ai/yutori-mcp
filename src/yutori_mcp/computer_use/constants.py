@@ -46,11 +46,11 @@ HOST_ONLY_EVENT_TYPES = frozenset({"frame", "activity", "app_state"})
 # also hides it from recorders. Read by the runner; the supervisor forwards it to the runner's
 # environment.
 ENV_RECORDABLE_OVERLAY = "YUTORI_RECORDABLE_OVERLAY"
-SDK_VERSION = "0.9.35"
+SDK_VERSION = "0.9.36"
 # The PyPI wheel digest and a digest derived from its stable RECORD entries.
 # Doctor compares the latter with the unpacked installation before any task runs.
-SDK_ARTIFACT_SHA256 = "9518775d16f4a0110a2aa2c3d6a308dbc83b1b20be21afee55c93e4aba99fccc"
-SDK_INSTALLATION_SHA256 = "2143a2aa35ad1121b697e6f438e1d550e7d55a0799b9acfa6768126efd02c330"
+SDK_ARTIFACT_SHA256 = "848a9de52942e6c20730a5732283b1e63ae1d17eac8cb27489a687d587057b47"
+SDK_INSTALLATION_SHA256 = "df64068f06dacd06d89e467a5158d4aada41459f1760b006edaa75b2ff1d57da"
 SDK_PROVENANCE_SHA256 = "e7182ddf09d4cdc9a999acf605a13672bbc70aba7dec533dfe252c9fc1dd75fd"
 
 # The cua-driver release that implements this tool contract, and the checksum
