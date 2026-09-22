@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.5.37"
+version = "0.5.38"
 description = "MCP server and workflow skills for building agents with Yutori"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,10 +30,12 @@ dependencies = [
     # breaks the install as soon as 2.x resolves.
     "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
-    # SDK 0.9.33 sends every newline inside typed text as a Return keystroke:
-    # the driver would otherwise insert "\n" literally or send it as keycode 0,
-    # so `type "query\n"` never submitted an address bar or a form on macOS.
-    "yutori==0.9.33",
+    # SDK 0.9.34 re-bundles the navigator overlay runtime at 0.6.0, which reads the
+    # screen size the focus-overlay panel hands it instead of scaling its chrome off
+    # the panel's own width. Background runs drew the pointer at the 0.65 clamp floor
+    # -- about half the size the same run shows in the full-screen overlay -- because
+    # 0.9.33 shipped the injection against a runtime that had no code reading it.
+    "yutori==0.9.34",
 ]
 
 [project.optional-dependencies]
