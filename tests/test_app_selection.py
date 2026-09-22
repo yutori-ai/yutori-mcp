@@ -183,14 +183,22 @@ async def test_selecting_an_app_without_windows_is_valid(monkeypatch):
 
 @pytest.mark.parametrize(
     "name,allowed",
-    [("get_app_state", True), ("invoke_app_menu", True), ("computer_batch", False)],
+    [("get_app_state", True), ("invoke_app_menu", False), ("computer_batch", False)],
 )
-async def test_windowless_app_allows_menu_tools_but_not_coordinates(monkeypatch, name, allowed):
+async def test_windowless_app_allows_state_reads_but_not_menus_or_coordinates(monkeypatch, name, allowed):
     output = [call(name, "a")]
     monkeypatch.setattr(N2ComputerAgent, "_predict_step", AsyncMock(return_value={"output": output}))
     agent = bootstrap_agent(SimpleNamespace(target_pid=42, window_target_info=None, selection_frame_delivered=False))
     result = await agent._predict_step([])
     assert (len(result["output"]) == 1) is allowed
+
+
+async def test_windowless_app_can_wait_for_a_window(monkeypatch):
+    item = call("computer_batch", "a")
+    item["_computer_actions"] = [{"type": "wait", "ms": 1000}, {"type": "screenshot"}]
+    monkeypatch.setattr(N2ComputerAgent, "_predict_step", AsyncMock(return_value={"output": [item]}))
+    agent = bootstrap_agent(SimpleNamespace(target_pid=42, window_target_info=None, selection_frame_delivered=False))
+    assert (await agent._predict_step([]))["output"] == [item]
 
 
 @pytest.mark.parametrize(

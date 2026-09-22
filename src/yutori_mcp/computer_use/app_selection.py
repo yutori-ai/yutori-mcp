@@ -19,7 +19,8 @@ SELECT_APP_TOOL = {
         "description": (
             "Select an application to work in without taking the user's focus. Launches it if needed, "
             "then returns its app/menu state, available window IDs, and a screenshot when a window exists. "
-            "An app with no windows is valid: use get_app_state and invoke_app_menu to open one. Call this before GUI actions "
+            "An app with no windows is valid, but coordinates and menus are unavailable until a window exists. "
+            "Wait for a window or select another app. Call this before GUI actions "
             "and whenever you need another app. Optionally select a specific window ID from a previous "
             "result. Make this the only tool call in a turn; inspect its screenshot before acting."
         ),
@@ -49,7 +50,7 @@ APP_STATE_TOOL = {
     "type": "function",
     "function": {
         "name": "get_app_state",
-        "description": "Read the selected app's windows and native menus without taking focus. Valid with zero windows. Call alone, then inspect the result before acting.",
+        "description": "Read the selected app's windows and available window AX menu elements without requesting activation. Zero windows is valid but menu access is then unavailable. Menus may be incomplete. Call alone and inspect the result.",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -61,7 +62,7 @@ APP_MENU_TOOL = {
     "type": "function",
     "function": {
         "name": "invoke_app_menu",
-        "description": "Invoke an exact menu path observed in the selected app's state, without activating it. Works without a window. Disabled or unavailable commands are refused. Call alone, then inspect fresh state before further actions.",
+        "description": "Press one exact menu path observed in the selected window's AX state using background element delivery. Requires a window. Open an observed top-level menu first, then inspect fresh state for submenu paths. Unavailable, ambiguous, disabled, or stale targets are refused without foreground fallback. Call alone.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -164,19 +165,21 @@ class AppSelectingAgent(N2ComputerAgent):
         has_target = self.computer.window_target_info is not None
         has_app = getattr(self.computer, "target_pid", None) is not None or has_target
         for item in calls:
-            if item is selection and (item.get("name") == "select_app" or has_app):
+            if item is selection and (item.get("name") == "select_app" or has_app) and (
+                item.get("name") != "invoke_app_menu" or has_target
+            ):
                 continue
             actions = item.get("_computer_actions") or []
-            screenshot_only = bool(actions) and all(action.get("type") == "screenshot" for action in actions)
-            missing_frame = has_target and not self.computer.selection_frame_delivered and not screenshot_only
-            app_screenshot = screenshot_only and has_app
-            if selection is not None or (not has_target and not app_screenshot) or missing_frame:
+            observation_only = bool(actions) and all(action.get("type") in {"screenshot", "wait"} for action in actions)
+            missing_frame = has_target and not self.computer.selection_frame_delivered and not observation_only
+            app_observation = observation_only and has_app
+            if selection is not None or (not has_target and not app_observation) or missing_frame:
                 output.append(
                     {
                         "type": "function_call_output",
                         "call_id": item["call_id"],
-                        "output": "[ERROR] Select an app in a separate turn. App-state and menu tools work without a window; "
-                        "window actions require a selected window and a fresh screenshot. Call app tools alone. "
+                        "output": "[ERROR] Select an app in a separate turn. App-state reads work without a window, "
+                        "but menu actions require a window and coordinate actions require a fresh screenshot. Call app tools alone. "
                         "If the capture failed, request a screenshot-only batch.",
                         "_n2_turn_id": item.get("_n2_turn_id"),
                     }
