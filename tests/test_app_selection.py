@@ -13,15 +13,29 @@ from yutori.navigator import N2ComputerAgent
 from yutori.navigator.n2 import N2Observation
 
 from yutori_mcp.computer_use import app_selection
-from yutori_mcp.computer_use.app_selection import AppSelectingAgent, AppSelectingComputer, SELECT_APP_TOOL
+from yutori_mcp.computer_use.app_selection import (
+    AppSelectingAgent,
+    AppSelectingComputer,
+    SELECT_APP_TOOL,
+)
 
 
 def computer() -> AppSelectingComputer:
-    return AppSelectingComputer(scope="window", presentation=False, transport=SimpleNamespace(), owns_transport=False)
+    return AppSelectingComputer(
+        scope="window",
+        presentation=False,
+        transport=SimpleNamespace(),
+        owns_transport=False,
+    )
 
 
 def call(name: str, call_id: str) -> dict:
-    return {"type": "function_call", "name": name, "call_id": call_id, "_n2_turn_id": "turn"}
+    return {
+        "type": "function_call",
+        "name": name,
+        "call_id": call_id,
+        "_n2_turn_id": "turn",
+    }
 
 
 def bootstrap_agent(computer: Any = None) -> AppSelectingAgent:
@@ -68,14 +82,21 @@ async def test_selection_is_a_model_turn_boundary(
         assert refused == (set() if selected else {"0"})
 
 
-async def test_no_duplicate_results_for_malformed_calls(monkeypatch: pytest.MonkeyPatch) -> None:
-    output = [call("select_app", "a"), {"type": "function_call_output", "call_id": "a", "output": "invalid"}]
+async def test_no_duplicate_results_for_malformed_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = [
+        call("select_app", "a"),
+        {"type": "function_call_output", "call_id": "a", "output": "invalid"},
+    ]
     monkeypatch.setattr(N2ComputerAgent, "_predict_step", AsyncMock(return_value={"output": output}))
     agent = bootstrap_agent()
     assert len((await agent._predict_step([]))["output"]) == 2
 
 
-async def test_bootstrap_does_not_capture_the_desktop(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_bootstrap_does_not_capture_the_desktop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     resolve = AsyncMock(return_value=(600, 800))
     monkeypatch.setattr(N2ComputerAgent, "_resolve_native_size", resolve)
     agent = bootstrap_agent()
@@ -87,7 +108,9 @@ async def test_bootstrap_does_not_capture_the_desktop(monkeypatch: pytest.Monkey
     resolve.assert_awaited_once()
 
 
-async def test_switch_and_recovery_bind_current_app_without_replaying_url(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_switch_and_recovery_bind_current_app_without_replaying_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     prepare = AsyncMock(
         side_effect=[
             {"name": "Safari", "pid": 1, "window_id": 10},
@@ -100,7 +123,12 @@ async def test_switch_and_recovery_bind_current_app_without_replaying_url(monkey
     instance.list_windows = AsyncMock(
         side_effect=[
             {"windows": [{"window_id": 10, "title": "Page"}]},
-            {"windows": [{"window_id": 20, "title": "Note"}, {"window_id": 21, "title": "Other note"}]},
+            {
+                "windows": [
+                    {"window_id": 20, "title": "Note"},
+                    {"window_id": 21, "title": "Other note"},
+                ]
+            },
             {"windows": [{"window_id": 30, "title": "Note"}]},
         ]
     )
@@ -122,15 +150,47 @@ async def test_switch_and_recovery_bind_current_app_without_replaying_url(monkey
     ]
 
 
-async def test_rejects_window_from_another_app_without_rebinding(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_rejects_window_from_another_app_without_rebinding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
-        app_selection, "prepare_app", AsyncMock(return_value={"name": "Notes", "pid": 2, "window_id": 20})
+        app_selection,
+        "prepare_app",
+        AsyncMock(return_value={"name": "Notes", "pid": 2, "window_id": 20}),
     )
     instance = computer()
     instance.list_windows = AsyncMock(return_value={"windows": [{"window_id": 20}]})
     with pytest.raises(ValueError, match="does not belong"):
         await instance.select_app("Notes", window_id=99)
     assert instance.window_target_info is None
+
+
+async def test_selecting_an_app_without_windows_is_valid(monkeypatch):
+    monkeypatch.setattr(
+        app_selection,
+        "prepare_app",
+        AsyncMock(return_value={"name": "Notes", "pid": 42, "window_id": None}),
+    )
+    instance = computer()
+    instance.list_windows = AsyncMock(return_value={"windows": []})
+    result = await instance.select_app("Notes")
+    assert result["window_id"] is None
+    assert instance.target_pid == 42
+    assert instance.target_window is None
+    assert instance.current_observation is None
+    assert instance._app_state_enabled
+
+
+@pytest.mark.parametrize(
+    "name,allowed",
+    [("get_app_state", True), ("invoke_app_menu", True), ("computer_batch", False)],
+)
+async def test_windowless_app_allows_menu_tools_but_not_coordinates(monkeypatch, name, allowed):
+    output = [call(name, "a")]
+    monkeypatch.setattr(N2ComputerAgent, "_predict_step", AsyncMock(return_value={"output": output}))
+    agent = bootstrap_agent(SimpleNamespace(target_pid=42, window_target_info=None, selection_frame_delivered=False))
+    result = await agent._predict_step([])
+    assert (len(result["output"]) == 1) is allowed
 
 
 @pytest.mark.parametrize(
@@ -158,7 +218,12 @@ async def test_inventory_contains_installed_and_running_apps_without_windows() -
             "structuredContent": {
                 "apps": [
                     {"name": "Notes", "bundle_id": "com.apple.Notes"},
-                    {"name": "Editor", "bundle_id": "org.editor", "pid": 12, "windows": ["private title"]},
+                    {
+                        "name": "Editor",
+                        "bundle_id": "org.editor",
+                        "pid": 12,
+                        "windows": ["private title"],
+                    },
                 ]
             }
         }
@@ -172,7 +237,9 @@ async def test_inventory_contains_installed_and_running_apps_without_windows() -
 
 
 @pytest.mark.parametrize("capture_fails", [False, True])
-async def test_real_sdk_loop_selects_apps_without_initial_screen_and_rejects_stale_calls(capture_fails: bool) -> None:
+async def test_real_sdk_loop_selects_apps_without_initial_screen_and_rejects_stale_calls(
+    capture_fails: bool,
+) -> None:
     stream = io.BytesIO()
     Image.new("RGB", (40, 30)).save(stream, format="PNG")
     frame = N2Observation(
@@ -223,7 +290,11 @@ async def test_real_sdk_loop_selects_apps_without_initial_screen_and_rejects_sta
             self.clicks.append((self.window_target_info["app_name"], x, y))
 
     def tool(name: str, arguments: dict[str, Any], id: str) -> dict[str, Any]:
-        return {"id": id, "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}
+        return {
+            "id": id,
+            "type": "function",
+            "function": {"name": name, "arguments": json.dumps(arguments)},
+        }
 
     batch = {"actions": [{"name": "left_click", "arguments": {"coordinates": [500, 500]}}]}
     responses = [
@@ -232,20 +303,59 @@ async def test_real_sdk_loop_selects_apps_without_initial_screen_and_rejects_sta
                 {
                     "message": {
                         "role": "assistant",
-                        "tool_calls": [tool("select_app", {"app": "Safari"}, "1"), tool("computer_batch", batch, "2")],
+                        "tool_calls": [
+                            tool("select_app", {"app": "Safari"}, "1"),
+                            tool("computer_batch", batch, "2"),
+                        ],
                     }
                 }
             ]
         },
-        {"choices": [{"message": {"role": "assistant", "tool_calls": [tool("select_app", {"app": "Notes"}, "3")]}}]},
-        {"choices": [{"message": {"role": "assistant", "tool_calls": [tool("computer_batch", batch, "4")]}}]},
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [tool("select_app", {"app": "Notes"}, "3")],
+                    }
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [tool("computer_batch", batch, "4")],
+                    }
+                }
+            ]
+        },
         {"choices": [{"message": {"role": "assistant", "content": "Done"}}]},
     ]
     if capture_fails:
         retry = {"actions": [{"name": "screenshot", "arguments": {}}]}
         responses[2:2] = [
-            {"choices": [{"message": {"role": "assistant", "tool_calls": [tool("computer_batch", batch, "stale")]}}]},
-            {"choices": [{"message": {"role": "assistant", "tool_calls": [tool("computer_batch", retry, "retry")]}}]},
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [tool("computer_batch", batch, "stale")],
+                        }
+                    }
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [tool("computer_batch", retry, "retry")],
+                        }
+                    }
+                ]
+            },
         ]
     requests = []
 
@@ -271,7 +381,9 @@ async def test_real_sdk_loop_selects_apps_without_initial_screen_and_rejects_sta
     assert "Select an app in a separate turn" in json.dumps(requests[1]["messages"])
 
 
-async def test_internal_dimension_capture_cannot_unlock_actions(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_internal_dimension_capture_cannot_unlock_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     instance = computer()
     instance._target_window = SimpleNamespace(pid=1, window_id=2, title=None, app_name="Notes")
 

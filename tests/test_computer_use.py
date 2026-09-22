@@ -3031,7 +3031,7 @@ async def test_prepare_app_background_still_resolves_a_window_when_unhide_fails(
     computer.list_windows.assert_awaited_once_with(42)
 
 
-async def test_prepare_app_background_gives_up_when_no_window_appears(monkeypatch):
+async def test_prepare_app_background_returns_valid_app_when_no_window_appears(monkeypatch):
     from yutori_mcp.computer_use import app as app_module
 
     monkeypatch.setattr(app_module, "_WINDOW_POLL_ATTEMPTS", 2)
@@ -3041,8 +3041,7 @@ async def test_prepare_app_background_gives_up_when_no_window_appears(monkeypatc
         list_windows=AsyncMock(return_value={"windows": []}),
         wait=AsyncMock(),
     )
-    with pytest.raises(RuntimeError, match="showed no window to target in background mode"):
-        await prepare_app(computer, "Notes", None, front=False)
+    assert await prepare_app(computer, "Notes", None, front=False) == {"name": "Notes", "pid": 42, "window_id": None}
     assert computer.list_windows.await_count == 2
 
 
@@ -3942,6 +3941,16 @@ def _activity_reporter():
 
 def _events(stream: io.StringIO) -> list[dict[str, Any]]:
     return [json.loads(line) for line in stream.getvalue().splitlines() if line.strip()]
+
+
+async def test_activity_reporter_emits_a_windowless_app_even_without_a_frame():
+    reporter, computer, _inner, stream = _activity_reporter()
+    computer.window_mode = True
+    computer.target_pid = 42
+    computer.target_window = None
+    computer.current_observation = None
+    await reporter.emit_frame()
+    assert _events(stream) == [{"type": "app_state", "pid": 42, "window_id": None}]
 
 
 async def test_activity_reporter_tees_presentation_events_into_sdk_shaped_rows():
