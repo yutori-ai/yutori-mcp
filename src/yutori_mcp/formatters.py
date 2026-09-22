@@ -559,7 +559,7 @@ def format_scout_detail(response: dict[str, Any], **context: Any) -> str:
     lines.append("Configuration:")
 
     webhook = response.get("webhook_url")
-    lines.append(f"  Webhook: {webhook if webhook else 'not configured'}")
+    lines.append(f"  Webhook: {webhook or 'not configured'}")
 
     skip_email = response.get("skip_email", False)
     lines.append(f"  Email notifications: {'disabled' if skip_email else 'enabled'}")
