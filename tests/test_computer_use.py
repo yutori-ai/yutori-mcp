@@ -488,7 +488,15 @@ async def test_supervisor_forwards_ready_and_action_events():
 async def test_supervisor_forwards_frame_and_activity_events_without_recording_them_as_actions():
     frame = {"type": "frame", "capture_id": 1, "media_type": "image/jpeg", "data": "AAAA", "caption": "Frame 1"}
     activity = {"type": "activity", "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"}}
-    events = [_ready_event(reasoning_overlay_requested=True), frame, activity, _action_event(index=1), _result_event()]
+    app_state = {"type": "app_state", "pid": 42, "window_id": None}
+    events = [
+        _ready_event(reasoning_overlay_requested=True),
+        frame,
+        activity,
+        app_state,
+        _action_event(index=1),
+        _result_event(),
+    ]
     process = _Process(_stream(*(json.dumps(event) for event in events)), _stream(""))
     seen: list[dict] = []
 
@@ -496,9 +504,17 @@ async def test_supervisor_forwards_frame_and_activity_events_without_recording_t
         seen.append(event)
 
     result = await _run_supervised(process, on_event=on_event)
-    assert [event["type"] for event in seen] == ["ready", "frame", "activity", "action"]
+    assert [event["type"] for event in seen] == ["ready", "frame", "activity", "app_state", "action"]
     assert result["outcome"] == "completed"
     assert [action["type"] for action in result["actions"]] == ["action"]
+
+
+async def test_supervisor_rejects_malformed_app_state_events():
+    bad = {"type": "app_state", "pid": "42", "window_id": None}
+    process = _Process(_stream(json.dumps(_ready_event()), json.dumps(bad)), _stream(""))
+    result = await _run_supervised(process)
+    assert result["outcome"] == "failed"
+    assert "malformed 'app_state'" in result["final_text"]
 
 
 async def test_supervisor_does_not_let_a_blocked_progress_callback_stall_protocol_drain(monkeypatch):
@@ -950,9 +966,9 @@ async def test_server_holds_desktop_lock_across_preflight_and_runner(monkeypatch
 
 def test_runtime_constants_select_latest_python_surface():
     assert TOOL_SET == "computer_use_tools-20260830"
-    assert SDK_VERSION == "0.9.34"
+    assert SDK_VERSION == "0.9.35"
     assert all(len(digest) == 64 for digest in (SDK_ARTIFACT_SHA256, SDK_INSTALLATION_SHA256, SDK_PROVENANCE_SHA256))
-    assert '"yutori==0.9.34"' in Path(__file__).parents[1].joinpath("pyproject.toml").read_text()
+    assert '"yutori==0.9.35"' in Path(__file__).parents[1].joinpath("pyproject.toml").read_text()
 
 
 def test_installed_sdk_matches_the_published_artifact():
@@ -3031,7 +3047,7 @@ async def test_prepare_app_background_still_resolves_a_window_when_unhide_fails(
     computer.list_windows.assert_awaited_once_with(42)
 
 
-async def test_prepare_app_background_gives_up_when_no_window_appears(monkeypatch):
+async def test_prepare_app_background_returns_valid_app_when_no_window_appears(monkeypatch):
     from yutori_mcp.computer_use import app as app_module
 
     monkeypatch.setattr(app_module, "_WINDOW_POLL_ATTEMPTS", 2)
@@ -3041,8 +3057,7 @@ async def test_prepare_app_background_gives_up_when_no_window_appears(monkeypatc
         list_windows=AsyncMock(return_value={"windows": []}),
         wait=AsyncMock(),
     )
-    with pytest.raises(RuntimeError, match="showed no window to target in background mode"):
-        await prepare_app(computer, "Notes", None, front=False)
+    assert await prepare_app(computer, "Notes", None, front=False) == {"name": "Notes", "pid": 42, "window_id": None}
     assert computer.list_windows.await_count == 2
 
 
@@ -3942,6 +3957,16 @@ def _activity_reporter():
 
 def _events(stream: io.StringIO) -> list[dict[str, Any]]:
     return [json.loads(line) for line in stream.getvalue().splitlines() if line.strip()]
+
+
+async def test_activity_reporter_emits_a_windowless_app_even_without_a_frame():
+    reporter, computer, _inner, stream = _activity_reporter()
+    computer.window_mode = True
+    computer.target_pid = 42
+    computer.target_window = None
+    computer.current_observation = None
+    await reporter.emit_frame()
+    assert _events(stream) == [{"type": "app_state", "pid": 42, "window_id": None}]
 
 
 async def test_activity_reporter_tees_presentation_events_into_sdk_shaped_rows():

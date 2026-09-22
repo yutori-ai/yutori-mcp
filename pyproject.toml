@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yutori-mcp"
-version = "0.5.38"
+version = "0.5.39"
 description = "MCP server and workflow skills for building agents with Yutori"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,12 +30,11 @@ dependencies = [
     # breaks the install as soon as 2.x resolves.
     "mcp>=1.0.0,<2.0.0",
     "pydantic>=2.0.0",
-    # SDK 0.9.34 re-bundles the navigator overlay runtime at 0.6.0, which reads the
-    # screen size the focus-overlay panel hands it instead of scaling its chrome off
-    # the panel's own width. Background runs drew the pointer at the 0.65 clamp floor
-    # -- about half the size the same run shows in the full-screen overlay -- because
-    # 0.9.33 shipped the injection against a runtime that had no code reading it.
-    "yutori==0.9.34",
+    # SDK 0.9.35 keeps a selected app bound while it has no windows (MacOSAppState,
+    # set_app_target, get_app_state, invoke_app_menu): menus are read from the window's
+    # own AX snapshot and pressed by element token in background mode, screenshots carry
+    # only the window list, and the runner emits app_state events with a nullable window.
+    "yutori==0.9.35",
 ]
 
 [project.optional-dependencies]

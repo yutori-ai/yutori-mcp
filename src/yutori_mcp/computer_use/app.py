@@ -133,7 +133,7 @@ async def _running_app(computer: MacOSComputer, requested: str) -> dict[str, Any
     return _find_running_app(structured_content(result), requested)
 
 
-async def _await_window(computer: MacOSComputer, pid: int, app: str) -> dict[str, Any]:
+async def _await_window(computer: MacOSComputer, pid: int, app: str) -> dict[str, Any] | None:
     fallback: dict[str, Any] | None = None
     for _ in range(_WINDOW_POLL_ATTEMPTS):
         windows = _windows(await computer.list_windows(pid))
@@ -154,7 +154,7 @@ async def _await_window(computer: MacOSComputer, pid: int, app: str) -> dict[str
         await computer.wait(_WINDOW_POLL_MS)
     if fallback is not None:
         return fallback
-    raise RuntimeError(f"{app!r} is running (pid {pid}) but showed no window to target in background mode")
+    return None
 
 
 async def prepare_app(
