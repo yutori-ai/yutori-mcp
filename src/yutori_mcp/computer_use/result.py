@@ -59,6 +59,20 @@ def read_bounded_line(stream: TextIO, max_chars: int) -> str | None:
     return line
 
 
+def is_clean_credential_line(value: str) -> bool:
+    """True if ``value`` is non-empty, single-line, and has no leading/trailing whitespace.
+
+    Shared by the runner's stdin credential-frame validation (``_read_protocol_input``),
+    the CLI's stdin VM-token validation (``_read_vm_run_token``), and the supervisor's
+    outbound credential-frame validation (``_credential_frame``). Before this, each site
+    hand-rolled its own subset of the "one clean line" contract: the CLI checked only
+    surrounding whitespace and missed an embedded ``\\r``, while the runner and supervisor
+    each separately checked for embedded ``\\r``/``\\n``. Centralizing the check keeps the
+    three credential boundaries from drifting out of sync again.
+    """
+    return bool(value) and value == value.strip() and "\n" not in value and "\r" not in value
+
+
 def is_positive_int(value: Any) -> bool:
     """True for a real positive int. `bool` is an int subclass, so it is excluded.
 

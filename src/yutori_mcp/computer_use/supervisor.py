@@ -37,7 +37,7 @@ from .preflight import (
     find_cua_driver,
     run_safely,
 )
-from .result import compact_json_line, failure, redact
+from .result import compact_json_line, failure, is_clean_credential_line, redact
 from .result import remaining_seconds as _remaining_seconds
 from .result import terminal_result
 from ..schemas import background_focus_overlay_constraint_error
@@ -206,13 +206,7 @@ def _child_environment() -> dict[str, str]:
 
 
 def _credential_frame(api_key: str) -> bytes:
-    if (
-        not api_key
-        or len(api_key) > MAX_CREDENTIAL_CHARACTERS
-        or api_key != api_key.strip()
-        or "\n" in api_key
-        or "\r" in api_key
-    ):
+    if len(api_key) > MAX_CREDENTIAL_CHARACTERS or not is_clean_credential_line(api_key):
         raise ValueError("API credential must be one non-empty line.")
     return api_key.encode("utf-8") + b"\n"
 
