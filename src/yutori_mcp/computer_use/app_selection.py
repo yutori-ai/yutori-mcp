@@ -50,7 +50,12 @@ APP_STATE_TOOL = {
     "type": "function",
     "function": {
         "name": "get_app_state",
-        "description": "Read the selected app's windows and available window AX menu elements without requesting activation. Zero windows is valid but menu access is then unavailable. Menus may be incomplete. Call alone and inspect the result.",
+        "description": (
+            "Read the selected app's windows and the menu items exposed by its window's accessibility "
+            "snapshot, without requesting activation. Screenshots never include menus; this is the only "
+            "way to read them. Zero windows is valid but menus are then unavailable. Menus may be "
+            "incomplete. Call alone and inspect the result."
+        ),
         "parameters": {
             "type": "object",
             "properties": {},
@@ -62,7 +67,13 @@ APP_MENU_TOOL = {
     "type": "function",
     "function": {
         "name": "invoke_app_menu",
-        "description": "Press one exact menu path observed in the selected window's AX state using background element delivery. Requires a window. Open an observed top-level menu first, then inspect fresh state for submenu paths. Unavailable, ambiguous, disabled, or stale targets are refused without foreground fallback. Call alone.",
+        "description": (
+            "Press one menu item by its exact full path from get_app_state, using background element "
+            "delivery. Requires a window. The snapshot already lists submenu items, so pass the complete "
+            "path to the item; top-level menu titles are refused because pressing one opens the menu on "
+            "the user's screen. Unavailable, ambiguous, disabled, or stale targets are refused without "
+            "foreground fallback. Call alone."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -179,8 +190,8 @@ class AppSelectingAgent(N2ComputerAgent):
                         "type": "function_call_output",
                         "call_id": item["call_id"],
                         "output": "[ERROR] Select an app in a separate turn. App-state reads work without a window, "
-                        "but menu actions require a window and coordinate actions require a fresh screenshot. Call app tools alone. "
-                        "If the capture failed, request a screenshot-only batch.",
+                        "but menu actions require a window and coordinate actions require a fresh screenshot. "
+                        "Call app tools alone. If the capture failed, request a screenshot-only batch.",
                         "_n2_turn_id": item.get("_n2_turn_id"),
                     }
                 )
