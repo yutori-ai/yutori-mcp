@@ -217,6 +217,19 @@ def _require_window_ids(request: dict[str, Any], field: str) -> list[int]:
     )
 
 
+def _optional_field(
+    request: dict[str, Any], field: str, *, require: Callable[[dict[str, Any], str], Any], default: Any
+) -> Any:
+    """Read ``field`` via ``require`` if present, else ``default``.
+
+    Single source of truth for the "a supervisor that predates this field keeps the SDK's
+    default" shape every optional (as opposed to required) ``_require_*`` call in
+    ``parse_request`` below shares: only the ``require`` validator and ``default`` differ per
+    field.
+    """
+    return require(request, field) if field in request else default
+
+
 def parse_request(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RequestError("INVALID_REQUEST", "Request must be a JSON object.")
@@ -237,17 +250,17 @@ def parse_request(payload: Any) -> dict[str, Any]:
     deadline_ms = _require_positive_int(payload, "deadline_ms")
     max_steps = _require_positive_int(payload, "max_steps")
     # Optional so a supervisor that predates these fields keeps the SDK's defaults.
-    show_stop_button = _require_bool(payload, "show_stop_button") if "show_stop_button" in payload else True
-    presentation = _require_bool(payload, "presentation") if "presentation" in payload else True
-    background_focus_overlay = (
-        _require_bool(payload, "background_focus_overlay") if "background_focus_overlay" in payload else False
+    show_stop_button = _optional_field(payload, "show_stop_button", require=_require_bool, default=True)
+    presentation = _optional_field(payload, "presentation", require=_require_bool, default=True)
+    background_focus_overlay = _optional_field(
+        payload, "background_focus_overlay", require=_require_bool, default=False
     )
     if error := background_focus_overlay_constraint_error(
         mode=mode, presentation=presentation, background_focus_overlay=background_focus_overlay
     ):
         raise RequestError("INVALID_REQUEST", f"{error}.")
-    exclude_capture_window_ids = (
-        _require_window_ids(payload, "exclude_capture_window_ids") if "exclude_capture_window_ids" in payload else []
+    exclude_capture_window_ids = _optional_field(
+        payload, "exclude_capture_window_ids", require=_require_window_ids, default=[]
     )
     parsed = {
         "task": task,
