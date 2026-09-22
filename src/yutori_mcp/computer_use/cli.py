@@ -52,6 +52,7 @@ from .result import (
     format_runtime_version,
     format_terminal_action,
     format_terminal_result,
+    is_clean_credential_line,
     read_bounded_line,
     structured_content,
 )
@@ -157,7 +158,7 @@ def _read_vm_run_token(stream: TextIO | None = None) -> str:
     if credential_frame is None:
         raise ValueError("Expected one newline-terminated VM run token on stdin.")
     token = credential_frame[:-1]
-    if token != token.strip() or not token.startswith(VM_RUN_TOKEN_PREFIX):
+    if not is_clean_credential_line(token) or not token.startswith(VM_RUN_TOKEN_PREFIX):
         raise ValueError("Expected a VM run token on stdin.")
     return token
 

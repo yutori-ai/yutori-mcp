@@ -3712,6 +3712,14 @@ def test_cli_reads_one_newline_terminated_vm_token_without_waiting_for_eof():
         cli._read_vm_run_token(io.StringIO("yvm_token"))
 
 
+@pytest.mark.parametrize("token", [" yvm_token", "yvm_token ", "yvm_tok\ren"])
+def test_cli_rejects_vm_token_with_embedded_or_surrounding_whitespace(token):
+    from yutori_mcp.computer_use import cli
+
+    with pytest.raises(ValueError, match="Expected a VM run token"):
+        cli._read_vm_run_token(io.StringIO(f"{token}\n"))
+
+
 async def test_cli_run_streams_vm_token_without_resolving_a_stored_key(monkeypatch, capsys):
     from yutori_mcp.computer_use import cli
 

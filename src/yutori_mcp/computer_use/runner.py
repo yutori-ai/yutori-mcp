@@ -49,7 +49,15 @@ from .constants import (
     TOOL_SET,
     VM_RUN_ID_HEADER,
 )
-from .result import compact_json_line, elapsed_ms_since, is_positive_int, read_bounded_line, redact, remaining_seconds
+from .result import (
+    compact_json_line,
+    elapsed_ms_since,
+    is_clean_credential_line,
+    is_positive_int,
+    read_bounded_line,
+    redact,
+    remaining_seconds,
+)
 from .targeting import TargetGuardedMacOSComputer as MacOSComputer
 from ..schemas import background_focus_overlay_constraint_error, computer_use_constraint_error
 
@@ -1215,7 +1223,7 @@ def _read_protocol_input() -> tuple[str, str]:
     if credential_frame is None or not request_frame.endswith("\n") or trailing.strip():
         raise RequestError("INVALID_REQUEST", "Expected one credential frame and one JSONL request frame.")
     api_key = credential_frame[:-1]
-    if not api_key or api_key != api_key.strip() or "\r" in api_key:
+    if not is_clean_credential_line(api_key):
         raise RequestError("INVALID_REQUEST", "Credential frame was invalid.")
     return api_key, request_frame
 
