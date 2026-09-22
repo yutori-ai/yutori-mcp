@@ -155,7 +155,12 @@ class AppSelectingComputer(TargetGuardedMacOSComputer):
             return (await self.get_app_state()).text
         if name == "invoke_app_menu":
             await self.invoke_app_menu(**arguments)
-            return "Native menu action dispatched; inspect the returned app state to verify its effect."
+            outcome = self.action_outcomes[-1]
+            state = await self.get_app_state()
+            return (
+                f"Menu item pressed via {outcome.route or 'accessibility'} (effect: {outcome.effect or 'unknown'}). "
+                f"Fresh app state follows; verify the effect before continuing.\n{state.text}"
+            )
         raise ValueError(f"Unknown app tool: {name}")
 
 

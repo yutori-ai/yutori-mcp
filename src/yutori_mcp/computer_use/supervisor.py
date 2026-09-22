@@ -284,6 +284,9 @@ def _event_shape_error(event: dict[str, Any]) -> str | None:
         required = {"capture_id": int, "media_type": str, "data": str}
     elif event_type == "activity":
         required = {"entry": dict}
+    elif event_type == "app_state":
+        # window_id is null while the selected app has no window; pid is null before any selection.
+        required = {"pid": (int, type(None)), "window_id": (int, type(None))}
     else:
         return None
     invalid = [
@@ -361,7 +364,7 @@ async def _supervise(
             event_type = event.get("type")
             if shape_error := _event_shape_error(event):
                 return protocol_failure(f"emitted malformed {event_type!r} event: {shape_error}.")
-            if event_type in {"action", "startup", "frame", "activity"}:
+            if event_type in {"action", "startup", "frame", "activity", "app_state"}:
                 if not ready:
                     return protocol_failure(f"emitted {event_type} before ready.")
                 if event_type == "action":

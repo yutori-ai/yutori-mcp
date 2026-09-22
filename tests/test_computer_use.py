@@ -488,7 +488,15 @@ async def test_supervisor_forwards_ready_and_action_events():
 async def test_supervisor_forwards_frame_and_activity_events_without_recording_them_as_actions():
     frame = {"type": "frame", "capture_id": 1, "media_type": "image/jpeg", "data": "AAAA", "caption": "Frame 1"}
     activity = {"type": "activity", "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"}}
-    events = [_ready_event(reasoning_overlay_requested=True), frame, activity, _action_event(index=1), _result_event()]
+    app_state = {"type": "app_state", "pid": 42, "window_id": None}
+    events = [
+        _ready_event(reasoning_overlay_requested=True),
+        frame,
+        activity,
+        app_state,
+        _action_event(index=1),
+        _result_event(),
+    ]
     process = _Process(_stream(*(json.dumps(event) for event in events)), _stream(""))
     seen: list[dict] = []
 
@@ -496,9 +504,17 @@ async def test_supervisor_forwards_frame_and_activity_events_without_recording_t
         seen.append(event)
 
     result = await _run_supervised(process, on_event=on_event)
-    assert [event["type"] for event in seen] == ["ready", "frame", "activity", "action"]
+    assert [event["type"] for event in seen] == ["ready", "frame", "activity", "app_state", "action"]
     assert result["outcome"] == "completed"
     assert [action["type"] for action in result["actions"]] == ["action"]
+
+
+async def test_supervisor_rejects_malformed_app_state_events():
+    bad = {"type": "app_state", "pid": "42", "window_id": None}
+    process = _Process(_stream(json.dumps(_ready_event()), json.dumps(bad)), _stream(""))
+    result = await _run_supervised(process)
+    assert result["outcome"] == "failed"
+    assert "malformed 'app_state'" in result["final_text"]
 
 
 async def test_supervisor_does_not_let_a_blocked_progress_callback_stall_protocol_drain(monkeypatch):
