@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import functools
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -56,9 +57,17 @@ from .result import (
     read_bounded_line,
     structured_content,
 )
-from .supervisor import run_task_with_resolved_credentials, stop_active_run
+from .supervisor import (
+    PrewarmedRunner,
+    discard_prewarmed_runner,
+    prewarm_runner,
+    run_task_with_resolved_credentials,
+    stop_active_run,
+)
 
 VM_RUN_TOKEN_PREFIX = "yvm_"
+# One `standby` request line: a JSON array of `run` arguments, task text included.
+MAX_STANDBY_REQUEST_BYTES = 1024 * 1024
 
 
 def _json_line(payload: dict[str, Any]) -> None:
@@ -337,7 +346,7 @@ def format_run_header(params: ComputerUseTaskInput, paint: Terminal) -> str:
     )
 
 
-async def _run_custom(args: argparse.Namespace) -> int:
+async def _run_custom(args: argparse.Namespace, *, prewarmed: PrewarmedRunner | None = None) -> int:
     # Reuses the MCP tool's input schema so the CLI enforces the same bounds
     # (minutes 1-60, positive steps, start_url requires app) with the same
     # messages; the resulting ValidationError is a ValueError, so dispatch's
@@ -373,6 +382,9 @@ async def _run_custom(args: argparse.Namespace) -> int:
     preflight_started = time.monotonic()
     if _blocked(json_output=json_output, api_key_provided=api_key_override is not None):
         return 1
+    if json_output:
+        # Lets a host split its launch-to-ready wait into this process's own start and the gate.
+        _json_line({"type": "preflight", "duration_ms": elapsed_ms_since(preflight_started)})
     # Both branches below run the identical request through the supervisor, differing only
     # in which `on_event` callback renders progress; bound here once as the single source of
     # truth for the request's fixed display flags.
@@ -385,6 +397,7 @@ async def _run_custom(args: argparse.Namespace) -> int:
         exclude_capture_window_ids=tuple(getattr(args, "exclude_capture_windows", None) or ()),
         api_key_override=api_key_override,
         vm_run_id=str(vm_run_id) if vm_run_id is not None else None,
+        prewarmed=prewarmed,
     )
     if json_output:
         result = await run_task(on_event=_json_event_printer())
@@ -395,6 +408,89 @@ async def _run_custom(args: argparse.Namespace) -> int:
     runner_started = time.monotonic()
     result = await run_task(on_event=_event_printer(params.mode, params.app, paint, started_at=runner_started))
     return _report(result, include_actions=False)
+
+
+def _standby_run_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="computer-use run", add_help=False, exit_on_error=False)
+    _add_run_arguments(parser)
+    return parser
+
+
+def parse_standby_request(line: str) -> argparse.Namespace:
+    """Parse the `run` arguments a host sends a standby process: one JSON array of argv strings.
+
+    The same parser as `computer-use run`, so a host builds one argument list for both paths
+    and every bound is enforced identically.
+    """
+    try:
+        argv = json.loads(line)
+    except json.JSONDecodeError:
+        raise ValueError("Standby request was not valid JSON.") from None
+    if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
+        raise ValueError("Standby request must be a JSON array of `run` arguments.")
+    try:
+        args = _standby_run_parser().parse_args(argv)
+    # Before Python 3.13 some parse errors still exit even with exit_on_error=False.
+    except (argparse.ArgumentError, SystemExit) as error:
+        raise ValueError(f"Invalid standby run arguments: {error}") from None
+    if args.api_key_stdin or args.vm_run_id is not None:
+        raise ValueError("Standby runs read their request from stdin; VM run credentials are not supported.")
+    args.json = True
+    return args
+
+
+async def _read_standby_request(runner: PrewarmedRunner) -> str | None:
+    """The host's request line, or None once stdin closes without one (the host let it go).
+
+    Raises RuntimeError if the prewarmed runner dies first, so the host can start a new standby
+    instead of submitting to one that can only fail.
+    """
+    loop = asyncio.get_running_loop()
+    reader = asyncio.StreamReader(limit=MAX_STANDBY_REQUEST_BYTES)
+    await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), sys.stdin)
+    read = asyncio.ensure_future(reader.readline())
+    lost = asyncio.ensure_future(runner.process.wait())
+    try:
+        done, _ = await asyncio.wait({read, lost}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in (read, lost):
+            if not task.done():
+                task.cancel()
+    if read not in done:
+        raise RuntimeError("The prewarmed computer-use runner exited while on standby.")
+    line = read.result().decode()
+    return line if line.strip() else None
+
+
+async def _standby() -> int:
+    """Boot a run before its task exists, then run the one request the host sends on stdin.
+
+    For host applications: the interpreter start, imports, and the runner process's own start
+    (about two seconds together) happen while the operator is still typing. Emits `standby`
+    once warm; after the request line it behaves exactly like `run --json`, with the preflight
+    gate evaluated at submission so the Mac's state is checked when the run actually starts.
+    """
+    try:
+        runner = await prewarm_runner()
+    except (RuntimeError, OSError) as error:
+        _json_line({"type": "error", "code": "STANDBY_FAILED", "message": str(error)})
+        return 1
+    try:
+        _json_line({"type": "standby"})
+        try:
+            line = await _read_standby_request(runner)
+        except RuntimeError as error:
+            _json_line({"type": "error", "code": "STANDBY_LOST", "message": str(error)})
+            return 1
+        if line is None:
+            return 0
+        try:
+            return await _run_custom(parse_standby_request(line), prewarmed=runner)
+        except ValueError as error:
+            _json_line({"type": "error", "code": "INVALID_REQUEST", "message": str(error)})
+            return 1
+    finally:
+        await discard_prewarmed_runner(runner)
 
 
 def apply_computer_use_environment(env: str | None) -> None:
@@ -429,6 +525,10 @@ def _dispatch_stop(_args: argparse.Namespace | None) -> int:
     return 0
 
 
+def _dispatch_standby(_args: argparse.Namespace | None) -> int:
+    return asyncio.run(_standby())
+
+
 def _dispatch_run(args: argparse.Namespace | None) -> int:
     if args is None:
         raise ValueError("computer-use run needs its parsed arguments")
@@ -444,6 +544,10 @@ _COMPUTER_USE_SUBCOMMANDS: dict[str, tuple[str, Callable[[argparse.Namespace | N
     "smoke": ("Run Calculator mechanical and live checks", _dispatch_smoke),
     "stop": ("Stop the active computer-use run (the local stop for background runs)", _dispatch_stop),
     "run": ("Run one custom task on the visible desktop or in app windows", _dispatch_run),
+    "standby": (
+        "For host applications: boot a run, then read one JSON array of `run` arguments from stdin",
+        _dispatch_standby,
+    ),
 }
 
 
@@ -461,7 +565,12 @@ def register_parser(
             command.add_argument("--json", action="store_true", help=json_help)
     run_parser = commands.add_parser("run", help=_COMPUTER_USE_SUBCOMMANDS["run"][0])
     run_parser.add_argument("--json", action="store_true", help=json_help)
-    run_parser.add_argument(
+    _add_run_arguments(run_parser)
+
+
+def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
+    """Every `run` option except --json; shared with the standby request parser."""
+    parser.add_argument(
         "--hide-stop-item",
         dest="hide_stop_item",
         action="store_true",
@@ -470,7 +579,7 @@ def register_parser(
             "the host application provides its own (the hotkey stays active)"
         ),
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--exclude-capture-window",
         dest="exclude_capture_windows",
         action="append",
@@ -481,7 +590,7 @@ def register_parser(
             "(foreground runs); it stays on screen and in recordings. Repeatable."
         ),
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--no-presentation",
         dest="no_presentation",
         action="store_true",
@@ -490,7 +599,7 @@ def register_parser(
             "the host application renders the run from the --json frame and activity events"
         ),
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--background-focus-overlay",
         action="store_true",
         help=(
@@ -498,47 +607,47 @@ def register_parser(
             "the embedding host owns status, activity, Stop, and hotkey surfaces"
         ),
     )
-    run_parser.add_argument("task", help="Task for the model to perform")
-    run_parser.add_argument(
+    parser.add_argument("task", help="Task for the model to perform")
+    parser.add_argument(
         "--api-key-stdin",
         action="store_true",
         help="Read one VM run token from stdin (requires --vm-run-id)",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--vm-run-id",
         type=uuid.UUID,
         default=None,
         help="Run ID bound to the stdin VM token (requires --api-key-stdin)",
     )
-    run_parser.add_argument("--app", default=None, help="Application to target")
-    run_parser.add_argument("--start-url", dest="start_url", default=None, help="URL to open in the app")
-    run_parser.add_argument(
+    parser.add_argument("--app", default=None, help="Application to target")
+    parser.add_argument("--start-url", dest="start_url", default=None, help="URL to open in the app")
+    parser.add_argument(
         "--minutes",
         type=float,
         default=COMPUTER_USE_DEFAULT_MINUTES,
         help=f"Absolute deadline in minutes (1-{COMPUTER_USE_MAX_MINUTES})",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--max-steps",
         dest="max_steps",
         type=int,
         default=COMPUTER_USE_DEFAULT_MAX_STEPS,
         help="Maximum model turns (one turn may contain multiple actions)",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--mode",
         choices=DELIVERY_MODES,
         default=COMPUTER_USE_DEFAULT_MODE,
         help=("foreground drives the visible desktop; background (default) chooses and switches app windows "
               "without taking focus; --app is optional"),
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--allow-foreground-fallback",
         dest="allow_foreground_fallback",
         action="store_true",
         help="Background only: retry an action that did not land with the window fronted briefly",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--no-local-shell",
         dest="allow_local_shell",
         action="store_false",

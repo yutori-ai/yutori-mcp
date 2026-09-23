@@ -7,8 +7,9 @@ from typing import Any
 
 from yutori.navigator import N2ComputerAgent
 from yutori.navigator.macos import MacOSWindowTarget
+from yutori.navigator.macos.transport import CuaDriverError
 
-from .app import prepare_app
+from .app import find_running_app, prepare_app, ready_window
 from .result import is_positive_int, structured_content
 from .targeting import TargetGuardedMacOSComputer
 
@@ -96,6 +97,8 @@ APP_TOOL_NAMES = {tool["function"]["name"] for tool in APP_TOOLS}
 class AppSelectingComputer(TargetGuardedMacOSComputer):
     selected_app: str | None = None
     selection_frame_delivered = False
+    # The driver's list_apps payload behind the run's inventory: running apps carry their pid.
+    app_catalog: dict[str, Any] | None = None
 
     def _bind_window_target(self, target: MacOSWindowTarget | None) -> None:
         super()._bind_window_target(target)
@@ -106,9 +109,12 @@ class AppSelectingComputer(TargetGuardedMacOSComputer):
         if observation is not None and observation.base64 == raw_base64:
             self.selection_frame_delivered = True
 
-    async def app_inventory(self) -> str:
+    async def app_inventory(self, catalog: dict[str, Any] | None = None) -> str:
+        """The model-facing app list, from ``catalog`` when the caller already fetched one."""
         # cua-driver's catalog includes installed apps as well as running applications.
-        catalog = structured_content(await self._call_tool("list_apps", {}, read_only=True))
+        if catalog is None:
+            catalog = structured_content(await self._call_tool("list_apps", {}, read_only=True))
+        self.app_catalog = catalog
         apps = [
             {key: app[key] for key in ("name", "bundle_id", "running") if key in app}
             for app in catalog.get("apps") or []
@@ -123,7 +129,9 @@ class AppSelectingComputer(TargetGuardedMacOSComputer):
             raise ValueError("window_id must be a positive integer")
         if url is not None and (not isinstance(url, str) or not url.startswith(("https://", "http://"))):
             raise ValueError("url must be an http(s) URL")
-        target = await prepare_app(self, app.strip(), url, front=False)
+        target = None if url is not None else await self._attach_running_app(app.strip())
+        if target is None:
+            target = await prepare_app(self, app.strip(), url, front=False)
         windows = (await self.list_windows(target["pid"])).get("windows") or []
         if window_id is not None:
             if not any(window.get("window_id") == window_id for window in windows):
@@ -141,6 +149,25 @@ class AppSelectingComputer(TargetGuardedMacOSComputer):
             **target,
             "windows": [{key: window[key] for key in ("window_id", "title") if key in window} for window in windows],
         }
+
+    async def _attach_running_app(self, app: str) -> dict[str, Any] | None:
+        """Skip the launch for an app that is already running with a drivable window.
+
+        ``launch_app`` takes over a second even when the app is running. The inventory's catalog
+        already names a running app's pid, and one window listing proves its window is on
+        screen, so the launch, unhide and settle wait add nothing. Anything less certain (not
+        in the catalog, no ready window, a pid that is gone) takes the full launch path.
+        """
+        running = find_running_app(self.app_catalog or {}, app)
+        if running is None:
+            return None
+        try:
+            window = await ready_window(self, running["pid"])
+        except CuaDriverError:
+            return None
+        if window is None:
+            return None
+        return {"name": str(running.get("name") or app), "pid": running["pid"], "window_id": window.get("window_id")}
 
     async def recover_selected_app(self) -> int | None:
         if self.selected_app is None:

@@ -404,3 +404,77 @@ async def test_internal_dimension_capture_cannot_unlock_actions(
     response = await agent._predict_step([])
     assert response["output"][-1]["type"] == "function_call_output"
     assert "capture failed" in response["output"][-1]["output"]
+
+
+def _ready_window_payload(window_id: int = 40, *, on_screen: bool = True) -> dict:
+    return {
+        "windows": [
+            {
+                "window_id": window_id,
+                "title": "Document",
+                "bounds": {"width": 800, "height": 600},
+                "is_on_screen": on_screen,
+            }
+        ]
+    }
+
+
+async def test_inventory_catalog_from_the_caller_skips_the_driver_call() -> None:
+    instance = computer()
+    instance._call_tool = AsyncMock()
+    catalog = {"apps": [{"name": "Notes", "bundle_id": "com.apple.Notes", "pid": 5, "running": True}]}
+    inventory = json.loads(await instance.app_inventory(catalog))
+    assert inventory == [{"name": "Notes", "bundle_id": "com.apple.Notes", "running": True}]
+    assert instance.app_catalog is catalog
+    instance._call_tool.assert_not_awaited()
+
+
+async def test_selecting_a_running_app_with_a_ready_window_skips_the_launch(monkeypatch: pytest.MonkeyPatch) -> None:
+    prepare = AsyncMock()
+    monkeypatch.setattr(app_selection, "prepare_app", prepare)
+    instance = computer()
+    instance.app_catalog = {"apps": [{"name": "Notes", "bundle_id": "com.apple.Notes", "pid": 5, "running": True}]}
+    instance.list_windows = AsyncMock(return_value=_ready_window_payload())
+    result = await instance.select_app("notes")
+    prepare.assert_not_awaited()
+    assert result["pid"] == 5 and result["window_id"] == 40 and result["name"] == "Notes"
+    assert instance.window_target_info["window_id"] == 40
+
+
+@pytest.mark.parametrize(
+    ("catalog", "windows", "url"),
+    [
+        # Not running: only a launch can produce it.
+        ({"apps": [{"name": "Notes", "bundle_id": "com.apple.Notes"}]}, _ready_window_payload(), None),
+        # Running but hidden or minimized: the launch path unhides it and waits for the window.
+        ({"apps": [{"name": "Notes", "pid": 5}]}, _ready_window_payload(on_screen=False), None),
+        # A URL has to be opened by the launch.
+        ({"apps": [{"name": "Notes", "pid": 5}]}, _ready_window_payload(), "https://example.com"),
+        # No catalog yet (a preselected app at startup).
+        (None, _ready_window_payload(), None),
+    ],
+)
+async def test_anything_less_than_a_ready_running_window_takes_the_launch_path(
+    monkeypatch: pytest.MonkeyPatch, catalog: dict | None, windows: dict, url: str | None
+) -> None:
+    prepare = AsyncMock(return_value={"name": "Notes", "pid": 6, "window_id": 41})
+    monkeypatch.setattr(app_selection, "prepare_app", prepare)
+    instance = computer()
+    instance.app_catalog = catalog
+    instance.list_windows = AsyncMock(return_value=windows)
+    result = await instance.select_app("Notes", url=url)
+    prepare.assert_awaited_once_with(instance, "Notes", url, front=False)
+    assert result["pid"] == 6
+
+
+async def test_a_stale_catalog_pid_falls_back_to_the_launch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from yutori.navigator.macos.transport import CuaDriverToolError
+
+    prepare = AsyncMock(return_value={"name": "Notes", "pid": 6, "window_id": 41})
+    monkeypatch.setattr(app_selection, "prepare_app", prepare)
+    instance = computer()
+    instance.app_catalog = {"apps": [{"name": "Notes", "pid": 5}]}
+    instance.list_windows = AsyncMock(side_effect=[CuaDriverToolError("no such process"), {"windows": []}])
+    result = await instance.select_app("Notes")
+    prepare.assert_awaited_once()
+    assert result["pid"] == 6
