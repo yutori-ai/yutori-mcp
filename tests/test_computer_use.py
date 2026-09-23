@@ -4559,3 +4559,20 @@ async def test_a_supplied_catalog_replaces_the_runner_prefetch(monkeypatch):
     request = parse_request({**_background_request(app=None), "app_catalog": supplied})
     assert await runner_module.run_request(request, Emitter(_CollectStream()), "yt-secret") == "completed"
     assert _FakeComputer.instances[-1].inventory_catalog == supplied
+
+
+async def test_a_supplied_catalog_is_available_to_a_preselected_app(monkeypatch):
+    _FakeComputer.instances.clear()
+    _patch_runner_sdk(monkeypatch)
+    monkeypatch.setattr(runner_module, "_supports_background_mode", lambda: True)
+    seen: list[Any] = []
+
+    async def prepare(computer, app, _url, *, front):
+        seen.append(getattr(computer, "app_catalog", None))
+        return {"name": app, "pid": 9, "window_id": 90}
+
+    monkeypatch.setattr(runner_module, "prepare_app", prepare)
+    supplied = {"apps": [{"name": "Notes", "pid": 9}]}
+    request = parse_request({**_background_request(app="Notes"), "app_catalog": supplied})
+    assert await runner_module.run_request(request, Emitter(_CollectStream()), "yt-secret") == "completed"
+    assert seen == [supplied], "select_app must see the standby's catalog to attach instead of launching"

@@ -1252,7 +1252,10 @@ async def run_request(
             startup.mark("computer")
             inventory = None
             if background:
-                # The app launch runs while the catalog is still being fetched on its own connection.
+                if supplied_catalog is not None:
+                    # Already fetched by a standby: a preselected running app can attach without a launch.
+                    computer.app_catalog = supplied_catalog
+                # Otherwise the launch runs while the catalog is still being fetched on its own connection.
                 if request["app"]:
                     await computer.select_app(request["app"], url=request["start_url"])
                     startup.mark("target")
