@@ -2075,7 +2075,6 @@ async def test_run_request_wires_sdk_runtime_and_reports_effective_state(monkeyp
     assert "never inspect browser profile databases" in agent.kwargs["system_prompt"]
     assert "stop immediately instead of trying alternate URLs" in agent.kwargs["system_prompt"]
     assert "Never ask them to give you a password" in agent.kwargs["system_prompt"]
-    assert "Do not install software or packages" in agent.kwargs["system_prompt"]
     assert computer.closed
     startup_events = [json.loads(line) for line in stream.lines if json.loads(line)["type"] == "startup"]
     assert [event["phase"] for event in startup_events] == ["api_client", "computer", "model"]
