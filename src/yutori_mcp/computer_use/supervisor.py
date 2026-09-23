@@ -24,9 +24,6 @@ from .constants import (
     MCP_VERSION,
     MODEL,
     PROTOCOL_VERSION,
-    SDK_ARTIFACT_SHA256,
-    SDK_PROVENANCE_SHA256,
-    SDK_VERSION,
 )
 from .lock import ComputerUseBusyError, DesktopLock
 from .preflight import (
@@ -40,6 +37,7 @@ from .preflight import (
 from .result import compact_json_line, failure, is_clean_credential_line, redact
 from .result import remaining_seconds as _remaining_seconds
 from .result import terminal_result
+from .sdk_pin import sdk_pin
 from ..schemas import background_focus_overlay_constraint_error
 
 logger = logging.getLogger(__name__)
@@ -238,12 +236,13 @@ async def _drain_stderr(stream: asyncio.StreamReader, secret: str) -> list[str]:
 
 
 def _ready_error(event: dict[str, Any]) -> str | None:
+    pin = sdk_pin()
     expected = {
         "protocol_version": PROTOCOL_VERSION,
         "package_version": MCP_VERSION,
-        "sdk_version": SDK_VERSION,
-        "sdk_artifact_sha256": SDK_ARTIFACT_SHA256,
-        "sdk_provenance_sha256": SDK_PROVENANCE_SHA256,
+        "sdk_version": pin.version,
+        "sdk_artifact_sha256": pin.artifact_sha256,
+        "sdk_provenance_sha256": pin.provenance_sha256,
         "driver_version_pinned": DRIVER_VERSION,
     }
     mismatches = [

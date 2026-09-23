@@ -44,9 +44,6 @@ from .constants import (
     MAX_CREDENTIAL_CHARACTERS,
     OBSERVATION_FORMAT,
     PROTOCOL_VERSION,
-    SDK_ARTIFACT_SHA256,
-    SDK_PROVENANCE_SHA256,
-    SDK_VERSION,
     TOOL_SET,
     VM_RUN_ID_HEADER,
 )
@@ -59,6 +56,7 @@ from .result import (
     redact,
     remaining_seconds,
 )
+from .sdk_pin import sdk_pin
 from .targeting import TargetGuardedMacOSComputer as MacOSComputer
 from ..schemas import (
     background_focus_overlay_constraint_error,
@@ -1133,7 +1131,7 @@ async def run_request(
         emitter.emit(
             _error_event(
                 "UNSUPPORTED_MODE",
-                f"mode 'background' needs a yutori SDK with window scope; the pinned SDK {SDK_VERSION} has none.",
+                f"mode 'background' needs a yutori SDK with window scope; the pinned SDK {sdk_pin().version} has none.",
             )
         )
         return "failed"
@@ -1141,7 +1139,7 @@ async def run_request(
         emitter.emit(
             _error_event(
                 "UNSUPPORTED_PRESENTATION",
-                f"background_focus_overlay needs a newer yutori SDK; the pinned SDK {SDK_VERSION} has none.",
+                f"background_focus_overlay needs a newer yutori SDK; the pinned SDK {sdk_pin().version} has none.",
             )
         )
         return "failed"
@@ -1355,15 +1353,16 @@ def main() -> int:
         termination["requested"] = True
 
     previous_sigterm = signal.signal(signal.SIGTERM, remember_termination)
+    pin = sdk_pin()
     try:
         emitter.emit(
             {
                 "type": "ready",
                 "protocol_version": PROTOCOL_VERSION,
                 "package_version": _package_version(),
-                "sdk_version": SDK_VERSION,
-                "sdk_artifact_sha256": SDK_ARTIFACT_SHA256,
-                "sdk_provenance_sha256": SDK_PROVENANCE_SHA256,
+                "sdk_version": pin.version,
+                "sdk_artifact_sha256": pin.artifact_sha256,
+                "sdk_provenance_sha256": pin.provenance_sha256,
                 "driver_version_pinned": DRIVER_VERSION,
                 "observation_format": OBSERVATION_FORMAT,
                 "observation_format_fallback": True,

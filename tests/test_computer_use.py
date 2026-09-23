@@ -16,7 +16,7 @@ import urllib.request
 import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from urllib.error import HTTPError
 from pathlib import Path
 from types import SimpleNamespace
@@ -51,6 +51,7 @@ from yutori_mcp.computer_use.constants import (
     TOOL_SET,
 )
 from yutori_mcp.computer_use.lock import ComputerUseBusyError, DesktopLock
+from yutori_mcp.computer_use.sdk_pin import RELEASE_PIN
 from yutori_mcp.computer_use.result import (
     FINAL_OUTPUT_HEADING,
     Terminal,
@@ -1081,8 +1082,12 @@ def test_runtime_check_verifies_version_installation_and_provenance(monkeypatch,
         read_text=lambda _name: None,
     )
     monkeypatch.setattr(preflight.importlib.metadata, "distribution", lambda _: distribution)
-    monkeypatch.setattr(preflight, "SDK_PROVENANCE_SHA256", hashlib.sha256(payload).hexdigest())
-    monkeypatch.setattr(preflight, "SDK_INSTALLATION_SHA256", preflight._stable_distribution_digest(distribution))
+    pin = replace(
+        RELEASE_PIN,
+        provenance_sha256=hashlib.sha256(payload).hexdigest(),
+        installation_sha256=preflight._stable_distribution_digest(distribution),
+    )
+    monkeypatch.setattr(preflight, "sdk_pin", lambda: pin)
     assert preflight.check_runtime().ok
 
     installed_file.write_text("modified")
@@ -1100,7 +1105,8 @@ def test_runtime_check_requires_an_explicit_editable_override(monkeypatch, tmp_p
         read_text=lambda _name: json.dumps({"url": tmp_path.as_uri(), "dir_info": {"editable": True}}),
     )
     monkeypatch.setattr(preflight.importlib.metadata, "distribution", lambda _: distribution)
-    monkeypatch.setattr(preflight, "SDK_PROVENANCE_SHA256", hashlib.sha256(payload).hexdigest())
+    pin = replace(RELEASE_PIN, provenance_sha256=hashlib.sha256(payload).hexdigest())
+    monkeypatch.setattr(preflight, "sdk_pin", lambda: pin)
     monkeypatch.delenv("YUTORI_MCP_ALLOW_EDITABLE_SDK", raising=False)
     assert not preflight.check_runtime().ok
 
