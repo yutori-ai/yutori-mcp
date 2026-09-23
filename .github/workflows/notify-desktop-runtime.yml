@@ -1,0 +1,47 @@
+name: Notify Yutori Local of runtime changes
+
+# Yutori Local (yutori-ai/yutori, apps/desktop) bundles a computer-use runtime built from a pinned
+# commit of this repository. When main changes code that ships in the yutori-mcp wheel, ask the
+# monorepo's desktop-runtime-bump workflow to open or update its pin-bump pull request.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/yutori_mcp/**"
+      - pyproject.toml
+
+# A newer push to main supersedes this one: the bump always resolves main's latest commit, so only
+# the last notification of a burst of merges matters.
+concurrency:
+  group: notify-desktop-runtime
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      # repository_dispatch needs contents:write on yutori-ai/yutori, which GITHUB_TOKEN here cannot
+      # have; the org's CI App can.
+      - name: Mint a dispatch token for yutori-ai/yutori
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.YUTORI_CI_APP_ID }}
+          private-key: ${{ secrets.YUTORI_CI_APP_PRIVATE_KEY }}
+          owner: yutori-ai
+          repositories: yutori
+          permission-contents: write
+
+      - name: Request a runtime pin bump
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          gh api repos/yutori-ai/yutori/dispatches \
+            -f event_type=desktop-runtime-changed \
+            -f "client_payload[repository]=$SOURCE_REPOSITORY" \
+            -f "client_payload[sha]=$SOURCE_SHA"
