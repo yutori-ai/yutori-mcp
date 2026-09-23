@@ -167,6 +167,28 @@ def _result(
     return CheckResult(name, ok, detail, None if ok else remediation, blocking)
 
 
+def _embedded_aware_result(
+    name: str,
+    *,
+    embedded_remediation: str,
+    embedded: Callable[[EmbeddedDriverHost], tuple[bool, str]],
+    standalone_remediation: str,
+    standalone: Callable[[], tuple[bool, str]],
+) -> CheckResult:
+    """Build a `CheckResult` that branches on whether an embedded host is configured.
+
+    Shared by ``check_daemon_identity`` and ``check_permissions``, which both check the
+    embedded host when one is configured and fall back to the standalone driver otherwise,
+    differing only in how each branch computes its `(ok, detail)` pair and remediation text.
+    """
+    host = _configured_embedded_host()
+    if host is not None:
+        ok, detail = embedded(host)
+        return _result(name, ok, detail, embedded_remediation)
+    ok, detail = standalone()
+    return _result(name, ok, detail, standalone_remediation)
+
+
 def check_macos() -> CheckResult:
     ok = platform.system() == "Darwin" and int(platform.mac_ver()[0].split(".")[0] or 0) >= 15
     return _result(
@@ -505,20 +527,16 @@ def _embedded_permissions(host: EmbeddedDriverHost) -> dict[str, Any]:
 
 
 def check_daemon_identity() -> CheckResult:
-    host = _configured_embedded_host()
-    if host is not None:
-        return _result(
-            "daemon identity",
-            _socket_accepts_connections(host.socket),
-            f"embedded daemon at {host.socket}",
-            _EMBEDDED_HOST_REMEDIATION,
-        )
-    result = run_safely(["pgrep", "-f", "/Applications/CuaDriver.app/Contents/MacOS/"], timeout=10)
-    return _result(
+    def standalone() -> tuple[bool, str]:
+        result = run_safely(["pgrep", "-f", "/Applications/CuaDriver.app/Contents/MacOS/"], timeout=10)
+        return result is not None and result.returncode == 0, "app-bundle daemon"
+
+    return _embedded_aware_result(
         "daemon identity",
-        result is not None and result.returncode == 0,
-        "app-bundle daemon",
-        "Start it with: open -n -g -a CuaDriver --args serve",
+        embedded_remediation=_EMBEDDED_HOST_REMEDIATION,
+        embedded=lambda host: (_socket_accepts_connections(host.socket), f"embedded daemon at {host.socket}"),
+        standalone_remediation="Start it with: open -n -g -a CuaDriver --args serve",
+        standalone=standalone,
     )
 
 
@@ -546,19 +564,18 @@ def _safe_permissions_ok(load: Callable[[], dict[str, Any]]) -> bool:
 
 
 def check_permissions() -> CheckResult:
-    host = _configured_embedded_host()
-    if host is not None:
-        return _result(
-            "permissions",
+    return _embedded_aware_result(
+        "permissions",
+        embedded_remediation=_EMBEDDED_PERMISSIONS_REMEDIATION,
+        embedded=lambda host: (
             _safe_permissions_ok(lambda: _embedded_permissions(host)),
             "Accessibility and Screen Recording (host application)",
-            _EMBEDDED_PERMISSIONS_REMEDIATION,
-        )
-    return _result(
-        "permissions",
-        _safe_permissions_ok(lambda: _driver_json("permissions")),
-        "Accessibility and Screen Recording",
-        _PERMISSIONS_GRANT_REMEDIATION,
+        ),
+        standalone_remediation=_PERMISSIONS_GRANT_REMEDIATION,
+        standalone=lambda: (
+            _safe_permissions_ok(lambda: _driver_json("permissions")),
+            "Accessibility and Screen Recording",
+        ),
     )
 
 
