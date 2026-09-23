@@ -155,7 +155,7 @@ final class EventRecorder: NSObject, ObservableObject {
         record(
             category: "text",
             name: "changed",
-            details: ["target": target, "value": value, "length": "\(value.count)"]
+            details: fieldDetails(target: target, value: value)
         )
     }
 
@@ -174,8 +174,14 @@ final class EventRecorder: NSObject, ObservableObject {
         record(
             category: "control",
             name: "submitted",
-            details: ["target": target, "value": value, "length": "\(value.count)"]
+            details: fieldDetails(target: target, value: value)
         )
+    }
+
+    /// The details payload shared by `recordTextChange` and `recordSubmit`; they differ only in
+    /// the category/name passed to `record(...)`.
+    private func fieldDetails(target: String, value: String) -> [String: String] {
+        ["target": target, "value": value, "length": "\(value.count)"]
     }
 
     func recordWebEvent(name: String, details: [String: String]) {
