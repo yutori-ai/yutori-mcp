@@ -32,6 +32,7 @@ from yutori.navigator.macos import (
 # stream shows exactly the conversation the SDK's activity window shows. Private to the SDK,
 # which this package pins by exact version and hash; tests guard the import.
 from yutori.navigator.macos.presentation import _transcript_entry as transcript_entry
+from yutori.navigator.macos.transport import CuaDriverTransport
 
 from .app import prepare_app
 from .app_selection import APP_TOOLS, AppSelectingAgent, AppSelectingComputer
@@ -55,6 +56,7 @@ from .result import (
     read_bounded_line,
     redact,
     remaining_seconds,
+    structured_content,
 )
 from .sdk_pin import sdk_pin
 from .targeting import TargetGuardedMacOSComputer as MacOSComputer
@@ -247,6 +249,30 @@ def _optional_field(
     return require(request, field) if field in request else default
 
 
+_CATALOG_APP_KEYS = ("name", "bundle_id", "running", "pid")
+
+
+def catalog_for_request(catalog: dict[str, Any]) -> dict[str, Any]:
+    """The part of a driver app catalog a run uses: identities, running state, and pids."""
+    return {
+        "apps": [
+            {key: app[key] for key in _CATALOG_APP_KEYS if key in app}
+            for app in catalog.get("apps") or []
+            if isinstance(app, dict) and isinstance(app.get("name"), str)
+        ]
+    }
+
+
+def _require_app_catalog(payload: dict[str, Any], field: str) -> dict[str, Any]:
+    value = _require_field(
+        payload,
+        field,
+        valid=lambda catalog: isinstance(catalog, dict) and isinstance(catalog.get("apps"), list),
+        expected="an object with an apps list",
+    )
+    return catalog_for_request(value)
+
+
 def parse_request(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RequestError("INVALID_REQUEST", "Request must be a JSON object.")
@@ -303,6 +329,9 @@ def parse_request(payload: Any) -> dict[str, Any]:
         "model": _require_string(payload, "model"),
         "api_base_url": _require_string(payload, "api_base_url"),
     }
+    # A standby supervisor fetches the catalog while the operator types; a cold run fetches its own.
+    if "app_catalog" in payload:
+        parsed["app_catalog"] = _require_app_catalog(payload, "app_catalog")
     if "vm_run_id" in payload:
         value = _require_string(payload, "vm_run_id")
         try:
@@ -637,6 +666,46 @@ class ActivityReporter:
                 "caption": caption,
             }
         )
+
+
+class CatalogPrefetch:
+    """The driver's app catalog, fetched on a connection of its own from the start of the run.
+
+    The SDK serializes calls on one driver connection, and ``list_apps`` (~0.8s) is the slowest
+    call before a background run's first model request. On a second connection it overlaps the
+    API client, the desktop session, and a preselected app's launch. Closing a connection takes
+    about half a second, so it closes in the background and is only awaited when the run ends.
+    """
+
+    def __init__(self, transport_factory: Callable[[], Any] = CuaDriverTransport) -> None:
+        self._transport = transport_factory()
+        self._close_task: asyncio.Task[None] | None = None
+        # time.monotonic() when the catalog arrived, for callers that hold it before a run.
+        self.fetched_at: float | None = None
+        self._task = asyncio.create_task(self._fetch())
+
+    async def _fetch(self) -> dict[str, Any]:
+        try:
+            catalog = structured_content(await self._transport.call_tool("list_apps", {}, read_only=True))
+            self.fetched_at = time.monotonic()
+            return catalog
+        finally:
+            self._close_task = asyncio.create_task(self._transport.close())
+
+    async def result(self) -> dict[str, Any] | None:
+        """The catalog, or None if the prefetch failed and the caller should fetch it itself."""
+        try:
+            return await self._task
+        except Exception as error:  # noqa: BLE001 - the session's own list_apps is the fallback
+            print(f"app catalog prefetch failed: {error}", file=sys.stderr)
+            return None
+
+    async def aclose(self) -> None:
+        if not self._task.done():
+            self._task.cancel()
+        await asyncio.gather(self._task, return_exceptions=True)
+        if self._close_task is not None:
+            await asyncio.gather(self._close_task, return_exceptions=True)
 
 
 class ApiCounter:
@@ -1168,6 +1237,8 @@ async def run_request(
     agent: Any = None
     outcome = "failed"
     final_text: str | None = None
+    supplied_catalog = request.get("app_catalog")
+    catalog = CatalogPrefetch() if background and supplied_catalog is None else None
     try:
         async with AsyncYutoriClient(api_key=api_key, base_url=request["api_base_url"]) as client:
             completions = client.chat.completions
@@ -1181,10 +1252,13 @@ async def run_request(
             startup.mark("computer")
             inventory = None
             if background:
-                inventory = await computer.app_inventory()
+                # The app launch runs while the catalog is still being fetched on its own connection.
                 if request["app"]:
                     await computer.select_app(request["app"], url=request["start_url"])
                     startup.mark("target")
+                if supplied_catalog is None and catalog is not None:
+                    supplied_catalog = await catalog.result()
+                inventory = await computer.app_inventory(supplied_catalog)
             elif request["app"]:
                 target = await _prepare_target(computer, request)
                 computer.target_pid = target["pid"]
@@ -1241,6 +1315,8 @@ async def run_request(
         outcome = "failed"
         final_text = _redacted_error_text(error, api_key)
     finally:
+        if catalog is not None:
+            await catalog.aclose()
         status = computer.presentation_status
         try:
             await computer.aclose()

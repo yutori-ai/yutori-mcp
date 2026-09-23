@@ -111,11 +111,28 @@ def pick_best_window(windows: list[dict[str, Any]], min_edge_points: float = 100
     return max(windows, key=_area)
 
 
+def is_ready_window(window: dict[str, Any]) -> bool:
+    """Whether a picked window can be driven right away: on screen, and a real content window.
+
+    A cold launch can briefly expose a stale offscreen UI-host record before the application's
+    real window reaches WindowServer, so an untitled window must also be substantial.
+    """
+    titled = isinstance(window.get("title"), str) and bool(window["title"].strip())
+    substantial = _area(window) >= _MIN_IMMEDIATE_UNTITLED_WINDOW_AREA
+    return window.get("is_on_screen") is not False and (titled or substantial)
+
+
+async def ready_window(computer: MacOSComputer, pid: int) -> dict[str, Any] | None:
+    """The app's best window if it is already drivable, else None; one window listing, no waits."""
+    window = pick_best_window(_windows(await computer.list_windows(pid)))
+    return window if window is not None and is_ready_window(window) else None
+
+
 def _is_missing_app(error: CuaDriverToolError) -> bool:
     return "APP_NOT_INSTALLED" in str(error).upper()
 
 
-def _find_running_app(payload: dict[str, Any], requested: str) -> dict[str, Any] | None:
+def find_running_app(payload: dict[str, Any], requested: str) -> dict[str, Any] | None:
     requested = requested.casefold()
     for candidate in payload.get("apps") or []:
         if not isinstance(candidate, dict) or not isinstance(candidate.get("pid"), int) or candidate["pid"] <= 0:
@@ -130,7 +147,7 @@ async def _running_app(computer: MacOSComputer, requested: str) -> dict[str, Any
     # The pinned SDK has no public list_apps convenience method. Its generic hook
     # retains deadline/Stop cancellation while keeping the transport SDK-owned.
     result = await computer._call_tool("list_apps", {}, read_only=True)
-    return _find_running_app(structured_content(result), requested)
+    return find_running_app(structured_content(result), requested)
 
 
 async def _await_window(computer: MacOSComputer, pid: int, app: str) -> dict[str, Any] | None:
@@ -143,13 +160,9 @@ async def _await_window(computer: MacOSComputer, pid: int, app: str) -> dict[str
             # compare every content window so a visible lightweight SwiftUI host cannot
             # mask the app's legitimate titled window while it remains off screen.
             fallback = _best_fallback_window(windows)
-            # A cold launch can briefly expose a stale offscreen UI-host record before
-            # the application's real window reaches WindowServer. Give unhide time to
-            # produce an on-screen target, but retain the best offscreen content window
-            # for apps that intentionally keep their only window there.
-            titled = isinstance(window.get("title"), str) and bool(window["title"].strip())
-            substantial = _area(window) >= _MIN_IMMEDIATE_UNTITLED_WINDOW_AREA
-            if window.get("is_on_screen") is not False and (titled or substantial):
+            # Give unhide time to produce an on-screen target, but retain the best offscreen
+            # content window for apps that intentionally keep their only window there.
+            if is_ready_window(window):
                 return window
         await computer.wait(_WINDOW_POLL_MS)
     if fallback is not None:

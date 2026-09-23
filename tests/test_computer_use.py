@@ -279,6 +279,7 @@ def test_lock_releases_on_exception_and_cancellation(tmp_path, error):
 class _Writer:
     def __init__(self):
         self.data = b""
+        self.closed = False
 
     def write(self, data):
         self.data += data
@@ -287,7 +288,10 @@ class _Writer:
         pass
 
     def close(self):
-        pass
+        self.closed = True
+
+    def is_closing(self):
+        return self.closed
 
     async def wait_closed(self):
         pass
@@ -681,7 +685,7 @@ async def test_stderr_diagnostics_retain_only_the_latest_twenty_lines():
 
 
 async def test_stop_process_group_escalates_to_kill():
-    process = SimpleNamespace(pid=123, returncode=None, wait=AsyncMock(return_value=0))
+    process = SimpleNamespace(pid=123, returncode=None, stdin=None, wait=AsyncMock(return_value=0))
 
     def killed(_pid, sig):
         if sig == signal.SIGKILL:
@@ -1954,7 +1958,8 @@ class _FakeComputer:
     async def set_window_target(self, target):
         self.window_targets.append(target)
 
-    async def app_inventory(self) -> str:
+    async def app_inventory(self, catalog: dict[str, Any] | None = None) -> str:
+        self.inventory_catalog = catalog
         return '[{"name": "Notes"}]'
 
     async def select_app(self, app: str, *, url: str | None = None) -> dict[str, Any]:
@@ -2015,6 +2020,17 @@ def _patch_runner_sdk(monkeypatch, *, agent_cls: type = _FakeAgent) -> None:
     monkeypatch.setattr(runner_module, "N2ComputerAgent", agent_cls)
     monkeypatch.setattr(runner_module, "AppSelectingAgent", agent_cls)
     monkeypatch.setattr(runner_module, "AppSelectingComputer", _FakeComputer)
+    monkeypatch.setattr(runner_module, "CatalogPrefetch", _FakeCatalogPrefetch)
+
+
+class _FakeCatalogPrefetch:
+    catalog: dict[str, Any] | None = {"apps": [{"name": "Notes", "pid": 7, "running": True}]}
+
+    async def result(self) -> dict[str, Any] | None:
+        return self.catalog
+
+    async def aclose(self) -> None:
+        pass
 
 
 def test_presentation_payload_distinguishes_capture_codec_from_n2_request_format():
@@ -3840,7 +3856,8 @@ async def test_cli_run_json_streams_events_and_the_result_as_json_lines(monkeypa
     assert await cli._run_custom(_run_args(json=True, hide_stop_item=True)) == 0
 
     lines = _json_lines(capsys.readouterr().out)
-    assert [line["type"] for line in lines] == ["ready", "action", "result"]
+    assert [line["type"] for line in lines] == ["preflight", "ready", "action", "result"]
+    assert isinstance(lines[0]["duration_ms"], int)
     assert lines[-1]["outcome"] == "completed" and lines[-1]["final_text"] == "done"
 
 
@@ -4178,7 +4195,7 @@ async def test_cli_run_forwards_presentation_and_json_streams_host_only_events(m
     args = _run_args(json=True, mode="background", app="Notes", no_presentation=True)
     assert await cli._run_custom(args) == 0
     lines = _json_lines(capsys.readouterr().out)
-    assert [line["type"] for line in lines] == ["frame", "activity", "result"]
+    assert [line["type"] for line in lines] == ["preflight", "frame", "activity", "result"]
 
     captured = AsyncMock(return_value={"outcome": "completed", "delivery_mode": "foreground", "final_text": "ok"})
     monkeypatch.setattr(supervisor, "run_task", captured)
@@ -4279,3 +4296,266 @@ async def test_run_request_without_app_starts_background_with_inventory_and_sele
     assert 'Initial application: none' in agent.kwargs['system_prompt']
     assert computer in agent.kwargs['callbacks']
     assert json.loads(stream.lines[-1])['delivery_mode'] == 'background'
+
+
+# --- Prewarmed (standby) runners -------------------------------------------------------------
+
+
+def _prewarmed(process=None, **ready_overrides) -> supervisor.PrewarmedRunner:
+    process = process or _Process(_stream(json.dumps(_result_event())), _stream(""))
+    return supervisor.PrewarmedRunner(process, _ready_event(**ready_overrides))
+
+
+async def test_supervisor_takes_over_a_prewarmed_runner_and_replays_its_ready(monkeypatch):
+    process = _Process(_stream(json.dumps(_action_event()), json.dumps(_result_event())), _stream(""))
+    runner = _prewarmed(process, reasoning_overlay_requested=True)
+    recorded: list[int] = []
+    monkeypatch.setattr(supervisor, "_record_runner_pid", recorded.append)
+    seen: list[dict] = []
+
+    async def on_event(event):
+        seen.append(event)
+
+    create = AsyncMock()
+    with patch("asyncio.create_subprocess_exec", create):
+        result = await _supervise(
+            command=python_runner_command(),
+            request={"type": "run"},
+            api_key="yt-key",
+            deadline=time.monotonic() + 1,
+            on_event=on_event,
+            prewarmed=runner,
+        )
+    create.assert_not_awaited()
+    assert result["outcome"] == "completed"
+    assert process.stdin.data.splitlines() == [b"yt-key", b'{"type":"run"}']
+    assert recorded == [process.pid], "only a runner that has its request is advertised to `stop`"
+    assert [event["type"] for event in seen] == ["ready", "action"]
+    assert seen[0]["reasoning_overlay_requested"] is True
+
+
+async def test_prewarm_waits_for_a_valid_ready():
+    process = _Process(_stream(json.dumps(_ready_event())), _stream(""))
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)) as create:
+        runner = await supervisor.prewarm_runner(prefetch_catalog=False)
+    assert runner.process is process and runner.alive
+    assert runner.ready_event["type"] == "ready"
+    assert create.await_args.kwargs["start_new_session"] is True
+    assert process.stdin.data == b"", "no credential or request is sent while on standby"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [json.dumps(_ready_event(sdk_version="0.0.1")), json.dumps({"type": "action"}), "not json", ""],
+)
+async def test_prewarm_rejects_a_runner_that_does_not_report_a_valid_ready(line):
+    process = _Process(_stream(line) if line else _stream(), _stream(""))
+    with _patched_process_group_stop(process) as stopped:
+        with pytest.raises(RuntimeError, match="runner"):
+            await supervisor.prewarm_runner(prefetch_catalog=False)
+    stopped.assert_awaited_once_with(process)
+
+
+async def test_stopping_a_prewarmed_runner_closes_its_stdin_first():
+    process = SimpleNamespace(pid=123, returncode=None, stdin=_Writer(), wait=AsyncMock(return_value=0))
+    with patch("yutori_mcp.computer_use.supervisor.os.killpg"):
+        await _stop_process_group(process)
+    assert process.stdin.closed, "a runner blocked reading its request only notices EOF"
+
+
+async def test_run_task_discards_an_unused_prewarmed_runner(tmp_path):
+    runner = _prewarmed()
+    discard = AsyncMock()
+    lock = DesktopLock(tmp_path / "desktop.lock")
+    with patch.object(supervisor, "discard_prewarmed_runner", discard), lock:
+        result = await run_task(**_run_task_kwargs(tmp_path), prewarmed=runner)
+    assert result["outcome"] == "failed"
+    discard.assert_awaited_once_with(runner)
+
+
+async def test_run_task_passes_a_live_prewarmed_runner_and_replaces_a_dead_one(tmp_path):
+    live = _prewarmed()
+    with _patched_run_task_supervise(tmp_path) as supervise:
+        await run_task(**_run_task_kwargs(tmp_path), prewarmed=live)
+    assert supervise.await_args.kwargs["prewarmed"] is live
+
+    dead = _prewarmed()
+    dead.process.returncode = 1
+    with _patched_run_task_supervise(tmp_path) as supervise:
+        await run_task(**_run_task_kwargs(tmp_path), prewarmed=dead)
+    assert supervise.await_args.kwargs["prewarmed"] is None
+
+
+def test_standby_request_parses_with_the_run_parser():
+    from yutori_mcp.computer_use import cli
+
+    args = cli.parse_standby_request(
+        json.dumps(["--mode", "background", "--app", "Safari", "--exclude-capture-window", "7", "--", "-dash task"])
+    )
+    assert args.task == "-dash task" and args.app == "Safari" and args.mode == "background"
+    assert args.exclude_capture_windows == [7]
+    assert args.json is True
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "not json",
+        json.dumps({"task": "x"}),
+        json.dumps(["--mode", "sideways", "x"]),
+        json.dumps(["--api-key-stdin", "--vm-run-id", str(uuid.uuid4()), "x"]),
+    ],
+)
+def test_standby_request_rejects_malformed_or_credential_bearing_requests(line):
+    from yutori_mcp.computer_use import cli
+
+    with pytest.raises(ValueError):
+        cli.parse_standby_request(line)
+
+
+async def test_standby_announces_itself_then_runs_the_request_on_the_prewarmed_runner(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    runner = _prewarmed()
+    monkeypatch.setattr(cli, "prewarm_runner", AsyncMock(return_value=runner))
+    monkeypatch.setattr(cli, "_read_standby_request", AsyncMock(return_value=json.dumps(["open notes"])))
+    run_custom = AsyncMock(return_value=0)
+    monkeypatch.setattr(cli, "_run_custom", run_custom)
+    discard = AsyncMock()
+    monkeypatch.setattr(cli, "discard_prewarmed_runner", discard)
+
+    assert await cli._standby() == 0
+    assert _json_lines(capsys.readouterr().out) == [{"type": "standby"}]
+    assert run_custom.await_args.args[0].task == "open notes"
+    assert run_custom.await_args.kwargs["prewarmed"] is runner
+    discard.assert_awaited_once_with(runner)
+
+
+@pytest.mark.parametrize(
+    ("read", "code", "exit_code"),
+    [
+        (AsyncMock(return_value=None), None, 0),
+        (AsyncMock(side_effect=RuntimeError("runner exited")), "STANDBY_LOST", 1),
+        (AsyncMock(return_value="not json"), "INVALID_REQUEST", 1),
+    ],
+)
+async def test_standby_that_never_runs_releases_its_runner(monkeypatch, capsys, read, code, exit_code):
+    from yutori_mcp.computer_use import cli
+
+    runner = _prewarmed()
+    monkeypatch.setattr(cli, "prewarm_runner", AsyncMock(return_value=runner))
+    monkeypatch.setattr(cli, "_read_standby_request", read)
+    monkeypatch.setattr(cli, "_run_custom", AsyncMock(side_effect=AssertionError("must not run")))
+    discard = AsyncMock()
+    monkeypatch.setattr(cli, "discard_prewarmed_runner", discard)
+
+    assert await cli._standby() == exit_code
+    lines = _json_lines(capsys.readouterr().out)
+    assert lines[0] == {"type": "standby"}
+    assert [line.get("code") for line in lines[1:]] == ([code] if code else [])
+    discard.assert_awaited_once_with(runner)
+
+
+async def test_standby_reports_a_runner_that_cannot_be_prewarmed(monkeypatch, capsys):
+    from yutori_mcp.computer_use import cli
+
+    monkeypatch.setattr(cli, "prewarm_runner", AsyncMock(side_effect=RuntimeError("not ready")))
+    assert await cli._standby() == 1
+    assert _json_lines(capsys.readouterr().out) == [
+        {"type": "error", "code": "STANDBY_FAILED", "message": "not ready"}
+    ]
+
+
+# --- App catalog prefetch --------------------------------------------------------------------
+
+
+async def test_catalog_prefetch_returns_the_catalog_and_closes_its_connection():
+    transport = SimpleNamespace(
+        call_tool=AsyncMock(return_value={"structuredContent": {"apps": [{"name": "Notes"}]}}),
+        close=AsyncMock(),
+    )
+    prefetch = runner_module.CatalogPrefetch(lambda: transport)
+    assert await prefetch.result() == {"apps": [{"name": "Notes"}]}
+    await prefetch.aclose()
+    transport.call_tool.assert_awaited_once_with("list_apps", {}, read_only=True)
+    transport.close.assert_awaited_once()
+
+
+async def test_a_failed_catalog_prefetch_falls_back_to_the_session(capsys):
+    transport = SimpleNamespace(call_tool=AsyncMock(side_effect=OSError("no driver")), close=AsyncMock())
+    prefetch = runner_module.CatalogPrefetch(lambda: transport)
+    assert await prefetch.result() is None
+    await prefetch.aclose()
+    transport.close.assert_awaited_once()
+    assert "prefetch failed" in capsys.readouterr().err
+
+
+async def test_background_run_launches_a_preselected_app_before_awaiting_the_catalog(monkeypatch):
+    _FakeComputer.instances.clear()
+    _FakeAgent.instances.clear()
+    _patch_runner_sdk(monkeypatch)
+    monkeypatch.setattr(runner_module, "_supports_background_mode", lambda: True)
+    order: list[str] = []
+
+    class _OrderedPrefetch(_FakeCatalogPrefetch):
+        async def result(self):
+            order.append("catalog")
+            return self.catalog
+
+    async def prepare(_computer, app, _url, *, front):
+        order.append(f"launch {app}")
+        return {"name": app, "pid": 7, "window_id": 70}
+
+    monkeypatch.setattr(runner_module, "CatalogPrefetch", _OrderedPrefetch)
+    monkeypatch.setattr(runner_module, "prepare_app", prepare)
+    request = parse_request(_background_request(app="Notes"))
+
+    assert await runner_module.run_request(request, Emitter(_CollectStream()), "yt-secret") == "completed"
+    assert order == ["launch Notes", "catalog"]
+    assert _FakeComputer.instances[-1].inventory_catalog == _FakeCatalogPrefetch.catalog
+
+
+class _DoneCatalog:
+    def __init__(self, catalog, *, age_seconds: float = 0.0):
+        self._catalog = catalog
+        self.fetched_at = time.monotonic() - age_seconds if catalog is not None else None
+
+    async def result(self):
+        return self._catalog
+
+    async def aclose(self):
+        pass
+
+
+@pytest.mark.parametrize(
+    ("mode", "age", "attached"),
+    [("background", 5.0, True), ("background", 10_000.0, False), ("foreground", 5.0, False)],
+)
+async def test_run_task_hands_a_fresh_standby_catalog_to_background_runs(tmp_path, mode, age, attached):
+    catalog = {"apps": [{"name": "Notes", "pid": 5, "running": True, "windows": ["private title"]}]}
+    runner = supervisor.PrewarmedRunner(_Process(_stream(), _stream()), _ready_event(), _DoneCatalog(catalog, age_seconds=age))
+    with _patched_run_task_supervise(tmp_path) as supervise:
+        await run_task(**_run_task_kwargs(tmp_path, mode=mode), prewarmed=runner)
+    request = supervise.await_args.kwargs["request"]
+    if attached:
+        assert request["app_catalog"] == {"apps": [{"name": "Notes", "pid": 5, "running": True}]}
+    else:
+        assert "app_catalog" not in request
+
+
+def test_runner_request_accepts_an_app_catalog_and_trims_it():
+    payload = {**_background_request(), "app_catalog": {"apps": [{"name": "Notes", "pid": 5, "windows": ["t"]}, 3]}}
+    assert parse_request(payload)["app_catalog"] == {"apps": [{"name": "Notes", "pid": 5}]}
+    with pytest.raises(RequestError):
+        parse_request({**_background_request(), "app_catalog": {"apps": "nope"}})
+
+
+async def test_a_supplied_catalog_replaces_the_runner_prefetch(monkeypatch):
+    _FakeComputer.instances.clear()
+    _patch_runner_sdk(monkeypatch)
+    monkeypatch.setattr(runner_module, "_supports_background_mode", lambda: True)
+    monkeypatch.setattr(runner_module, "CatalogPrefetch", Mock(side_effect=AssertionError("no prefetch")))
+    supplied = {"apps": [{"name": "Notes", "pid": 9}]}
+    request = parse_request({**_background_request(app=None), "app_catalog": supplied})
+    assert await runner_module.run_request(request, Emitter(_CollectStream()), "yt-secret") == "completed"
+    assert _FakeComputer.instances[-1].inventory_catalog == supplied

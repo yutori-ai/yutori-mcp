@@ -55,6 +55,10 @@ EVENT_QUEUE_LIMIT = 32
 RUNNER_SHUTDOWN_GRACE_SECONDS = 5.0
 RUNNER_FRAME_LIMIT_BYTES = 8 * 1024 * 1024
 RUNNER_MODULE = "yutori_mcp.computer_use.runner"
+# A prewarmed runner has only its interpreter start and imports to get through before `ready`.
+RUNNER_PREWARM_TIMEOUT_SECONDS = 60.0
+# A standby's app catalog is handed to its run only while running-app state is still recent.
+PREWARMED_CATALOG_MAX_AGE_SECONDS = 120.0
 
 
 def runner_pid_path() -> Path:
@@ -212,6 +216,11 @@ def _credential_frame(api_key: str) -> bytes:
 async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
     if process.returncode is not None:
         return
+    # A prewarmed runner still blocked reading its request only notices EOF: its SIGTERM latch
+    # sets a flag that the blocking read never checks. Closing stdin ends it promptly; for a
+    # runner that already has its request, stdin is closed and this does nothing.
+    if process.stdin is not None and not process.stdin.is_closing():
+        process.stdin.close()
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -296,16 +305,8 @@ def _event_shape_error(event: dict[str, Any]) -> str | None:
     return f"invalid or missing fields: {', '.join(invalid)}" if invalid else None
 
 
-async def _supervise(
-    *,
-    command: list[str],
-    request: dict[str, Any],
-    api_key: str,
-    deadline: float,
-    on_event: EventCallback | None = None,
-) -> dict[str, Any]:
-    credential_frame = _credential_frame(api_key)
-    process = await asyncio.create_subprocess_exec(
+async def _spawn_runner(command: list[str]) -> asyncio.subprocess.Process:
+    return await asyncio.create_subprocess_exec(
         *command,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
@@ -319,6 +320,107 @@ async def _supervise(
         # runner on import.
         cwd=os.path.expanduser("~"),
     )
+
+
+class PrewarmedRunner:
+    """A runner process that has booted and reported a valid `ready`, now waiting for its request.
+
+    The runner reads its credential and request only after announcing `ready`, so it can be
+    started before there is a task: its interpreter start and imports (about a second) then
+    happen while the operator is still typing. The supervisor that later takes it over replays
+    ``ready_event`` to its host, so the event stream looks the same as for a cold start.
+    """
+
+    def __init__(
+        self, process: asyncio.subprocess.Process, ready_event: dict[str, Any], catalog: Any = None
+    ) -> None:
+        self.process = process
+        self.ready_event = ready_event
+        # A runner.CatalogPrefetch started alongside the runner, or None.
+        self.catalog = catalog
+
+    @property
+    def alive(self) -> bool:
+        return self.process.returncode is None
+
+    async def fresh_catalog(self) -> dict[str, Any] | None:
+        """The prefetched app catalog if it arrived within the freshness window, else None."""
+        if self.catalog is None:
+            return None
+        catalog = await self.catalog.result()
+        fetched_at = self.catalog.fetched_at
+        if catalog is None or fetched_at is None:
+            return None
+        if time.monotonic() - fetched_at > PREWARMED_CATALOG_MAX_AGE_SECONDS:
+            return None
+        from .runner import catalog_for_request
+
+        return catalog_for_request(catalog)
+
+
+async def prewarm_runner(
+    command: list[str] | None = None,
+    *,
+    timeout: float = RUNNER_PREWARM_TIMEOUT_SECONDS,
+    prefetch_catalog: bool = True,
+) -> PrewarmedRunner:
+    """Start a runner and wait for its `ready`; raises RuntimeError if it cannot be used.
+
+    With ``prefetch_catalog`` the driver's app catalog (the slowest call before a background
+    run's first model request) is fetched on its own connection at the same time.
+    """
+    catalog = None
+    if prefetch_catalog:
+        # Deferred: the runner module imports the SDK, which only a standby needs up front.
+        from .runner import CatalogPrefetch
+
+        catalog = CatalogPrefetch()
+    try:
+        process = await _spawn_runner(command or python_runner_command())
+    except BaseException:
+        if catalog is not None:
+            await catalog.aclose()
+        raise
+    assert process.stdout
+    try:
+        line = await asyncio.wait_for(process.stdout.readline(), timeout)
+        event = json.loads(line.decode()) if line else None
+        if not isinstance(event, dict) or event.get("type") != "ready":
+            raise RuntimeError("Computer-use runner did not report ready.")
+        if mismatch := _ready_error(event):
+            raise RuntimeError(f"Computer-use runner provenance mismatch: {mismatch}")
+    except asyncio.TimeoutError:
+        await discard_prewarmed_runner(PrewarmedRunner(process, {}, catalog))
+        raise RuntimeError(f"Computer-use runner was not ready within {timeout:g}s.") from None
+    except (RuntimeError, ValueError, UnicodeDecodeError) as error:
+        await discard_prewarmed_runner(PrewarmedRunner(process, {}, catalog))
+        if isinstance(error, RuntimeError):
+            raise
+        raise RuntimeError("Computer-use runner emitted invalid JSON before ready.") from error
+    except BaseException:
+        await discard_prewarmed_runner(PrewarmedRunner(process, {}, catalog))
+        raise
+    return PrewarmedRunner(process, event, catalog)
+
+
+async def discard_prewarmed_runner(runner: PrewarmedRunner) -> None:
+    """End a prewarmed runner that will not run; a no-op once a run has used and reaped it."""
+    await _stop_process_group(runner.process)
+    if runner.catalog is not None:
+        await runner.catalog.aclose()
+
+
+async def _supervise(
+    *,
+    command: list[str],
+    request: dict[str, Any],
+    api_key: str,
+    deadline: float,
+    on_event: EventCallback | None = None,
+    prewarmed: PrewarmedRunner | None = None,
+) -> dict[str, Any]:
+    credential_frame = _credential_frame(api_key)
+    process = prewarmed.process if prewarmed is not None else await _spawn_runner(command)
     assert process.stdin and process.stdout and process.stderr
     stderr_task = asyncio.create_task(_drain_stderr(process.stderr, api_key))
     notifier = _EventNotifier(on_event) if on_event is not None else None
@@ -344,6 +446,12 @@ async def _supervise(
         await process.stdin.drain()
         process.stdin.close()
         await process.stdin.wait_closed()
+        if prewarmed is not None:
+            # Its `ready` was read and validated when it was prewarmed; only now is it this run's.
+            ready = True
+            _record_runner_pid(process.pid)
+            if notifier is not None:
+                notifier.submit(prewarmed.ready_event)
         while True:
             remaining = _remaining_seconds(deadline)
             try:
@@ -483,6 +591,7 @@ async def run_task(
     exclude_capture_window_ids: Sequence[int] = (),
     lock: DesktopLock | None = None,
     on_event: EventCallback | None = None,
+    prewarmed: PrewarmedRunner | None = None,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + minutes * 60
     deadline_ms = int((time.time() + minutes * 60) * 1000)
@@ -522,16 +631,28 @@ async def run_task(
                 request["vm_run_id"] = vm_run_id
             if find_cua_driver() is None:  # Kept defensive; preflight already checked it.
                 return failure("cua-driver not found. Run: yutori-mcp computer-use setup", delivery_mode=mode)
+            if prewarmed is not None and not prewarmed.alive:
+                logger.warning("Prewarmed computer-use runner exited before its run; starting a fresh one")
+                await discard_prewarmed_runner(prewarmed)
+                prewarmed = None
+            if prewarmed is not None and mode == DELIVERY_MODE_BACKGROUND:
+                if (catalog := await prewarmed.fresh_catalog()) is not None:
+                    request["app_catalog"] = catalog
             result = await _supervise(
                 command=python_runner_command(),
                 request=request,
                 api_key=api_key,
                 deadline=deadline,
                 on_event=on_event,
+                prewarmed=prewarmed,
             )
             return attach_run_link(result, platform_url)
     except (ComputerUseBusyError, RuntimeError, OSError, ValueError) as error:
         return failure(str(error), delivery_mode=mode)
+    finally:
+        # Every early return above (busy lock, bad arguments, missing driver) leaves it unused.
+        if prewarmed is not None:
+            await discard_prewarmed_runner(prewarmed)
 
 
 async def run_task_with_resolved_credentials(
