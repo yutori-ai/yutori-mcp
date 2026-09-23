@@ -25,13 +25,10 @@ from .constants import (
     DRIVER_VERSION,
     MCP_VERSION,
     MODEL,
-    SDK_ARTIFACT_SHA256,
-    SDK_INSTALLATION_SHA256,
-    SDK_PROVENANCE_SHA256,
-    SDK_VERSION,
     TOOL_SET,
 )
 from .result import compact_json_line, structured_content
+from .sdk_pin import SdkPinError, sdk_pin
 
 DRIVER_APP = Path("/Applications/CuaDriver.app")
 DRIVER_PATHS = (
@@ -66,6 +63,9 @@ _SETUP_REMEDIATION = "Run: yutori-mcp computer-use setup"
 # Shared remediation text for checks whose fix is granting the driver's TCC permissions:
 # check_permissions and check_capture's driver-capture-failed branch both point here.
 _PERMISSIONS_GRANT_REMEDIATION = "Run: cua-driver permissions grant"
+# A host-pinned runtime ships inside the application that assembled it; nothing a user can reinstall
+# with uvx repairs it.
+_HOST_RUNTIME_REMEDIATION = "Reinstall the application that bundles this runtime."
 # An application that embeds cua-driver (the driver's EMBEDDING contract) hands this runtime its
 # own binary and the private socket of the daemon it spawned. Both must be set together; the
 # runtime then never looks for /Applications/CuaDriver.app and permissions are read from the host
@@ -257,10 +257,17 @@ def _stable_distribution_digest(distribution: importlib.metadata.Distribution) -
 
 
 def check_runtime() -> CheckResult:
-    remediation = f"Reinstall the pinned runtime: uvx --refresh --from yutori-mcp=={MCP_VERSION} yutori-mcp"
+    release_remediation = f"Reinstall the pinned runtime: uvx --refresh --from yutori-mcp=={MCP_VERSION} yutori-mcp"
+
+    try:
+        pin = sdk_pin()
+    except SdkPinError as error:
+        return _result("Python runtime", False, str(error), _HOST_RUNTIME_REMEDIATION)
+    remediation = _HOST_RUNTIME_REMEDIATION if pin.host_pinned else release_remediation
+    origin = f"; host-pinned from {pin.source}" if pin.host_pinned else ""
 
     def report(ok: bool, detail: str) -> CheckResult:
-        return _result("Python runtime", ok, detail, remediation)
+        return _result("Python runtime", ok, detail + origin, remediation)
 
     try:
         distribution = importlib.metadata.distribution("yutori")
@@ -272,23 +279,21 @@ def check_runtime() -> CheckResult:
     if editable:
         override = os.environ.get(_EDITABLE_SDK_OVERRIDE) == "1"
         detail = f"yutori {version}; editable installation; override {'enabled' if override else 'required'}"
-        if not override or version != SDK_VERSION:
+        if not override or version != pin.version:
             return report(False, detail)
         try:
             provenance = _provenance_path(distribution, editable=True).read_bytes()
         except (OSError, ValueError, json.JSONDecodeError) as error:
             return report(False, str(error))
-        ok = hashlib.sha256(provenance).hexdigest() == SDK_PROVENANCE_SHA256
+        ok = hashlib.sha256(provenance).hexdigest() == pin.provenance_sha256
         return report(ok, detail)
 
     try:
         installation_digest = _stable_distribution_digest(distribution)
     except OSError as error:
         return report(False, f"installed file unavailable: {error}")
-    if version != SDK_VERSION or installation_digest != SDK_INSTALLATION_SHA256:
-        detail = (
-            f"yutori {version}; artifact sha256 {SDK_ARTIFACT_SHA256}; installation sha256 {installation_digest}"
-        )
+    if version != pin.version or installation_digest != pin.installation_sha256:
+        detail = f"yutori {version}; artifact sha256 {pin.artifact_sha256}; installation sha256 {installation_digest}"
         return report(False, detail)
     try:
         provenance = _provenance_path(distribution, editable=False).read_bytes()
@@ -296,10 +301,10 @@ def check_runtime() -> CheckResult:
         return report(False, str(error))
     provenance_digest = hashlib.sha256(provenance).hexdigest()
     detail = (
-        f"yutori {version}; artifact sha256 {SDK_ARTIFACT_SHA256}; installation sha256 {installation_digest}; "
+        f"yutori {version}; artifact sha256 {pin.artifact_sha256}; installation sha256 {installation_digest}; "
         f"provenance sha256 {provenance_digest}"
     )
-    return report(provenance_digest == SDK_PROVENANCE_SHA256, detail)
+    return report(provenance_digest == pin.provenance_sha256, detail)
 
 
 def run_safely(

@@ -9,14 +9,20 @@ import time
 from collections.abc import Callable
 from typing import Any, TextIO
 
-from .constants import DELIVERY_MODE_BACKGROUND, DELIVERY_MODE_FOREGROUND, MCP_VERSION, SDK_VERSION
+from .constants import DELIVERY_MODE_BACKGROUND, DELIVERY_MODE_FOREGROUND, MCP_VERSION
+from .sdk_pin import SdkPinError, sdk_pin
 
 REDACTED = "[REDACTED]"
 
 
 def format_runtime_version(paint: "Terminal") -> str:
     """The exact MCP and SDK packages executing a computer-use run."""
-    return f"yutori-mcp {MCP_VERSION}  {paint.glyph('separator')}  yutori {SDK_VERSION}"
+    try:
+        sdk_version = sdk_pin().version
+    except SdkPinError:
+        # The run banner prints before the preflight gate, which reports the broken pin itself.
+        sdk_version = "unknown (unreadable host pin)"
+    return f"yutori-mcp {MCP_VERSION}  {paint.glyph('separator')}  yutori {sdk_version}"
 
 
 def compact_json_line(payload: dict[str, Any]) -> str:
