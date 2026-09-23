@@ -66,92 +66,68 @@ from ..schemas import (
 )
 
 _FOREGROUND_OPENING = "You control the entire macOS screen. "
-_SHARED_CONTEXT = (
-    "This is macOS, not Linux: do not use "
-    "Ubuntu or Linux UI conventions. Use macOS conventions: cmd, not ctrl, for "
-    "standard shortcuts. Prefer reliable keyboard shortcuts such as cmd+w to close the "
-    "current window, cmd+q to quit, and cmd+shift+s for Save As. If one visual attempt "
-    "to click a title-bar or menu close control misses, do not repeat the same "
-    "coordinates; use the keyboard shortcut. If a desktop widget opens accidentally, "
-    "press cmd+w once and continue. The coordinate origin is the top-left of the "
-    "capture. Take screenshots after visual changes. If a click produces no visible "
-    "change, the target may be busy rather than mis-aimed: retry the same click up to "
-    "three times, checking a fresh screenshot between attempts, and if it still does "
-    "not respond, reach the same result another way — a menu item, a keyboard "
-    "shortcut, or a different control — instead of clicking it again. "
+_SHARED_GUIDANCE = (
+    "This is macOS, not Linux: use macOS conventions, including cmd, not ctrl, for standard "
+    "shortcuts. Prefer reliable keyboard shortcuts such as cmd+w to close the current window, "
+    "cmd+q to quit, and cmd+shift+s for Save As. If a desktop widget opens accidentally, press "
+    "cmd+w once and continue. The coordinate origin is the top-left of the capture. Take "
+    "screenshots after visual changes. If a click produces no visible change, the target may be "
+    "busy rather than mis-aimed: retry the same click up to three times, checking a fresh "
+    "screenshot between attempts; if it still does not respond, reach the same result another "
+    "way, such as a menu item, a keyboard shortcut, or a different control. When you finish, "
+    "take a final screenshot to confirm the result, then summarize; there is no need to bring "
+    "results into view. "
 )
-_FOREGROUND_FINISH = (
-    "Once you have "
-    "confirmed a step worked, leave that result in view: bring the file, window, or "
-    "view it changed to the front, reopening or refreshing it if the change was made "
-    "somewhere the screen does not show, so progress stays visible while the task is "
-    "still running. When you finish, open the final artifact (the document, file, "
-    "page, or app view holding the result) so it is visible on screen, then take a "
-    "screenshot to confirm it before you summarize. "
-)
-_BACKGROUND_FINISH = (
-    "There is no need to bring results into view when you finish: take a final "
-    "screenshot of the window to confirm the result, then summarize. "
-)
-_SHARED_TAIL = (
-    "Shell commands run headlessly "
-    "in bash as the logged-in user; do not use sudo. Do not use osascript or shell "
-    "commands to inspect or control GUI applications because macOS Automation consent "
-    "can block them indefinitely. Use screenshots and computer actions for GUI work "
-    "and visual verification. Never inspect a GUI application's databases, containers, "
-    "caches, or private data stores through the shell. Unless the user explicitly "
-    "requested exhaustive research, use at most three shell calls for research, combine "
-    "related lookups, and then begin the GUI work without further shell research. "
-    "Determine sign-in state only from visible UI; never inspect browser profile databases, "
-    "cookies, login data, history, Keychain, or other credential stores. When a visible "
-    "sign-in or reauthentication challenge blocks the task, stop immediately instead of "
-    "trying alternate URLs, accounts, or sign-in methods, and ask the user to sign in "
-    "themselves. Never ask them to give you a password, passkey, or verification code. "
-    "Do not install software or packages unless the user explicitly requested installation.\n\n"
-    "Do not open or change System Settings, application settings, accounts, "
-    "permissions, or defaults unless the user explicitly asked for that settings change."
+_SHELL_AND_SAFETY = (
+    "Shell commands run headlessly in bash as the logged-in user; do not use sudo. Do not use "
+    "osascript or shell commands to inspect or control GUI applications, because macOS "
+    "Automation consent can block them indefinitely; use screenshots and computer actions for "
+    "GUI work and visual verification. Never inspect a GUI application's databases, containers, "
+    "caches, or private data stores through the shell. Unless the user explicitly requested "
+    "exhaustive research, use at most three shell calls for research, combine related lookups, "
+    "and then begin the GUI work without further shell research. Determine sign-in state only "
+    "from visible UI; never inspect browser profile databases, cookies, login data, history, "
+    "Keychain, or other credential stores. When a visible sign-in or reauthentication challenge "
+    "blocks the task, stop immediately instead of trying alternate URLs, accounts, or sign-in "
+    "methods, and ask the user to sign in themselves. Never ask them to give you a password, "
+    "passkey, or verification code. Do not open or change System Settings, application "
+    "settings, accounts, permissions, or defaults unless the user explicitly asked for that "
+    "settings change."
 )
 
 
 def _background_opening(app: str) -> str:
     return (
         "Work in application windows in the background while the user continues using this Mac. "
-        "Choose the applications needed for the task yourself; do not ask the user to select one. "
-        "Use select_app to launch or attach to each application, including when switching apps. "
-        "If no app is selected, your first action must be select_app; no screen has been captured yet. "
-        "Each screenshot shows only the selected window, and coordinates are relative to it. "
-        "Call select_app alone and inspect its returned app state and optional screenshot. "
-        "A running app with no windows is valid, but the existing driver cannot access its menus or coordinates. "
-        "Wait for a window, select another app, or ask the user to open one; do not repeatedly retry menu or "
-        "coordinate actions. "
-        "Screenshots never include menus. When a window exists, call get_app_state to read the menu items its "
-        "accessibility snapshot exposes, including submenu items. "
-        "Use invoke_app_menu with the exact full path to one menu item; never pass a top-level menu title alone. "
-        "Unavailable or stale menu targets are refused without foreground fallback. Menu tools never request "
-        "activation, but an application can change focus as a command's side effect. "
-        "Use these app tools alone; coordinates are unavailable until a window screenshot arrives. "
-        "Its result includes window IDs and titles; select a specific window when needed. "
         f"Initial application: {app}. "
+        "Choose the applications the task needs yourself; do not ask the user to pick one. "
+        "Use select_app to launch or attach to each application, including when switching apps; "
+        "if no app is selected, your first action must be select_app. "
+        "Each screenshot shows only the selected window, and coordinates are relative to it. "
+        "Screenshots never include menus: call get_app_state to read the menu items, including "
+        "submenu items, then invoke_app_menu with the exact full path to one item. "
+        "A running app with no windows is valid, but menus and coordinates are unavailable until it has a "
+        "window: wait for one, select another app, or ask the user to open one. "
+        "Call each app tool alone and inspect its result before acting. "
         "You cannot see the Dock, global menu bar, or other applications. Do not use Spotlight, "
         "cmd+tab, or shell commands to launch or activate apps. Do not bring results to the front, "
-        "move or resize windows, or move the user's pointer. Use app-local keyboard shortcuts. "
-        "Modifier-clicks are unavailable without foreground fallback. If an action does not land, "
-        "inspect a fresh screenshot and try another control. If the target is minimized or stops "
-        "accepting input, report the blocker; do not take focus or silently switch to foreground. "
+        "move or resize windows, or move the user's pointer. Use app-local keyboard shortcuts; "
+        "modifier-clicks are unavailable. If the target is minimized or stops accepting input, "
+        "report the blocker; do not take focus or switch to the foreground. "
     )
 
 
 def system_context(mode: str, app: str | None = None, allow_local_shell: bool = True) -> str:
     """The model's standing instructions for one delivery mode.
 
-    Foreground runs own the whole screen and keep results visible; background runs see and
-    drive one application window while the user keeps working.
+    Foreground runs own the whole screen; background runs see and drive one application
+    window while the user keeps working.
     """
     if mode == DELIVERY_MODE_BACKGROUND:
         opening = _background_opening(app or "none; choose one from the available apps")
-        context = opening + _SHARED_CONTEXT + _BACKGROUND_FINISH + _SHARED_TAIL
     else:
-        context = _FOREGROUND_OPENING + _SHARED_CONTEXT + _FOREGROUND_FINISH + _SHARED_TAIL
+        opening = _FOREGROUND_OPENING
+    context = opening + _SHARED_GUIDANCE + _SHELL_AND_SAFETY
     if not allow_local_shell:
         context += (
             "\n\nLocal shell and filesystem tools are disabled for this run. Do not call bash, "
