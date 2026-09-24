@@ -27,6 +27,17 @@ HOST_PIN_SCHEMA = 1
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 
+def is_sha256_hex(value: str) -> bool:
+    """Whether ``value`` is a lowercase hex-encoded sha256 digest.
+
+    Shared by ``parse_host_pin`` below (validating every ``*_sha256`` field of a host
+    pin file) and ``host_pin.build_host_pin`` (validating the ``--sdk-artifact-sha256``
+    CLI argument before it is written into one), so the digest-shape check can't drift
+    between the two places that gate a host pin's trustworthiness.
+    """
+    return _SHA256_PATTERN.fullmatch(value) is not None
+
+
 class SdkPinError(ValueError):
     """A host pin exists but cannot be trusted; the runtime must refuse to run rather than fall back."""
 
@@ -82,9 +93,7 @@ def parse_host_pin(raw: str, path: Path) -> SdkPin:
     values = {name: data.get(name) for name in fields}
     if missing := [name for name, value in values.items() if not isinstance(value, str) or not value]:
         raise SdkPinError(f"host pin {path} is missing {', '.join(missing)}")
-    if malformed := [
-        name for name in fields if name.endswith("_sha256") and not _SHA256_PATTERN.fullmatch(values[name])
-    ]:
+    if malformed := [name for name in fields if name.endswith("_sha256") and not is_sha256_hex(values[name])]:
         raise SdkPinError(f"host pin {path} has malformed {', '.join(malformed)}")
     return SdkPin(
         version=values["sdk_version"],
