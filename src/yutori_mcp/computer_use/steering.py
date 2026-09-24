@@ -14,6 +14,7 @@ class SteeringServer:
         self.path = path
         self.emitter = emitter
         self.agent: Any = None
+        self.closed = False
         self.server: asyncio.Server | None = None
         self.messages: dict[str, dict[str, str]] = {}
         self.writers: set[asyncio.StreamWriter] = set()
@@ -34,6 +35,7 @@ class SteeringServer:
         return self
 
     async def __aexit__(self, *_exc: Any) -> None:
+        self.closed = True
         if self.server:
             self.server.close()
             await self.server.wait_closed()
@@ -75,7 +77,12 @@ class SteeringServer:
                 command = json.loads(raw)
                 if not isinstance(command, dict) or set(command) != {"id", "text"}:
                     raise ValueError("Expected a guidance ID and text")
+                if self.closed:
+                    raise ValueError("This run is no longer accepting guidance")
                 status = self.agent.queue_guidance(command["id"], command["text"])
+                previous = self.messages.get(command["id"])
+                if previous is not None and previous["status"] != "queued":
+                    status = previous["status"]
                 message = {"id": command["id"], "text": command["text"].strip(), "status": status}
                 self.messages[message["id"]] = message
                 self._publish(message)

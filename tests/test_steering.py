@@ -51,6 +51,9 @@ async def test_socket_queue_retry_injection_and_terminal_cleanup():
             assert not (await send(path, []))["ok"]
             await server.on_guidance_injected([{"id": "one", "text": "Use Hostfinder", "status": "injected"}])
             assert events[-1]["entry"]["state"] == "injected"
+            retry = await send(path, {"id": "one", "text": "Use Hostfinder"})
+            assert retry["status"] == "injected"
+            assert events[-1]["entry"]["state"] == "injected"
             assert (await send(path, {"id": "two", "text": "Compare range"}))["ok"]
         assert not Path(path).exists()
         assert events[-1]["entry"]["state"] == "not_sent"
@@ -75,3 +78,24 @@ async def test_socket_requires_supporting_sdk_and_private_directory():
         with pytest.raises(ValueError, match="private directory"):
             async with server:
                 pass
+
+
+async def test_shutdown_rejects_a_request_already_waiting_for_its_frame():
+    from unittest.mock import AsyncMock, Mock
+
+    events = []
+    server = SteeringServer(None, SimpleNamespace(emit=events.append))
+    server.agent = Agent()
+    reader = asyncio.StreamReader()
+    writer = Mock()
+    writer.drain = AsyncMock()
+    writer.wait_closed = AsyncMock()
+    receiving = asyncio.create_task(server._receive(reader, writer))
+    await asyncio.sleep(0)
+    await server.__aexit__()
+    reader.feed_data(b'{"id":"late","text":"Too late"}\n')
+    await receiving
+    assert not server.agent.messages
+    assert not events
+    response = json.loads(writer.write.call_args.args[0])
+    assert not response["ok"]
