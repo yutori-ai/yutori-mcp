@@ -499,6 +499,7 @@ async def test_supervisor_forwards_frame_and_activity_events_without_recording_t
         frame,
         activity,
         app_state,
+        {"type": "steering_ready"},
         _action_event(index=1),
         _result_event(),
     ]
@@ -509,7 +510,7 @@ async def test_supervisor_forwards_frame_and_activity_events_without_recording_t
         seen.append(event)
 
     result = await _run_supervised(process, on_event=on_event)
-    assert [event["type"] for event in seen] == ["ready", "frame", "activity", "app_state", "action"]
+    assert [event["type"] for event in seen] == ["ready", "frame", "activity", "app_state", "steering_ready", "action"]
     assert result["outcome"] == "completed"
     assert [action["type"] for action in result["actions"]] == ["action"]
 

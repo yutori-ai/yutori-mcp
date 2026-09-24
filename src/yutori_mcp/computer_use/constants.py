@@ -38,7 +38,7 @@ DELIVERY_MODES = (DELIVERY_MODE_FOREGROUND, DELIVERY_MODE_BACKGROUND)
 # `frame`/`activity` events are streamed for a host application's own rendering (`--json`,
 # the MCP progress reporter); the terminal printer and MCP progress notifications have
 # nothing to show for them and skip both. Centralized so the two skip-checks can't drift.
-HOST_ONLY_EVENT_TYPES = frozenset({"frame", "activity", "app_state"})
+HOST_ONLY_EVENT_TYPES = frozenset({"frame", "activity", "app_state", "steering_ready"})
 # Foreground runs keep the overlay in screen recordings and screen shares by default: the SDK
 # takes the model's frames through the overlay host with its own windows filtered out
 # (`exclude_overlay_from_capture=False`), so the model never sees it and nothing fades around a

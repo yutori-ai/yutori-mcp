@@ -472,7 +472,7 @@ async def _supervise(
             event_type = event.get("type")
             if shape_error := _event_shape_error(event):
                 return protocol_failure(f"emitted malformed {event_type!r} event: {shape_error}.")
-            if event_type in {"action", "startup", "frame", "activity", "app_state"}:
+            if event_type in {"action", "startup", "frame", "activity", "app_state", "steering_ready"}:
                 if not ready:
                     return protocol_failure(f"emitted {event_type} before ready.")
                 if event_type == "action":
@@ -590,6 +590,7 @@ async def run_task(
     presentation: bool = True,
     background_focus_overlay: bool = False,
     exclude_capture_window_ids: Sequence[int] = (),
+    steering_socket: str | None = None,
     lock: DesktopLock | None = None,
     on_event: EventCallback | None = None,
     prewarmed: PrewarmedRunner | None = None,
@@ -625,6 +626,7 @@ async def run_task(
                 # CGWindowIDs of the host application's own panels to keep out of the model's
                 # desktop frames (foreground runs); they stay on screen and in recordings.
                 "exclude_capture_window_ids": [int(window_id) for window_id in exclude_capture_window_ids],
+                "steering_socket": steering_socket,
                 "model": MODEL,
                 "api_base_url": api_base_url,
             }
