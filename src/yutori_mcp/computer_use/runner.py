@@ -40,7 +40,6 @@ from .constants import (
     DELIVERY_MODES,
     DELIVERY_MODE_BACKGROUND,
     DELIVERY_MODE_FOREGROUND,
-    DRIVER_VERSION,
     ENV_RECORDABLE_OVERLAY,
     MAX_CREDENTIAL_CHARACTERS,
     OBSERVATION_FORMAT,
@@ -58,7 +57,7 @@ from .result import (
     remaining_seconds,
     structured_content,
 )
-from .sdk_pin import sdk_pin
+from .sdk_pin import pin_ready_fields, sdk_pin
 from .targeting import TargetGuardedMacOSComputer as MacOSComputer
 from ..schemas import (
     background_focus_overlay_constraint_error,
@@ -1415,10 +1414,7 @@ def main() -> int:
                 "type": "ready",
                 "protocol_version": PROTOCOL_VERSION,
                 "package_version": _package_version(),
-                "sdk_version": pin.version,
-                "sdk_artifact_sha256": pin.artifact_sha256,
-                "sdk_provenance_sha256": pin.provenance_sha256,
-                "driver_version_pinned": DRIVER_VERSION,
+                **pin_ready_fields(pin),
                 "observation_format": OBSERVATION_FORMAT,
                 "observation_format_fallback": True,
                 "observation_fallback_format": "jpeg",

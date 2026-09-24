@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .constants import (
+    DRIVER_VERSION,
     SDK_ARTIFACT_SHA256,
     SDK_INSTALLATION_SHA256,
     SDK_PROVENANCE_SHA256,
@@ -57,6 +58,21 @@ class SdkPin:
 
 
 RELEASE_PIN = SdkPin(SDK_VERSION, SDK_ARTIFACT_SHA256, SDK_INSTALLATION_SHA256, SDK_PROVENANCE_SHA256)
+
+
+def pin_ready_fields(pin: SdkPin) -> dict[str, str]:
+    """The pin-derived subset of the runner's `ready` protocol event.
+
+    Built once so the runner's emission (``runner.py::main``) and the supervisor's
+    validation of it (``supervisor.py::_ready_error``) cannot drift on what a
+    trustworthy pin looks like on the wire.
+    """
+    return {
+        "sdk_version": pin.version,
+        "sdk_artifact_sha256": pin.artifact_sha256,
+        "sdk_provenance_sha256": pin.provenance_sha256,
+        "driver_version_pinned": DRIVER_VERSION,
+    }
 
 
 def host_pin_path() -> Path:
