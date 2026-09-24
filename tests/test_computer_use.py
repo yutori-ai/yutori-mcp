@@ -32,7 +32,10 @@ from yutori.navigator.macos import (
     MacOSPresentationStatus,
     ShellPresentationEvent,
 )
-from yutori.navigator.macos.transport import CuaDriverToolError, CuaDriverUncertainActionError
+from yutori.navigator.macos.transport import (
+    CuaDriverToolError,
+    CuaDriverUncertainActionError,
+)
 
 from yutori_mcp.computer_use import preflight, runner as runner_module, supervisor
 from yutori_mcp.computer_use.app import pick_best_window, prepare_app
@@ -67,7 +70,10 @@ from yutori_mcp.computer_use.result import (
     terminal_result,
 )
 from yutori_mcp.computer_use.supervisor import attach_run_link, run_chat_id
-from yutori_mcp.computer_use.targeting import TargetGuardedMacOSComputer, require_frontmost_target
+from yutori_mcp.computer_use.targeting import (
+    TargetGuardedMacOSComputer,
+    require_frontmost_target,
+)
 from yutori_mcp.computer_use.runner import (
     ActionReporter,
     Emitter,
@@ -150,13 +156,18 @@ import yutori_mcp.computer_use.cli
     [("linux", "prod", False), ("darwin", "prod", True), ("darwin", "unknown", False)],
 )
 def test_registration_gate(platform, environment, expected):
-    with patch("yutori_mcp.server.sys.platform", platform), patch.dict("os.environ", {"YUTORI_ENV": environment}):
+    with (
+        patch("yutori_mcp.server.sys.platform", platform),
+        patch.dict("os.environ", {"YUTORI_ENV": environment}),
+    ):
         from yutori_mcp.server import _computer_use_enabled
 
         assert _computer_use_enabled() is expected
 
 
-def test_main_applies_explicit_environment_before_computer_use_registration(monkeypatch):
+def test_main_applies_explicit_environment_before_computer_use_registration(
+    monkeypatch,
+):
     from yutori_mcp import server
 
     observed = []
@@ -195,7 +206,9 @@ def test_main_applies_explicit_environment_before_computer_use_dispatch(monkeypa
     observed, record_dispatch = _recording_dispatch()
 
     monkeypatch.setenv("YUTORI_ENV", "prod")
-    monkeypatch.setattr(sys, "argv", ["yutori-mcp", "--env", "dev", "computer-use", "doctor"])
+    monkeypatch.setattr(
+        sys, "argv", ["yutori-mcp", "--env", "dev", "computer-use", "doctor"]
+    )
     monkeypatch.setattr(computer_use_cli, "dispatch", record_dispatch)
 
     with pytest.raises(SystemExit) as exc_info:
@@ -204,7 +217,9 @@ def test_main_applies_explicit_environment_before_computer_use_dispatch(monkeypa
     assert observed == {"environment": "dev"}
 
 
-def test_main_clears_ambient_environment_for_computer_use_without_explicit_env(monkeypatch):
+def test_main_clears_ambient_environment_for_computer_use_without_explicit_env(
+    monkeypatch,
+):
     import yutori_mcp.computer_use.cli as computer_use_cli
     from yutori_mcp import server
 
@@ -224,14 +239,18 @@ def test_main_clears_ambient_environment_for_computer_use_without_explicit_env(m
     ("arguments", "ambient", "expected"),
     [(["--env", "dev"], "prod", "dev"), ([], "dev", None)],
 )
-def test_protected_entrypoint_applies_computer_use_environment(monkeypatch, arguments, ambient, expected):
+def test_protected_entrypoint_applies_computer_use_environment(
+    monkeypatch, arguments, ambient, expected
+):
     import yutori_mcp.computer_use.cli as computer_use_cli
     from yutori_mcp import entrypoint
 
     observed, record_dispatch = _recording_dispatch()
 
     monkeypatch.setenv("YUTORI_ENV", ambient)
-    monkeypatch.setattr(sys, "argv", ["yutori-mcp", *arguments, "computer-use", "doctor"])
+    monkeypatch.setattr(
+        sys, "argv", ["yutori-mcp", *arguments, "computer-use", "doctor"]
+    )
     monkeypatch.setattr(computer_use_cli, "dispatch", record_dispatch)
 
     with pytest.raises(SystemExit) as exc_info:
@@ -369,7 +388,9 @@ def _startup_event(**overrides):
     return event
 
 
-async def _run_supervised(process, *, api_key="yt-key", deadline_seconds=1, **supervise_kwargs):
+async def _run_supervised(
+    process, *, api_key="yt-key", deadline_seconds=1, **supervise_kwargs
+):
     """Patch the child process and call `_supervise` with the shared fixed args this file's tests repeat.
 
     Only for tests that don't need to assert on the `create_subprocess_exec` mock itself or patch anything
@@ -441,7 +462,10 @@ async def _run_supervised_with_stop_patched(
 async def test_supervisor_redacts_key_and_keeps_it_out_of_argv():
     secret = "yt-super-secret-value"
     process = _Process(
-        _stream(json.dumps(_ready_event()), json.dumps({"type": "error", "code": "X", "message": secret})),
+        _stream(
+            json.dumps(_ready_event()),
+            json.dumps({"type": "error", "code": "X", "message": secret}),
+        ),
         _stream(f"diagnostic {secret}"),
     )
     create = AsyncMock(return_value=process)
@@ -491,8 +515,17 @@ async def test_supervisor_forwards_ready_and_action_events():
 
 
 async def test_supervisor_forwards_frame_and_activity_events_without_recording_them_as_actions():
-    frame = {"type": "frame", "capture_id": 1, "media_type": "image/jpeg", "data": "AAAA", "caption": "Frame 1"}
-    activity = {"type": "activity", "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"}}
+    frame = {
+        "type": "frame",
+        "capture_id": 1,
+        "media_type": "image/jpeg",
+        "data": "AAAA",
+        "caption": "Frame 1",
+    }
+    activity = {
+        "type": "activity",
+        "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"},
+    }
     app_state = {"type": "app_state", "pid": 42, "window_id": None}
     events = [
         _ready_event(reasoning_overlay_requested=True),
@@ -509,20 +542,30 @@ async def test_supervisor_forwards_frame_and_activity_events_without_recording_t
         seen.append(event)
 
     result = await _run_supervised(process, on_event=on_event)
-    assert [event["type"] for event in seen] == ["ready", "frame", "activity", "app_state", "action"]
+    assert [event["type"] for event in seen] == [
+        "ready",
+        "frame",
+        "activity",
+        "app_state",
+        "action",
+    ]
     assert result["outcome"] == "completed"
     assert [action["type"] for action in result["actions"]] == ["action"]
 
 
 async def test_supervisor_rejects_malformed_app_state_events():
     bad = {"type": "app_state", "pid": "42", "window_id": None}
-    process = _Process(_stream(json.dumps(_ready_event()), json.dumps(bad)), _stream(""))
+    process = _Process(
+        _stream(json.dumps(_ready_event()), json.dumps(bad)), _stream("")
+    )
     result = await _run_supervised(process)
     assert result["outcome"] == "failed"
     assert "malformed 'app_state'" in result["final_text"]
 
 
-async def test_supervisor_does_not_let_a_blocked_progress_callback_stall_protocol_drain(monkeypatch):
+async def test_supervisor_does_not_let_a_blocked_progress_callback_stall_protocol_drain(
+    monkeypatch,
+):
     monkeypatch.setattr(supervisor, "EVENT_CALLBACK_FLUSH_SECONDS", 0.01)
     started = asyncio.Event()
 
@@ -532,7 +575,9 @@ async def test_supervisor_does_not_let_a_blocked_progress_callback_stall_protoco
 
     action = _action_event()
     process = _Process(
-        _stream(json.dumps(_ready_event()), json.dumps(action), json.dumps(_result_event())),
+        _stream(
+            json.dumps(_ready_event()), json.dumps(action), json.dumps(_result_event())
+        ),
         _stream(""),
     )
 
@@ -579,7 +624,9 @@ async def test_supervisor_accepts_result_larger_than_default_stream_limit():
 async def test_supervisor_rejects_result_larger_than_configured_stream_limit():
     stream = asyncio.StreamReader(limit=100)
     stream.feed_data(json.dumps(_ready_event()).encode() + b"\n")
-    stream.feed_data(json.dumps({"type": "result", "final_text": "x" * 200}).encode() + b"\n")
+    stream.feed_data(
+        json.dumps({"type": "result", "final_text": "x" * 200}).encode() + b"\n"
+    )
     stream.feed_eof()
     process = _Process(stream, _stream(""))
     process.returncode = 0
@@ -619,7 +666,9 @@ async def test_supervisor_rejects_runner_provenance_drift():
     ],
 )
 async def test_supervisor_rejects_malformed_events(event):
-    process = _Process(_stream(json.dumps(_ready_event()), json.dumps(event)), _stream(""))
+    process = _Process(
+        _stream(json.dumps(_ready_event()), json.dumps(event)), _stream("")
+    )
     process.returncode = 0
     result = await _run_supervised(process)
     assert result["outcome"] == "failed"
@@ -629,7 +678,9 @@ async def test_supervisor_rejects_malformed_events(event):
 async def test_supervisor_rejects_invalid_utf8_in_an_otherwise_valid_event():
     stream = asyncio.StreamReader()
     stream.feed_data(json.dumps(_ready_event()).encode() + b"\n")
-    stream.feed_data(b'{"type":"result","outcome":"completed","delivery_mode":"foreground","final_text":"\xff"}\n')
+    stream.feed_data(
+        b'{"type":"result","outcome":"completed","delivery_mode":"foreground","final_text":"\xff"}\n'
+    )
     stream.feed_eof()
     process = _Process(stream, _stream(""))
     process.returncode = 0
@@ -679,13 +730,17 @@ def test_remaining_seconds_raises_once_deadline_has_passed():
 
 
 async def test_stderr_diagnostics_retain_only_the_latest_twenty_lines():
-    diagnostics = await supervisor._drain_stderr(_stream(*(f"line-{index}" for index in range(30))), "secret")
+    diagnostics = await supervisor._drain_stderr(
+        _stream(*(f"line-{index}" for index in range(30))), "secret"
+    )
 
     assert diagnostics == [f"line-{index}" for index in range(10, 30)]
 
 
 async def test_stop_process_group_escalates_to_kill():
-    process = SimpleNamespace(pid=123, returncode=None, stdin=None, wait=AsyncMock(return_value=0))
+    process = SimpleNamespace(
+        pid=123, returncode=None, stdin=None, wait=AsyncMock(return_value=0)
+    )
 
     def killed(_pid, sig):
         if sig == signal.SIGKILL:
@@ -696,29 +751,42 @@ async def test_stop_process_group_escalates_to_kill():
         raise asyncio.TimeoutError
 
     with (
-        patch("yutori_mcp.computer_use.supervisor.os.killpg", side_effect=killed) as kill,
-        patch("yutori_mcp.computer_use.supervisor.asyncio.wait_for", side_effect=expire),
+        patch(
+            "yutori_mcp.computer_use.supervisor.os.killpg", side_effect=killed
+        ) as kill,
+        patch(
+            "yutori_mcp.computer_use.supervisor.asyncio.wait_for", side_effect=expire
+        ),
     ):
         await _stop_process_group(process)
-    assert [call.args[1] for call in kill.call_args_list] == [signal.SIGTERM, signal.SIGKILL]
+    assert [call.args[1] for call in kill.call_args_list] == [
+        signal.SIGTERM,
+        signal.SIGKILL,
+    ]
 
 
 async def test_supervisor_stdout_deadline_returns_limit_and_stops_group():
     process = _Process(asyncio.StreamReader(), asyncio.StreamReader())
 
-    result, stopped = await _run_supervised_with_stop_patched(process, api_key="secret", deadline_seconds=0.01)
+    result, stopped = await _run_supervised_with_stop_patched(
+        process, api_key="secret", deadline_seconds=0.01
+    )
     assert result["outcome"] == "limit"
     stopped.assert_awaited_once_with(process)
 
 
 async def test_supervisor_eof_does_not_bypass_the_deadline():
-    process = _Process(_stream(json.dumps(_ready_event()), json.dumps(_result_event())), _stream(""))
+    process = _Process(
+        _stream(json.dumps(_ready_event()), json.dumps(_result_event())), _stream("")
+    )
 
     async def wait_forever():
         await asyncio.Future()
 
     process.wait = wait_forever
-    result, stopped = await _run_supervised_with_stop_patched(process, api_key="secret", deadline_seconds=0.01)
+    result, stopped = await _run_supervised_with_stop_patched(
+        process, api_key="secret", deadline_seconds=0.01
+    )
     assert result["outcome"] == "limit"
     stopped.assert_awaited_once_with(process)
 
@@ -758,9 +826,17 @@ async def test_runner_sigterm_path_cancels_the_sdk_session(monkeypatch):
 
     loop = asyncio.get_running_loop()
     monkeypatch.setattr(runner_module, "run_request", run_request)
-    monkeypatch.setattr(loop, "add_signal_handler", lambda sig, callback: handlers.setdefault(sig, callback))
-    monkeypatch.setattr(loop, "remove_signal_handler", lambda sig: handlers.pop(sig, None) is not None)
-    task = asyncio.create_task(runner_module._run_until_terminated({}, Emitter(_CollectStream()), "key"))
+    monkeypatch.setattr(
+        loop,
+        "add_signal_handler",
+        lambda sig, callback: handlers.setdefault(sig, callback),
+    )
+    monkeypatch.setattr(
+        loop, "remove_signal_handler", lambda sig: handlers.pop(sig, None) is not None
+    )
+    task = asyncio.create_task(
+        runner_module._run_until_terminated({}, Emitter(_CollectStream()), "key")
+    )
     await started.wait()
     handlers[signal.SIGTERM]()
     handlers[signal.SIGTERM]()
@@ -832,7 +908,13 @@ def test_runner_rejects_malformed_stdin_protocol(monkeypatch, payload):
 
 
 def test_python_runner_is_isolated_and_has_no_node_path():
-    assert python_runner_command() == [sys.executable, "-I", "-B", "-m", "yutori_mcp.computer_use.runner"]
+    assert python_runner_command() == [
+        sys.executable,
+        "-I",
+        "-B",
+        "-m",
+        "yutori_mcp.computer_use.runner",
+    ]
     source = Path(supervisor.__file__).read_text()
     assert "find_node" not in source
     assert "load_runtime" not in source
@@ -865,7 +947,9 @@ def _patched_run_task_supervise(tmp_path, *, result=None):
     """
     driver = tmp_path / "cua-driver"
     driver.write_text("")
-    supervise = AsyncMock(return_value=result if result is not None else {"outcome": "completed"})
+    supervise = AsyncMock(
+        return_value=result if result is not None else {"outcome": "completed"}
+    )
     with (
         patch.object(supervisor, "_supervise", supervise),
         patch.object(supervisor, "find_cua_driver", return_value=driver),
@@ -896,7 +980,9 @@ async def test_run_task_uses_only_python_runner_and_sdk_driver_discovery(tmp_pat
     assert "driver_path" not in request and "harness" not in request
 
 
-async def test_resolved_run_credentials_use_stdin_override_without_reading_stored_key(monkeypatch):
+async def test_resolved_run_credentials_use_stdin_override_without_reading_stored_key(
+    monkeypatch,
+):
     from yutori_mcp import adapter
 
     run = AsyncMock(return_value={"outcome": "completed"})
@@ -906,8 +992,12 @@ async def test_resolved_run_credentials_use_stdin_override_without_reading_store
         "resolve_run_credentials_and_platform_url",
         lambda: pytest.fail("stdin credentials must not resolve the stored key"),
     )
-    monkeypatch.setattr(adapter, "resolve_base_url", lambda: "https://api.yutori.com/v1")
-    monkeypatch.setattr(adapter, "resolve_platform_url", lambda: "https://platform.yutori.com")
+    monkeypatch.setattr(
+        adapter, "resolve_base_url", lambda: "https://api.yutori.com/v1"
+    )
+    monkeypatch.setattr(
+        adapter, "resolve_platform_url", lambda: "https://platform.yutori.com"
+    )
 
     result = await supervisor.run_task_with_resolved_credentials(
         api_key_override="yvm_token",
@@ -927,13 +1017,20 @@ async def test_run_task_links_the_run_to_the_platform_chat_page(tmp_path):
     action = _action_event(tool="screenshot", chat_id="chat-1")
     supervised = terminal_result("limit", "deadline", actions=[action])
     with _patched_run_task_supervise(tmp_path, result=supervised):
-        result = await run_task(**_run_task_kwargs(tmp_path, platform_url="https://platform.dev.yutori.com"))
+        result = await run_task(
+            **_run_task_kwargs(tmp_path, platform_url="https://platform.dev.yutori.com")
+        )
     assert result["chat_id"] == "chat-1"
     assert result["run_url"] == "https://platform.dev.yutori.com/navigator/chats/chat-1"
-    assert "Run: https://platform.dev.yutori.com/navigator/chats/chat-1" in format_result(result)
+    assert (
+        "Run: https://platform.dev.yutori.com/navigator/chats/chat-1"
+        in format_result(result)
+    )
 
 
-def _patch_server_lock(monkeypatch, lock_module, lock, first_blocker=lambda: None) -> None:
+def _patch_server_lock(
+    monkeypatch, lock_module, lock, first_blocker=lambda: None
+) -> None:
     """Patch DesktopLock and first_blocker() for tests driving server._handle_computer_use directly.
 
     Mirrors _patch_smoke_preflight's convention for the CLI's DesktopLock/first_blocker pair;
@@ -944,7 +1041,9 @@ def _patch_server_lock(monkeypatch, lock_module, lock, first_blocker=lambda: Non
     monkeypatch.setattr(preflight, "first_blocker", first_blocker)
 
 
-async def test_server_holds_desktop_lock_across_preflight_and_runner(monkeypatch, tmp_path):
+async def test_server_holds_desktop_lock_across_preflight_and_runner(
+    monkeypatch, tmp_path
+):
     from yutori_mcp import server
     from yutori_mcp.computer_use import lock as lock_module
 
@@ -972,8 +1071,18 @@ async def test_server_holds_desktop_lock_across_preflight_and_runner(monkeypatch
 def test_runtime_constants_select_latest_python_surface():
     assert TOOL_SET == "computer_use_tools-20260830"
     assert SDK_VERSION == "0.9.36"
-    assert all(len(digest) == 64 for digest in (SDK_ARTIFACT_SHA256, SDK_INSTALLATION_SHA256, SDK_PROVENANCE_SHA256))
-    assert '"yutori==0.9.36"' in Path(__file__).parents[1].joinpath("pyproject.toml").read_text()
+    assert all(
+        len(digest) == 64
+        for digest in (
+            SDK_ARTIFACT_SHA256,
+            SDK_INSTALLATION_SHA256,
+            SDK_PROVENANCE_SHA256,
+        )
+    )
+    assert (
+        '"yutori==0.9.36"'
+        in Path(__file__).parents[1].joinpath("pyproject.toml").read_text()
+    )
 
 
 def test_installed_sdk_matches_the_published_artifact():
@@ -986,9 +1095,15 @@ def test_installed_sdk_matches_the_published_artifact():
     reason="release artifact verification is a single-version CI check",
 )
 def test_published_sdk_wheel_matches_artifact_hash():
-    with urllib.request.urlopen(f"https://pypi.org/pypi/yutori/{SDK_VERSION}/json", timeout=30) as response:
+    with urllib.request.urlopen(
+        f"https://pypi.org/pypi/yutori/{SDK_VERSION}/json", timeout=30
+    ) as response:
         release = json.load(response)
-    wheels = [item for item in release["urls"] if item["filename"].endswith("-py3-none-any.whl")]
+    wheels = [
+        item
+        for item in release["urls"]
+        if item["filename"].endswith("-py3-none-any.whl")
+    ]
     assert len(wheels) == 1
     wheel = wheels[0]
     assert wheel["digests"]["sha256"] == SDK_ARTIFACT_SHA256
@@ -1025,7 +1140,11 @@ def test_api_access_probes_the_runtime_toolset(monkeypatch):
         "yutori_mcp.adapter.resolve_run_credentials",
         lambda _environment: ("api-key", "https://api.yutori.com/v1"),
     )
-    monkeypatch.setattr(preflight, "urlopen", lambda request, timeout: requests.append(request) or Response())
+    monkeypatch.setattr(
+        preflight,
+        "urlopen",
+        lambda request, timeout: requests.append(request) or Response(),
+    )
 
     assert preflight.check_api_access().ok
     assert json.loads(requests[0].data)["tool_set"] == TOOL_SET
@@ -1038,7 +1157,8 @@ def test_api_access_rejects_non_auth_http_failures(monkeypatch, status):
         raise HTTPError("https://api.yutori.com", status, "failed", {}, None)
 
     monkeypatch.setattr(
-        "yutori_mcp.adapter.resolve_run_credentials", lambda _: ("api-key", "https://api.yutori.com/v1")
+        "yutori_mcp.adapter.resolve_run_credentials",
+        lambda _: ("api-key", "https://api.yutori.com/v1"),
     )
     monkeypatch.setattr(preflight, "urlopen", fail_probe)
     result = preflight.check_api_access()
@@ -1060,7 +1180,8 @@ def test_api_access_reports_invalid_model_instead_of_login(monkeypatch):
         raise HTTPError("https://api.yutori.com", 400, "failed", {}, io.BytesIO(body))
 
     monkeypatch.setattr(
-        "yutori_mcp.adapter.resolve_run_credentials", lambda _: ("api-key", "https://api.yutori.com/v1")
+        "yutori_mcp.adapter.resolve_run_credentials",
+        lambda _: ("api-key", "https://api.yutori.com/v1"),
     )
     monkeypatch.setattr(preflight, "urlopen", fail_probe)
     result = preflight.check_api_access()
@@ -1070,7 +1191,9 @@ def test_api_access_reports_invalid_model_instead_of_login(monkeypatch):
     assert "login" not in result.remediation
 
 
-def test_runtime_check_verifies_version_installation_and_provenance(monkeypatch, tmp_path):
+def test_runtime_check_verifies_version_installation_and_provenance(
+    monkeypatch, tmp_path
+):
     payload = b"provenance"
     package_file = Path("yutori/runtime.py")
     installed_file = tmp_path / package_file
@@ -1085,7 +1208,9 @@ def test_runtime_check_verifies_version_installation_and_provenance(monkeypatch,
         locate_file=lambda path: tmp_path / path,
         read_text=lambda _name: None,
     )
-    monkeypatch.setattr(preflight.importlib.metadata, "distribution", lambda _: distribution)
+    monkeypatch.setattr(
+        preflight.importlib.metadata, "distribution", lambda _: distribution
+    )
     pin = replace(
         RELEASE_PIN,
         provenance_sha256=hashlib.sha256(payload).hexdigest(),
@@ -1095,7 +1220,11 @@ def test_runtime_check_verifies_version_installation_and_provenance(monkeypatch,
     assert preflight.check_runtime().ok
 
     installed_file.write_text("modified")
-    monkeypatch.setattr(preflight, "_provenance_path", lambda *_args, **_kwargs: pytest.fail("read untrusted SDK"))
+    monkeypatch.setattr(
+        preflight,
+        "_provenance_path",
+        lambda *_args, **_kwargs: pytest.fail("read untrusted SDK"),
+    )
     assert not preflight.check_runtime().ok
 
 
@@ -1106,9 +1235,13 @@ def test_runtime_check_requires_an_explicit_editable_override(monkeypatch, tmp_p
     provenance_file.write_bytes(payload)
     distribution = SimpleNamespace(
         version=SDK_VERSION,
-        read_text=lambda _name: json.dumps({"url": tmp_path.as_uri(), "dir_info": {"editable": True}}),
+        read_text=lambda _name: json.dumps(
+            {"url": tmp_path.as_uri(), "dir_info": {"editable": True}}
+        ),
     )
-    monkeypatch.setattr(preflight.importlib.metadata, "distribution", lambda _: distribution)
+    monkeypatch.setattr(
+        preflight.importlib.metadata, "distribution", lambda _: distribution
+    )
     pin = replace(RELEASE_PIN, provenance_sha256=hashlib.sha256(payload).hexdigest())
     monkeypatch.setattr(preflight, "sdk_pin", lambda: pin)
     monkeypatch.delenv("YUTORI_MCP_ALLOW_EDITABLE_SDK", raising=False)
@@ -1130,7 +1263,9 @@ def test_runtime_digest_ignores_pip_generated_bytecode(tmp_path):
         locate_file=lambda path: tmp_path / path,
     )
     source_only = SimpleNamespace(files=[source], locate_file=distribution.locate_file)
-    assert preflight._stable_distribution_digest(distribution) == preflight._stable_distribution_digest(source_only)
+    assert preflight._stable_distribution_digest(
+        distribution
+    ) == preflight._stable_distribution_digest(source_only)
 
 
 def test_overlay_compiler_and_capture_failures_are_warnings(monkeypatch):
@@ -1140,7 +1275,10 @@ def test_overlay_compiler_and_capture_failures_are_warnings(monkeypatch):
     with patch.object(preflight.subprocess, "run", side_effect=OSError("missing")):
         compiler = preflight.check_compiler()
     assert not compiler.ok and not compiler.blocking
-    with patch("yutori.navigator.macos.check_macos_overlay", side_effect=RuntimeError("missing")):
+    with patch(
+        "yutori.navigator.macos.check_macos_overlay",
+        side_effect=RuntimeError("missing"),
+    ):
         overlay = preflight.check_overlay()
     assert not overlay.ok and not overlay.blocking
 
@@ -1198,8 +1336,14 @@ def test_first_blocker_skips_stored_key_check_for_stdin_credentials(monkeypatch)
     def blocker():
         return preflight.CheckResult("driver", False, "missing", "setup")
 
-    monkeypatch.setattr(adapter, "resolve_run_credentials", lambda _environment: (None, "https://example.test"))
-    monkeypatch.setattr(preflight, "_RUN_BLOCKING_CHECKS", (preflight.check_api_key, blocker))
+    monkeypatch.setattr(
+        adapter,
+        "resolve_run_credentials",
+        lambda _environment: (None, "https://example.test"),
+    )
+    monkeypatch.setattr(
+        preflight, "_RUN_BLOCKING_CHECKS", (preflight.check_api_key, blocker)
+    )
 
     assert preflight.first_blocker().name == "API key"
     assert preflight.first_blocker(api_key_provided=True).name == "driver"
@@ -1220,7 +1364,11 @@ def test_doctor_labels_nonblocking_failures_as_warnings(monkeypatch, capsys):
     monkeypatch.setattr(
         cli,
         "run_checks",
-        lambda: [preflight.CheckResult("overlay", False, "not prepared", "run setup", blocking=False)],
+        lambda: [
+            preflight.CheckResult(
+                "overlay", False, "not prepared", "run setup", blocking=False
+            )
+        ],
     )
     assert cli._doctor() == 0
     assert "WARNING overlay" in capsys.readouterr().out
@@ -1229,7 +1377,9 @@ def test_doctor_labels_nonblocking_failures_as_warnings(monkeypatch, capsys):
 def test_installer_checksum_aborts_before_execution(monkeypatch):
     from yutori_mcp.computer_use import cli
 
-    monkeypatch.setattr(cli, "check_runtime", lambda: preflight.CheckResult("runtime", True, "ok"))
+    monkeypatch.setattr(
+        cli, "check_runtime", lambda: preflight.CheckResult("runtime", True, "ok")
+    )
     monkeypatch.setattr(cli, "_download_installer", lambda _: b"installer")
     with patch("yutori_mcp.computer_use.cli.subprocess.run") as run:
         assert cli._setup() == 1
@@ -1245,9 +1395,13 @@ def _patch_successful_driver_setup(monkeypatch, cli, tmp_path) -> None:
     """
     driver = tmp_path / "cua-driver"
     driver.write_text("")
-    monkeypatch.setattr(cli, "check_runtime", lambda: preflight.CheckResult("runtime", True, "ok"))
+    monkeypatch.setattr(
+        cli, "check_runtime", lambda: preflight.CheckResult("runtime", True, "ok")
+    )
     monkeypatch.setattr(cli, "_download_installer", lambda _: b"installer")
-    monkeypatch.setattr(cli, "DRIVER_INSTALLER_SHA256", hashlib.sha256(b"installer").hexdigest())
+    monkeypatch.setattr(
+        cli, "DRIVER_INSTALLER_SHA256", hashlib.sha256(b"installer").hexdigest()
+    )
     monkeypatch.setattr(cli, "find_cua_driver", lambda: driver)
 
 
@@ -1256,8 +1410,14 @@ def test_setup_prepares_overlay_after_driver_permissions(monkeypatch, tmp_path):
 
     _patch_successful_driver_setup(monkeypatch, cli, tmp_path)
     prepared = SimpleNamespace(binary=tmp_path / "overlay")
-    prepare = patch("yutori.navigator.macos.prepare_macos_overlay", return_value=prepared)
-    with prepare as prepare_overlay, patch.object(cli.subprocess, "run"), patch.object(cli, "_doctor", return_value=0):
+    prepare = patch(
+        "yutori.navigator.macos.prepare_macos_overlay", return_value=prepared
+    )
+    with (
+        prepare as prepare_overlay,
+        patch.object(cli.subprocess, "run"),
+        patch.object(cli, "_doctor", return_value=0),
+    ):
         assert cli._setup() == 0
     prepare_overlay.assert_called_once_with()
 
@@ -1267,7 +1427,10 @@ def test_setup_treats_overlay_file_errors_as_warnings(monkeypatch, tmp_path, cap
 
     _patch_successful_driver_setup(monkeypatch, cli, tmp_path)
     with (
-        patch("yutori.navigator.macos.prepare_macos_overlay", side_effect=OSError("read-only cache")),
+        patch(
+            "yutori.navigator.macos.prepare_macos_overlay",
+            side_effect=OSError("read-only cache"),
+        ),
         patch.object(cli.subprocess, "run"),
         patch.object(cli, "_doctor", return_value=0),
     ):
@@ -1319,8 +1482,12 @@ async def test_mechanical_calculator_check_uses_cua_driver(monkeypatch, tmp_path
 
     prepare = AsyncMock()
     monkeypatch.setattr(cli, "find_cua_driver", lambda: driver)
-    monkeypatch.setattr("yutori_mcp.computer_use.targeting.TargetGuardedMacOSComputer", FakeComputer)
-    monkeypatch.setattr("yutori.navigator.macos.transport.CuaDriverTransport", FakeTransport)
+    monkeypatch.setattr(
+        "yutori_mcp.computer_use.targeting.TargetGuardedMacOSComputer", FakeComputer
+    )
+    monkeypatch.setattr(
+        "yutori.navigator.macos.transport.CuaDriverTransport", FakeTransport
+    )
     monkeypatch.setattr(app, "prepare_app", prepare)
 
     assert await cli._mechanical_calculator_check() == "42"
@@ -1347,7 +1514,9 @@ def _patch_smoke_preflight(monkeypatch, cli, lock_path, first_blocker=lambda: No
     monkeypatch.setattr(cli, "first_blocker", first_blocker)
 
 
-async def test_smoke_reserves_desktop_before_mechanical_check(monkeypatch, tmp_path, capsys):
+async def test_smoke_reserves_desktop_before_mechanical_check(
+    monkeypatch, tmp_path, capsys
+):
     from yutori_mcp.computer_use import cli
 
     lock_path = tmp_path / "desktop.lock"
@@ -1364,12 +1533,16 @@ async def test_smoke_reserves_desktop_before_mechanical_check(monkeypatch, tmp_p
     assert "Another computer-use task controls this Mac" in capsys.readouterr().out
 
 
-async def test_smoke_does_not_print_mismatched_clipboard_contents(monkeypatch, tmp_path, capsys):
+async def test_smoke_does_not_print_mismatched_clipboard_contents(
+    monkeypatch, tmp_path, capsys
+):
     from yutori_mcp.computer_use import cli
 
     secret = "clipboard-secret-value"
     _patch_smoke_preflight(monkeypatch, cli, tmp_path / "desktop.lock")
-    monkeypatch.setattr(cli, "_mechanical_calculator_check", AsyncMock(return_value=secret))
+    monkeypatch.setattr(
+        cli, "_mechanical_calculator_check", AsyncMock(return_value=secret)
+    )
 
     assert await cli._smoke_live() == 1
 
@@ -1383,9 +1556,13 @@ async def test_smoke_allows_two_minutes_for_live_check(monkeypatch, tmp_path):
 
     run = AsyncMock(return_value={"outcome": "completed"})
     _patch_smoke_preflight(monkeypatch, cli, tmp_path / "desktop.lock")
-    monkeypatch.setattr(cli, "_mechanical_calculator_check", AsyncMock(return_value="42"))
+    monkeypatch.setattr(
+        cli, "_mechanical_calculator_check", AsyncMock(return_value="42")
+    )
     monkeypatch.setattr(supervisor, "run_task", run)
-    monkeypatch.setattr(cli, "format_terminal_result", lambda *_args, **_kwargs: "complete")
+    monkeypatch.setattr(
+        cli, "format_terminal_result", lambda *_args, **_kwargs: "complete"
+    )
     _patch_run_credentials(monkeypatch, api_key="dev-key")
 
     assert await cli._smoke_live() == 0
@@ -1395,7 +1572,10 @@ async def test_smoke_allows_two_minutes_for_live_check(monkeypatch, tmp_path):
 
 
 def test_pick_best_window_excludes_helper_strips():
-    strips = [{"window_id": index, "bounds": {"width": 600, "height": 20}, "z_index": 9} for index in range(4)]
+    strips = [
+        {"window_id": index, "bounds": {"width": 600, "height": 20}, "z_index": 9}
+        for index in range(4)
+    ]
     main = {"window_id": 99, "bounds": {"width": 400, "height": 500}, "z_index": 1}
     assert pick_best_window(strips + [main])["window_id"] == 99
     assert pick_best_window(strips)["window_id"] == 0
@@ -1480,7 +1660,9 @@ async def test_prepare_app_retries_bundle_as_name_and_fronts_best_window():
                 {
                     "pid": 42,
                     "name": "Calculator",
-                    "windows": [{"window_id": 7, "bounds": {"width": 400, "height": 500}}],
+                    "windows": [
+                        {"window_id": 7, "bounds": {"width": 400, "height": 500}}
+                    ],
                 },
             ]
         ),
@@ -1509,18 +1691,26 @@ async def test_prepare_app_launches_finder_by_bundle_id():
     target = await prepare_app(computer, "Finder", None)
 
     assert target == {"name": "Finder", "pid": 42, "window_id": None}
-    computer.launch_app.assert_awaited_once_with(bundle_id="com.apple.finder", urls=None)
+    computer.launch_app.assert_awaited_once_with(
+        bundle_id="com.apple.finder", urls=None
+    )
 
 
 async def test_prepare_app_preserves_explicit_launch_refusal():
-    computer = SimpleNamespace(launch_app=AsyncMock(side_effect=CuaDriverToolError("POLICY_DENIED")))
+    computer = SimpleNamespace(
+        launch_app=AsyncMock(side_effect=CuaDriverToolError("POLICY_DENIED"))
+    )
     with pytest.raises(CuaDriverToolError, match="POLICY_DENIED"):
         await prepare_app(computer, "com.apple.calculator", None)
     computer.launch_app.assert_awaited_once()
 
 
 async def test_prepare_app_never_retries_uncertain_launch():
-    computer = SimpleNamespace(launch_app=AsyncMock(side_effect=CuaDriverUncertainActionError("acknowledgement lost")))
+    computer = SimpleNamespace(
+        launch_app=AsyncMock(
+            side_effect=CuaDriverUncertainActionError("acknowledgement lost")
+        )
+    )
     with pytest.raises(CuaDriverUncertainActionError, match="acknowledgement lost"):
         await prepare_app(computer, "com.apple.calculator", None)
     computer.launch_app.assert_awaited_once()
@@ -1531,7 +1721,11 @@ async def test_prepare_app_fronts_running_persistent_app_after_launch_failure():
         launch_app=AsyncMock(side_effect=CuaDriverToolError("APP_NOT_INSTALLED")),
         _call_tool=AsyncMock(
             return_value={
-                "structuredContent": {"apps": [{"pid": 42, "name": "Finder", "bundle_id": "com.apple.finder"}]}
+                "structuredContent": {
+                    "apps": [
+                        {"pid": 42, "name": "Finder", "bundle_id": "com.apple.finder"}
+                    ]
+                }
             }
         ),
         bring_to_front=AsyncMock(),
@@ -1547,7 +1741,9 @@ async def test_prepare_app_fronts_running_persistent_app_after_launch_failure():
 async def test_prepare_app_does_not_retry_uncertain_fronting():
     computer = SimpleNamespace(
         launch_app=AsyncMock(return_value={"pid": 42, "name": "Calculator"}),
-        bring_to_front=AsyncMock(side_effect=CuaDriverUncertainActionError("acknowledgement lost")),
+        bring_to_front=AsyncMock(
+            side_effect=CuaDriverUncertainActionError("acknowledgement lost")
+        ),
         _probe_frontmost=AsyncMock(return_value=FrontmostApp(42, "Calculator")),
         wait=AsyncMock(),
     )
@@ -1580,7 +1776,9 @@ async def test_require_frontmost_target_fails_closed_when_the_probe_is_unavailab
     )
 
     with pytest.raises(MacOSFocusChangedError, match="could not verify") as caught:
-        await require_frontmost_target(computer, 42, tool="type_text", target_name="Notes")
+        await require_frontmost_target(
+            computer, 42, tool="type_text", target_name="Notes"
+        )
 
     assert caught.value.observation == "current frame"
 
@@ -1609,7 +1807,9 @@ async def test_target_guarded_computer_refuses_keyboard_for_another_foreground_p
     computer._probe_frontmost = AsyncMock(return_value=FrontmostApp(99, "Conductor"))
     computer.screenshot = AsyncMock(return_value="fresh frame")
 
-    with pytest.raises(MacOSFocusChangedError, match=r"pid 42.*Conductor \(pid 99\) is frontmost") as caught:
+    with pytest.raises(
+        MacOSFocusChangedError, match=r"pid 42.*Conductor \(pid 99\) is frontmost"
+    ) as caught:
         await computer._guard_frontmost("hotkey")
 
     assert caught.value.observation == "fresh frame"
@@ -1729,7 +1929,11 @@ def test_parse_request_rejects_malformed_requests(overrides, code):
     [
         ("ok", "confirmed", "executed"),
         ("[ERROR] Refused an action.", "refused", "refused"),
-        ("[ERROR] shell_command failed: timeout", "timeout_after_possible_dispatch", "uncertain"),
+        (
+            "[ERROR] shell_command failed: timeout",
+            "timeout_after_possible_dispatch",
+            "uncertain",
+        ),
         ("[ERROR] Invalid click", "unverifiable", "uncertain"),
     ],
 )
@@ -1741,15 +1945,24 @@ def test_classify_result_maps_outputs_to_statuses(output, raw_status, status):
 
 def test_redacted_error_text_scrubs_the_secret():
     error = RuntimeError("driver rejected key yt-secret-123")
-    assert runner_module._redacted_error_text(error, "yt-secret-123") == "driver rejected key [REDACTED]"
+    assert (
+        runner_module._redacted_error_text(error, "yt-secret-123")
+        == "driver rejected key [REDACTED]"
+    )
 
 
 def test_redacted_error_text_falls_back_to_type_name_when_message_is_empty():
-    assert runner_module._redacted_error_text(RuntimeError(), "yt-secret-123") == "RuntimeError"
+    assert (
+        runner_module._redacted_error_text(RuntimeError(), "yt-secret-123")
+        == "RuntimeError"
+    )
 
 
 def test_redact_scrubs_every_occurrence_of_the_secret():
-    assert redact("key=yt-secret then yt-secret again", "yt-secret") == "key=[REDACTED] then [REDACTED] again"
+    assert (
+        redact("key=yt-secret then yt-secret again", "yt-secret")
+        == "key=[REDACTED] then [REDACTED] again"
+    )
 
 
 def test_redact_is_a_noop_when_the_secret_is_absent():
@@ -1814,7 +2027,9 @@ async def test_startup_reporter_emits_each_phase_and_only_the_first_model_reques
     assert [event["elapsed_ms"] for event in events] == [100, 500, 1000]
 
 
-def test_runner_main_unexpected_failure_preserves_the_requested_background_mode(monkeypatch):
+def test_runner_main_unexpected_failure_preserves_the_requested_background_mode(
+    monkeypatch,
+):
     stream = _CollectStream()
 
     async def fail(_request, _emitter, _api_key, _termination_requested):
@@ -1841,12 +2056,23 @@ async def test_action_events_sanitize_commands_and_never_include_output(monkeypa
     reporter = ActionReporter(Emitter(stream), time.monotonic())
     item = {
         "name": "bash",
-        "arguments": json.dumps({"command": f"API_TOKEN={secret} run --password hunter2", "run_in_background": True}),
+        "arguments": json.dumps(
+            {
+                "command": f"API_TOKEN={secret} run --password hunter2",
+                "run_in_background": True,
+            }
+        ),
     }
     await reporter.on_computer_call_start(item)
     await reporter.on_computer_call_end(
         item,
-        [{"output": {"result": "Started background task bash-ab12 (pid 7).\nsecret command output must not escape"}}],
+        [
+            {
+                "output": {
+                    "result": "Started background task bash-ab12 (pid 7).\nsecret command output must not escape"
+                }
+            }
+        ],
     )
     event = json.loads(stream.lines[-1])
     assert event["run_in_background"] is True
@@ -1860,7 +2086,9 @@ async def test_action_reporter_flushes_an_in_flight_call_as_uncertain():
     stream = _CollectStream()
     clock = iter((10.0, 10.5, 10.5)).__next__
     reporter = ActionReporter(Emitter(stream), 9.0, clock=clock)
-    await reporter.on_computer_call_start({"name": "left_click", "arguments": {"coordinates": [1, 1]}})
+    await reporter.on_computer_call_start(
+        {"name": "left_click", "arguments": {"coordinates": [1, 1]}}
+    )
 
     reporter.flush_interrupted()
     reporter.flush_interrupted()
@@ -1965,9 +2193,15 @@ class _FakeComputer:
     async def select_app(self, app: str, *, url: str | None = None) -> dict[str, Any]:
         target = await runner_module.prepare_app(self, app, url, front=False)
         self.target_pid = target["pid"]
-        await self.set_window_target(_FakeWindowTarget(target["pid"], target["window_id"], app_name=target["name"]))
+        await self.set_window_target(
+            _FakeWindowTarget(
+                target["pid"], target["window_id"], app_name=target["name"]
+            )
+        )
+
         async def recover() -> int:
             return (await self.select_app(app))["pid"]
+
         self.recover_target = recover
         return target
 
@@ -1993,12 +2227,16 @@ class _FakeAgent:
 
     async def run(self, _messages):
         for callback in self.callbacks:
-            if hasattr(callback, "on_run_continue") and not await callback.on_run_continue({}, [], []):
+            if hasattr(
+                callback, "on_run_continue"
+            ) and not await callback.on_run_continue({}, [], []):
                 return
             if hasattr(callback, "on_api_start"):
                 await callback.on_api_start({})
             if hasattr(callback, "on_api_end"):
-                await callback.on_api_end({}, {"request_id": "req-first", "choices": []})
+                await callback.on_api_end(
+                    {}, {"request_id": "req-first", "choices": []}
+                )
         item = {"name": "left_click", "arguments": {"coordinates": [1, 1]}}
         for callback in self.callbacks:
             if hasattr(callback, "on_computer_call_start"):
@@ -2006,7 +2244,14 @@ class _FakeAgent:
         for callback in self.callbacks:
             if hasattr(callback, "on_computer_call_end"):
                 await callback.on_computer_call_end(item, [{"output": "ok"}])
-        yield {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Done [DONE]"}]}]}
+        yield {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "Done [DONE]"}],
+                }
+            ]
+        }
 
 
 def _patch_runner_sdk(monkeypatch, *, agent_cls: type = _FakeAgent) -> None:
@@ -2024,7 +2269,9 @@ def _patch_runner_sdk(monkeypatch, *, agent_cls: type = _FakeAgent) -> None:
 
 
 class _FakeCatalogPrefetch:
-    catalog: dict[str, Any] | None = {"apps": [{"name": "Notes", "pid": 7, "running": True}]}
+    catalog: dict[str, Any] | None = {
+        "apps": [{"name": "Notes", "pid": 7, "running": True}]
+    }
 
     async def result(self) -> dict[str, Any] | None:
         return self.catalog
@@ -2070,14 +2317,27 @@ async def test_run_request_wires_sdk_runtime_and_reports_effective_state(monkeyp
     assert agent.kwargs["supports_click_modifiers"] is True
     assert "Shell commands run headlessly" in agent.kwargs["system_prompt"]
     assert "Do not use osascript" in agent.kwargs["system_prompt"]
-    assert "Never inspect a GUI application's databases" in agent.kwargs["system_prompt"]
+    assert (
+        "Never inspect a GUI application's databases" in agent.kwargs["system_prompt"]
+    )
     assert "use at most three shell calls for research" in agent.kwargs["system_prompt"]
     assert "never inspect browser profile databases" in agent.kwargs["system_prompt"]
-    assert "stop immediately instead of trying alternate URLs" in agent.kwargs["system_prompt"]
+    assert (
+        "stop immediately instead of trying alternate URLs"
+        in agent.kwargs["system_prompt"]
+    )
     assert "Never ask them to give you a password" in agent.kwargs["system_prompt"]
     assert computer.closed
-    startup_events = [json.loads(line) for line in stream.lines if json.loads(line)["type"] == "startup"]
-    assert [event["phase"] for event in startup_events] == ["api_client", "computer", "model"]
+    startup_events = [
+        json.loads(line)
+        for line in stream.lines
+        if json.loads(line)["type"] == "startup"
+    ]
+    assert [event["phase"] for event in startup_events] == [
+        "api_client",
+        "computer",
+        "model",
+    ]
     result = json.loads(stream.lines[-1])
     assert result["final_text"] == "Done"
     assert result["reasoning_overlay_requested"] is True
@@ -2112,7 +2372,10 @@ async def test_run_request_reports_an_action_interrupted_by_cancellation(monkeyp
     stream = _CollectStream()
     request = parse_request(_valid_request(deadline_ms=int((time.time() + 60) * 1000)))
 
-    assert await runner_module.run_request(request, Emitter(stream), "yt-secret") == "aborted"
+    assert (
+        await runner_module.run_request(request, Emitter(stream), "yt-secret")
+        == "aborted"
+    )
 
     events = [json.loads(line) for line in stream.lines]
     assert [event["type"] for event in events[-2:]] == ["action", "result"]
@@ -2127,7 +2390,14 @@ class _LimitAgent(_FakeAgent):
             if hasattr(callback, "on_run_continue"):
                 while await callback.on_run_continue({}, [], []):
                     pass
-        yield {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Partial"}]}]}
+        yield {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "Partial"}],
+                }
+            ]
+        }
 
     def completion_request(self, extra_messages):
         self.summary_extra_messages = extra_messages
@@ -2140,7 +2410,9 @@ class _LimitAgent(_FakeAgent):
         }
 
 
-async def test_run_request_reuses_the_agent_trajectory_for_the_limit_summary(monkeypatch):
+async def test_run_request_reuses_the_agent_trajectory_for_the_limit_summary(
+    monkeypatch,
+):
     class SummaryCompletions:
         def __init__(self):
             self.requests = []
@@ -2172,9 +2444,14 @@ async def test_run_request_reuses_the_agent_trajectory_for_the_limit_summary(mon
     _patch_runner_sdk(monkeypatch, agent_cls=_LimitAgent)
     monkeypatch.setattr(runner_module, "AsyncYutoriClient", SummaryClient)
     stream = _CollectStream()
-    request = parse_request(_valid_request(deadline_ms=int((time.time() + 60) * 1000), max_steps=1))
+    request = parse_request(
+        _valid_request(deadline_ms=int((time.time() + 60) * 1000), max_steps=1)
+    )
 
-    assert await runner_module.run_request(request, Emitter(stream), "yt-secret") == "limit"
+    assert (
+        await runner_module.run_request(request, Emitter(stream), "yt-secret")
+        == "limit"
+    )
 
     (run_agent,) = _FakeAgent.instances
     (client,) = SummaryClient.instances
@@ -2233,7 +2510,10 @@ async def test_run_request_reports_limit_when_the_deadline_has_already_passed():
     stream = _CollectStream()
     request = parse_request(_valid_request(deadline_ms=int((time.time() - 1) * 1000)))
 
-    assert await runner_module.run_request(request, Emitter(stream), "yt-secret") == "limit"
+    assert (
+        await runner_module.run_request(request, Emitter(stream), "yt-secret")
+        == "limit"
+    )
 
     (event,) = [json.loads(line) for line in stream.lines]
     assert event == {
@@ -2268,18 +2548,38 @@ async def test_run_request_carries_the_chat_id_on_actions_and_the_result(monkeyp
     stream = _CollectStream()
     request = parse_request(_valid_request(deadline_ms=int((time.time() + 60) * 1000)))
 
-    assert await runner_module.run_request(request, Emitter(stream), "yt-secret") == "completed"
+    assert (
+        await runner_module.run_request(request, Emitter(stream), "yt-secret")
+        == "completed"
+    )
 
     events = [json.loads(line) for line in stream.lines]
     # `activity` and `frame` events interleave with actions, so pick the last action by type.
-    action, result = [event for event in events if event["type"] == "action"][-1], events[-1]
+    action, result = (
+        [event for event in events if event["type"] == "action"][-1],
+        events[-1],
+    )
     assert (action["type"], action["chat_id"]) == ("action", "req-first")
     assert (result["type"], result["chat_id"]) == ("result", "req-first")
 
 
 def test_run_chat_id_prefers_the_result_then_the_latest_action():
-    assert run_chat_id({"chat_id": "from-result", "actions": [{"chat_id": "from-action"}]}) == "from-result"
-    assert run_chat_id({"actions": [{"chat_id": None}, {"chat_id": "later"}, {"tool": "screenshot"}]}) == "later"
+    assert (
+        run_chat_id({"chat_id": "from-result", "actions": [{"chat_id": "from-action"}]})
+        == "from-result"
+    )
+    assert (
+        run_chat_id(
+            {
+                "actions": [
+                    {"chat_id": None},
+                    {"chat_id": "later"},
+                    {"tool": "screenshot"},
+                ]
+            }
+        )
+        == "later"
+    )
     assert run_chat_id({"actions": []}) is None
 
 
@@ -2288,12 +2588,19 @@ def test_attach_run_link_builds_the_platform_chat_url():
     assert attach_run_link(result, "https://platform.yutori.com/") is result
     assert result["chat_id"] == "abc-123"
     assert result["run_url"] == "https://platform.yutori.com/navigator/chats/abc-123"
-    assert "run_url" not in attach_run_link(terminal_result("failed", "no model call"), "https://platform.yutori.com")
+    assert "run_url" not in attach_run_link(
+        terminal_result("failed", "no model call"), "https://platform.yutori.com"
+    )
     assert "run_url" not in attach_run_link({"chat_id": "abc-123", "actions": []}, None)
 
 
 def test_format_result_prints_the_run_link_right_after_the_outcome():
-    text = format_result({"outcome": "completed", "run_url": "https://platform.yutori.com/navigator/chats/abc"})
+    text = format_result(
+        {
+            "outcome": "completed",
+            "run_url": "https://platform.yutori.com/navigator/chats/abc",
+        }
+    )
     assert text.splitlines()[:3] == [
         "Outcome: completed",
         "Delivery mode: foreground",
@@ -2356,7 +2663,9 @@ class _FakeWindowTarget:
 
 
 def _background_request(**overrides):
-    request = _valid_request(app="Notes", mode="background", deadline_ms=int((time.time() + 60) * 1000))
+    request = _valid_request(
+        app="Notes", mode="background", deadline_ms=int((time.time() + 60) * 1000)
+    )
     request.update(overrides)
     return request
 
@@ -2366,11 +2675,17 @@ def test_computer_use_mode_defaults_and_validators():
     assert params.mode == "background" and params.allow_foreground_fallback is False
     assert params.allow_local_shell is True
     assert ComputerUseTaskInput(task="t", mode="background").app is None
-    with pytest.raises(ValidationError, match="allow_foreground_fallback requires mode='background'"):
-        ComputerUseTaskInput(task="t", app="Notes", mode="foreground", allow_foreground_fallback=True)
+    with pytest.raises(
+        ValidationError, match="allow_foreground_fallback requires mode='background'"
+    ):
+        ComputerUseTaskInput(
+            task="t", app="Notes", mode="foreground", allow_foreground_fallback=True
+        )
     with pytest.raises(ValidationError):
         ComputerUseTaskInput(task="t", app="Notes", mode="sideways")
-    background = ComputerUseTaskInput(task="t", app="Notes", mode="background", allow_foreground_fallback=True)
+    background = ComputerUseTaskInput(
+        task="t", app="Notes", mode="background", allow_foreground_fallback=True
+    )
     assert background.model_dump()["mode"] == "background"
     assert background.model_dump()["allow_foreground_fallback"] is True
 
@@ -2385,19 +2700,39 @@ def test_computer_use_mode_literal_matches_runtime_delivery_modes():
     "kwargs,expected",
     [
         (
-            {"app": None, "start_url": "https://x", "mode": "foreground", "allow_foreground_fallback": False},
+            {
+                "app": None,
+                "start_url": "https://x",
+                "mode": "foreground",
+                "allow_foreground_fallback": False,
+            },
             "start_url requires app",
         ),
         (
-            {"app": None, "start_url": None, "mode": "background", "allow_foreground_fallback": False},
+            {
+                "app": None,
+                "start_url": None,
+                "mode": "background",
+                "allow_foreground_fallback": False,
+            },
             None,
         ),
         (
-            {"app": "Notes", "start_url": None, "mode": "foreground", "allow_foreground_fallback": True},
+            {
+                "app": "Notes",
+                "start_url": None,
+                "mode": "foreground",
+                "allow_foreground_fallback": True,
+            },
             "allow_foreground_fallback requires mode='background'",
         ),
         (
-            {"app": "Notes", "start_url": "https://x", "mode": "background", "allow_foreground_fallback": True},
+            {
+                "app": "Notes",
+                "start_url": "https://x",
+                "mode": "background",
+                "allow_foreground_fallback": True,
+            },
             None,
         ),
     ],
@@ -2415,9 +2750,21 @@ def test_run_computer_use_task_signature_mirrors_the_schema_defaults():
 
     parameters = inspect.signature(server.run_computer_use_task).parameters
     fields = ComputerUseTaskInput.model_fields
-    assert parameters["mode"].default == fields["mode"].default == COMPUTER_USE_DEFAULT_MODE
-    assert parameters["allow_foreground_fallback"].default is fields["allow_foreground_fallback"].default is False
-    assert parameters["allow_local_shell"].default is fields["allow_local_shell"].default is True
+    assert (
+        parameters["mode"].default
+        == fields["mode"].default
+        == COMPUTER_USE_DEFAULT_MODE
+    )
+    assert (
+        parameters["allow_foreground_fallback"].default
+        is fields["allow_foreground_fallback"].default
+        is False
+    )
+    assert (
+        parameters["allow_local_shell"].default
+        is fields["allow_local_shell"].default
+        is True
+    )
     assert list(parameters)[-1] == "ctx"
 
 
@@ -2446,7 +2793,10 @@ async def test_server_forwards_mode_and_fallback_to_the_runner(monkeypatch, tmp_
         },
     )
     assert result["delivery_mode"] == "background"
-    assert forwarded["mode"] == "background" and forwarded["allow_foreground_fallback"] is True
+    assert (
+        forwarded["mode"] == "background"
+        and forwarded["allow_foreground_fallback"] is True
+    )
     assert forwarded["allow_local_shell"] is False
     assert forwarded["app"] == "Notes"
     assert forwarded["platform_url"] == "https://platform.yutori.com"
@@ -2491,34 +2841,48 @@ async def test_progress_reporter_formats_startup_phases_without_action_fields():
         progress=0,
         message="Computer-use startup: Notes ready  250ms | at 300ms",
     )
-    ctx.info.assert_awaited_once_with("Computer-use startup: Notes ready  250ms | at 300ms")
+    ctx.info.assert_awaited_once_with(
+        "Computer-use startup: Notes ready  250ms | at 300ms"
+    )
 
 
-async def test_server_early_failures_preserve_the_requested_background_mode(monkeypatch, tmp_path):
+async def test_server_early_failures_preserve_the_requested_background_mode(
+    monkeypatch, tmp_path
+):
     from yutori_mcp import server
     from yutori_mcp.computer_use import lock as lock_module
 
     lock_path = tmp_path / "desktop.lock"
     blocker = preflight.CheckResult("driver", False, "missing", "run setup")
-    _patch_server_lock(monkeypatch, lock_module, DesktopLock(lock_path), lambda: blocker)
+    _patch_server_lock(
+        monkeypatch, lock_module, DesktopLock(lock_path), lambda: blocker
+    )
 
     arguments = {"task": "add a note", "app": "Notes", "mode": "background"}
     blocked, _ = await server._handle_computer_use(None, arguments)
     assert blocked["delivery_mode"] == DELIVERY_MODE_BACKGROUND
 
-    monkeypatch.setattr(preflight, "first_blocker", lambda: pytest.fail("busy run must not reach preflight"))
+    monkeypatch.setattr(
+        preflight,
+        "first_blocker",
+        lambda: pytest.fail("busy run must not reach preflight"),
+    )
     with DesktopLock(lock_path):
         busy, _ = await server._handle_computer_use(None, arguments)
     assert busy["delivery_mode"] == DELIVERY_MODE_BACKGROUND
 
 
-async def test_invoke_unexpected_failure_preserves_the_requested_background_mode(monkeypatch):
+async def test_invoke_unexpected_failure_preserves_the_requested_background_mode(
+    monkeypatch,
+):
     from yutori_mcp import server
 
     async def fail_before_result(_client, _arguments):
         raise RuntimeError("unexpected host failure")
 
-    monkeypatch.setitem(server._TOOL_HANDLERS, "run_computer_use_task", fail_before_result)
+    monkeypatch.setitem(
+        server._TOOL_HANDLERS, "run_computer_use_task", fail_before_result
+    )
     text = await server._invoke(
         "run_computer_use_task",
         {"task": "add a note", "app": "Notes", "mode": "background"},
@@ -2533,12 +2897,25 @@ def test_cli_run_parser_accepts_mode_and_fallback_flags():
     parser = argparse.ArgumentParser()
     cli.register_parser(parser.add_subparsers(dest="command"))
     args = parser.parse_args(
-        ["computer-use", "run", "add a note", "--app", "Notes", "--mode", "background", "--allow-foreground-fallback", "--no-local-shell"]
+        [
+            "computer-use",
+            "run",
+            "add a note",
+            "--app",
+            "Notes",
+            "--mode",
+            "background",
+            "--allow-foreground-fallback",
+            "--no-local-shell",
+        ]
     )
     assert args.mode == "background" and args.allow_foreground_fallback is True
     assert args.allow_local_shell is False
     default = parser.parse_args(["computer-use", "run", "add a note"])
-    assert default.mode == COMPUTER_USE_DEFAULT_MODE and default.allow_foreground_fallback is False
+    assert (
+        default.mode == COMPUTER_USE_DEFAULT_MODE
+        and default.allow_foreground_fallback is False
+    )
     assert default.allow_local_shell is True
     with pytest.raises(SystemExit):
         parser.parse_args(["computer-use", "run", "x", "--mode", "sideways"])
@@ -2562,10 +2939,18 @@ def test_hands_off_notice_depends_on_the_mode():
     assert "leave the window being driven alone" in cli.hands_off_notice("background")
 
 
-async def test_cli_run_forwards_the_mode_and_prints_the_matching_notice(monkeypatch, capsys):
+async def test_cli_run_forwards_the_mode_and_prints_the_matching_notice(
+    monkeypatch, capsys
+):
     from yutori_mcp.computer_use import cli
 
-    run = AsyncMock(return_value={"outcome": "completed", "delivery_mode": "background", "final_text": "done"})
+    run = AsyncMock(
+        return_value={
+            "outcome": "completed",
+            "delivery_mode": "background",
+            "final_text": "done",
+        }
+    )
     monkeypatch.setattr(cli, "_blocked", lambda **_kwargs: False)
     monkeypatch.setattr(supervisor, "run_task", run)
     _patch_run_credentials(monkeypatch)
@@ -2605,7 +2990,9 @@ async def test_run_task_request_carries_mode_fallback_and_shell_policy(tmp_path)
         )
     request = supervise.await_args.kwargs["request"]
     assert request["protocol_version"] == PROTOCOL_VERSION == 3
-    assert request["mode"] == "background" and request["allow_foreground_fallback"] is True
+    assert (
+        request["mode"] == "background" and request["allow_foreground_fallback"] is True
+    )
     assert request["allow_local_shell"] is False
 
 
@@ -2618,12 +3005,20 @@ async def test_run_task_carries_only_the_vm_run_id_to_the_runner(tmp_path):
     assert "api_key" not in request
 
 
-async def test_run_task_defaults_to_background_and_reports_failures_in_the_requested_mode(tmp_path):
+async def test_run_task_defaults_to_background_and_reports_failures_in_the_requested_mode(
+    tmp_path,
+):
     with patch.object(supervisor, "find_cua_driver", return_value=None):
         foreground = await run_task(**_run_task_kwargs(tmp_path, mode="foreground"))
         background = await run_task(**_run_task_kwargs(tmp_path))
-    assert foreground["outcome"] == "failed" and foreground["delivery_mode"] == "foreground"
-    assert background["outcome"] == "failed" and background["delivery_mode"] == "background"
+    assert (
+        foreground["outcome"] == "failed"
+        and foreground["delivery_mode"] == "foreground"
+    )
+    assert (
+        background["outcome"] == "failed"
+        and background["delivery_mode"] == "background"
+    )
 
 
 async def test_supervisor_synthesized_results_carry_the_requested_mode():
@@ -2640,36 +3035,53 @@ async def test_supervisor_synthesized_results_carry_the_requested_mode():
 
 
 def test_event_shape_checks_delivery_modes_and_accepts_the_new_action_fields():
-    action = _action_event(delivery_mode="background", route="accessibility", effect="confirmed", escalated=True)
+    action = _action_event(
+        delivery_mode="background",
+        route="accessibility",
+        effect="confirmed",
+        escalated=True,
+    )
     assert supervisor._event_shape_error(action) is None
     assert supervisor._event_shape_error({**action, "delivery_mode": "sideways"}) == (
         "invalid or missing fields: delivery_mode"
     )
-    assert supervisor._event_shape_error(_result_event(delivery_mode="background")) is None
+    assert (
+        supervisor._event_shape_error(_result_event(delivery_mode="background")) is None
+    )
     assert supervisor._event_shape_error(_result_event(delivery_mode="sideways")) == (
         "invalid or missing fields: delivery_mode"
     )
 
 
 def test_parse_request_accepts_background_with_app():
-    parsed = parse_request(_valid_request(app="Notes", mode="background", allow_foreground_fallback=True))
-    assert parsed["mode"] == "background" and parsed["allow_foreground_fallback"] is True
+    parsed = parse_request(
+        _valid_request(app="Notes", mode="background", allow_foreground_fallback=True)
+    )
+    assert (
+        parsed["mode"] == "background" and parsed["allow_foreground_fallback"] is True
+    )
     assert parsed["allow_local_shell"] is True
     assert parse_request(_valid_request())["mode"] == "foreground"
 
 
 def test_parse_request_validates_vm_run_id():
     run_id = uuid.uuid4()
-    assert parse_request(_valid_request(vm_run_id=str(run_id)))["vm_run_id"] == str(run_id)
+    assert parse_request(_valid_request(vm_run_id=str(run_id)))["vm_run_id"] == str(
+        run_id
+    )
     with pytest.raises(RequestError, match="vm_run_id must be a UUID"):
         parse_request(_valid_request(vm_run_id="not-a-uuid"))
 
 
 async def test_run_bound_completions_adds_the_vm_run_header_to_every_request():
     create = AsyncMock(return_value={"ok": True})
-    completions = runner_module._RunBoundCompletions(SimpleNamespace(create=create), "run-123")
+    completions = runner_module._RunBoundCompletions(
+        SimpleNamespace(create=create), "run-123"
+    )
 
-    assert await completions.create([], model="n2", extra_headers={"x-existing": "value"}) == {"ok": True}
+    assert await completions.create(
+        [], model="n2", extra_headers={"x-existing": "value"}
+    ) == {"ok": True}
 
     assert create.await_args.kwargs["extra_headers"] == {
         "x-existing": "value",
@@ -2677,7 +3089,9 @@ async def test_run_bound_completions_adds_the_vm_run_header_to_every_request():
     }
 
 
-def test_computer_kwargs_keep_the_foreground_shape_and_add_window_scope_for_background(monkeypatch):
+def test_computer_kwargs_keep_the_foreground_shape_and_add_window_scope_for_background(
+    monkeypatch,
+):
     monkeypatch.delenv(runner_module.ENV_RECORDABLE_OVERLAY, raising=False)
     cancellation = object()
     shared = {
@@ -2689,13 +3103,20 @@ def test_computer_kwargs_keep_the_foreground_shape_and_add_window_scope_for_back
         "known_secrets": ("k",),
     }
     foreground = runner_module._computer_kwargs(
-        parse_request(_valid_request()), deadline=1.0, cancellation=cancellation, api_key="k"
+        parse_request(_valid_request()),
+        deadline=1.0,
+        cancellation=cancellation,
+        api_key="k",
     )
     # Recordable by default: the overlay stays in screen recordings, the SDK keeps it out of the
     # model's frames on the capturer's side.
     assert foreground == {**shared, "exclude_overlay_from_capture": False}
     background = runner_module._computer_kwargs(
-        parse_request(_valid_request(app="Notes", mode="background", allow_foreground_fallback=True)),
+        parse_request(
+            _valid_request(
+                app="Notes", mode="background", allow_foreground_fallback=True
+            )
+        ),
         deadline=1.0,
         cancellation=cancellation,
         api_key="k",
@@ -2710,7 +3131,10 @@ def test_computer_kwargs_keep_the_foreground_shape_and_add_window_scope_for_back
 def test_computer_kwargs_recordable_overlay_switch(monkeypatch):
     def foreground():
         return runner_module._computer_kwargs(
-            parse_request(_valid_request()), deadline=1.0, cancellation=object(), api_key="k"
+            parse_request(_valid_request()),
+            deadline=1.0,
+            cancellation=object(),
+            api_key="k",
         )
 
     # "0" opts out: the overlay leaves screen capture altogether (and recordings with it).
@@ -2722,7 +3146,10 @@ def test_computer_kwargs_recordable_overlay_switch(monkeypatch):
         assert foreground()["exclude_overlay_from_capture"] is False
     # Window scope shows no full-screen overlay; the switch does not apply.
     background = runner_module._computer_kwargs(
-        parse_request(_valid_request(app="Notes", mode="background")), deadline=1.0, cancellation=object(), api_key="k"
+        parse_request(_valid_request(app="Notes", mode="background")),
+        deadline=1.0,
+        cancellation=object(),
+        api_key="k",
     )
     assert "exclude_overlay_from_capture" not in background
 
@@ -2735,11 +3162,18 @@ def test_child_environment_forwards_the_recordable_overlay_switch(monkeypatch):
 
 
 def test_computer_kwargs_can_disable_local_shell():
-    request = parse_request(_valid_request(app="iPhone Mirroring", mode="background", allow_local_shell=False))
-    kwargs = runner_module._computer_kwargs(request, deadline=1.0, cancellation=object(), api_key="k")
+    request = parse_request(
+        _valid_request(
+            app="iPhone Mirroring", mode="background", allow_local_shell=False
+        )
+    )
+    kwargs = runner_module._computer_kwargs(
+        request, deadline=1.0, cancellation=object(), api_key="k"
+    )
     assert kwargs["allow_local_shell"] is False
-    assert "Local shell and filesystem tools are disabled" in runner_module.system_context(
-        "background", "iPhone Mirroring", False
+    assert (
+        "Local shell and filesystem tools are disabled"
+        in runner_module.system_context("background", "iPhone Mirroring", False)
     )
 
 
@@ -2749,11 +3183,18 @@ def test_system_context_varies_only_in_the_mode_specific_parts():
     assert foreground == runner_module.SYSTEM_CONTEXT
     assert foreground.startswith("You control the entire macOS screen.")
     assert "Initial application: Notes." in background
-    assert "entire macOS screen" not in background and "Do not bring results to the front" in background
+    assert (
+        "entire macOS screen" not in background
+        and "Do not bring results to the front" in background
+    )
     assert "shell commands to launch or activate apps" in background
     assert "open -a" not in foreground
     assert "leave that result in view" not in background
-    for shared in ("cmd, not ctrl", "Shell commands run headlessly", "Do not open or change System Settings"):
+    for shared in (
+        "cmd, not ctrl",
+        "Shell commands run headlessly",
+        "Do not open or change System Settings",
+    ):
         assert shared in foreground and shared in background
     assert "none; choose one" in runner_module.system_context("background")
 
@@ -2792,7 +3233,9 @@ async def test_run_request_background_binds_the_window_and_never_fronts(monkeypa
     _patch_runner_sdk(monkeypatch)
     monkeypatch.setattr(runner_module, "prepare_app", prepared)
     monkeypatch.setattr(runner_module, "_supports_background_mode", lambda: True)
-    monkeypatch.setattr("yutori.navigator.macos.MacOSWindowTarget", _FakeWindowTarget, raising=False)
+    monkeypatch.setattr(
+        "yutori.navigator.macos.MacOSWindowTarget", _FakeWindowTarget, raising=False
+    )
     monkeypatch.setattr(
         _FakeComputer,
         "telemetry_overrides",
@@ -2810,14 +3253,22 @@ async def test_run_request_background_binds_the_window_and_never_fronts(monkeypa
     stream = _CollectStream()
     request = parse_request(_background_request(allow_foreground_fallback=True))
 
-    assert await runner_module.run_request(request, Emitter(stream), "yt-secret") == "completed"
+    assert (
+        await runner_module.run_request(request, Emitter(stream), "yt-secret")
+        == "completed"
+    )
 
     computer = _FakeComputer.instances[-1]
     agent = _FakeAgent.instances[-1]
-    assert computer.kwargs["scope"] == "window" and computer.kwargs["presentation"] is True
+    assert (
+        computer.kwargs["scope"] == "window" and computer.kwargs["presentation"] is True
+    )
     assert computer.kwargs["allow_foreground_fallback"] is True
     assert computer.screenshots == 0  # no pre-launch desktop frame in window scope
-    assert prepared.await_args.args[1:] == ("Notes", None) and prepared.await_args.kwargs == {"front": False}
+    assert prepared.await_args.args[1:] == (
+        "Notes",
+        None,
+    ) and prepared.await_args.kwargs == {"front": False}
     assert computer.window_targets == [_FakeWindowTarget(42, 7, app_name="Notes")]
     assert computer.target_pid == 42
     assert "Initial application: Notes." in agent.kwargs["system_prompt"]
@@ -2826,15 +3277,31 @@ async def test_run_request_background_binds_the_window_and_never_fronts(monkeypa
     assert agent.kwargs["presentation"]._inner is computer.presentation
     result = json.loads(stream.lines[-1])
     assert result["delivery_mode"] == "background"
-    assert result["reasoning_overlay_requested"] is True and result["reasoning_overlay_effective"] is True
+    assert (
+        result["reasoning_overlay_requested"] is True
+        and result["reasoning_overlay_effective"] is True
+    )
     assert result["fallback_escalations"] == 2 and result["background_refusals"] == 1
     assert result["fallback_skips"] == 3
     assert result["window_rebinds"] == 1 and result["focus_guard_trips"] == 0
     assert result["preview_frames"] == 0
     assert result["window_target"] == {"pid": 42, "window_id": 7, "app_name": "Notes"}
-    startup_events = [json.loads(line) for line in stream.lines if json.loads(line)["type"] == "startup"]
-    assert [event["phase"] for event in startup_events] == ["api_client", "computer", "target", "model"]
-    action = next(json.loads(line) for line in stream.lines if json.loads(line)["type"] == "action")
+    startup_events = [
+        json.loads(line)
+        for line in stream.lines
+        if json.loads(line)["type"] == "startup"
+    ]
+    assert [event["phase"] for event in startup_events] == [
+        "api_client",
+        "computer",
+        "target",
+        "model",
+    ]
+    action = next(
+        json.loads(line)
+        for line in stream.lines
+        if json.loads(line)["type"] == "action"
+    )
     assert action["delivery_mode"] == "background" and action["route"] == "pixel"
     assert action["effect"] is None and action["escalated"] is False
 
@@ -2844,15 +3311,22 @@ async def test_run_request_background_binds_the_window_and_never_fronts(monkeypa
     assert computer.window_targets[-1] == _FakeWindowTarget(43, 9, app_name="Notes")
 
 
-async def test_run_request_foreground_does_not_encode_the_invalidated_prelaunch_frame(monkeypatch):
+async def test_run_request_foreground_does_not_encode_the_invalidated_prelaunch_frame(
+    monkeypatch,
+):
     _FakeComputer.instances.clear()
     prepared = AsyncMock(return_value={"name": "Notes", "pid": 42, "window_id": 7})
     _patch_runner_sdk(monkeypatch)
     monkeypatch.setattr(runner_module, "prepare_app", prepared)
     stream = _CollectStream()
-    request = parse_request(_valid_request(app="Notes", deadline_ms=int((time.time() + 60) * 1000)))
+    request = parse_request(
+        _valid_request(app="Notes", deadline_ms=int((time.time() + 60) * 1000))
+    )
 
-    assert await runner_module.run_request(request, Emitter(stream), "yt-secret") == "completed"
+    assert (
+        await runner_module.run_request(request, Emitter(stream), "yt-secret")
+        == "completed"
+    )
 
     computer = _FakeComputer.instances[-1]
     assert computer.screenshots == 0
@@ -2867,16 +3341,22 @@ async def test_pinned_sdk_launch_invalidates_its_cached_prelaunch_frame():
     from yutori.navigator.macos import MacOSComputer
 
     transport = SimpleNamespace(
-        call_tool=AsyncMock(return_value={"structuredContent": {"name": "Notes", "pid": 42}})
+        call_tool=AsyncMock(
+            return_value={"structuredContent": {"name": "Notes", "pid": 42}}
+        )
     )
-    computer = MacOSComputer(transport=transport, owns_transport=False, presentation=False)
+    computer = MacOSComputer(
+        transport=transport, owns_transport=False, presentation=False
+    )
     computer._initial_png = b"stale desktop"
 
     assert await computer.launch_app(name="Notes") == {"name": "Notes", "pid": 42}
     assert computer._initial_png is None
 
 
-async def test_run_request_background_without_sdk_support_fails_before_touching_the_desktop(monkeypatch):
+async def test_run_request_background_without_sdk_support_fails_before_touching_the_desktop(
+    monkeypatch,
+):
     class Untouchable:
         def __init__(self, **_kwargs):
             raise AssertionError("MacOSComputer must not be constructed")
@@ -2885,7 +3365,12 @@ async def test_run_request_background_without_sdk_support_fails_before_touching_
     monkeypatch.setattr(runner_module, "_supports_background_mode", lambda: False)
     stream = _CollectStream()
 
-    assert await runner_module.run_request(parse_request(_background_request()), Emitter(stream), "k") == "failed"
+    assert (
+        await runner_module.run_request(
+            parse_request(_background_request()), Emitter(stream), "k"
+        )
+        == "failed"
+    )
 
     (event,) = [json.loads(line) for line in stream.lines]
     assert event["type"] == "error" and event["code"] == "UNSUPPORTED_MODE"
@@ -2906,25 +3391,43 @@ async def test_action_reporter_reports_the_delivery_the_sdk_observed():
     computer.action_outcomes.extend(
         [
             SimpleNamespace(
-                requested_delivery="background", route="accessibility", effect="unverifiable", escalated=False,
+                requested_delivery="background",
+                route="accessibility",
+                effect="unverifiable",
+                escalated=False,
                 refusal_code=None,
             ),
             SimpleNamespace(
-                requested_delivery="foreground", route="synthetic_events", effect="unverifiable", escalated=True,
+                requested_delivery="foreground",
+                route="synthetic_events",
+                effect="unverifiable",
+                escalated=True,
                 refusal_code="delivery_failed",
             ),
             SimpleNamespace(
-                requested_delivery="background", route="synthetic_events", effect="confirmed", escalated=False,
+                requested_delivery="background",
+                route="synthetic_events",
+                effect="confirmed",
+                escalated=False,
                 refusal_code=None,
             ),
         ]
     )
     await reporter.on_computer_call_start(item)
     await reporter.on_computer_call_end(item, [{"output": "ok"}])
-    await reporter.on_computer_call_start({"name": "bash", "arguments": {"command": "ls"}})
-    await reporter.on_computer_call_end({"name": "bash", "arguments": {"command": "ls"}}, [{"output": "ok"}])
+    await reporter.on_computer_call_start(
+        {"name": "bash", "arguments": {"command": "ls"}}
+    )
+    await reporter.on_computer_call_end(
+        {"name": "bash", "arguments": {"command": "ls"}}, [{"output": "ok"}]
+    )
     first, second = (json.loads(line) for line in stream.lines)
-    assert (first["delivery_mode"], first["route"], first["effect"], first["escalated"]) == (
+    assert (
+        first["delivery_mode"],
+        first["route"],
+        first["effect"],
+        first["escalated"],
+    ) == (
         "foreground",
         "synthetic_events",
         "confirmed",
@@ -2932,11 +3435,87 @@ async def test_action_reporter_reports_the_delivery_the_sdk_observed():
     )
     assert first["refusal_code"] == "delivery_failed"
     # No new driver outcome for the shell call: fall back to the configured mode.
-    assert (second["delivery_mode"], second["route"], second["effect"], second["escalated"]) == (
+    assert (
+        second["delivery_mode"],
+        second["route"],
+        second["effect"],
+        second["escalated"],
+    ) == (
         "background",
         "pixel",
         None,
         False,
+    )
+
+
+async def test_action_reporter_lists_every_delivery_attempt_of_a_call():
+    computer = SimpleNamespace(action_outcomes=[])
+    stream = _CollectStream()
+    reporter = ActionReporter(
+        Emitter(stream),
+        time.monotonic(),
+        delivery_mode="background",
+        action_delivery=runner_module._action_delivery(computer),
+    )
+    item = {"name": "computer_batch", "arguments": {"actions": []}}
+    refused = {
+        "tool": "press_key",
+        "rung": "background",
+        "requested_delivery": "background",
+        "reported_delivery": None,
+        "effect": "refused",
+        "route": None,
+        "path": None,
+        "escalated": False,
+        "refusal_code": "same_pid_keyboard_ambiguity",
+        "recommended": "accessibility",
+        "reason": "pid 9 owns 1 other eligible top-level window(s)",
+        "detail": "Background input refused (same_pid_keyboard_ambiguity)",
+        "key": "return",
+        "text_chars": None,
+        "element_addressed": False,
+        "landed": False,
+    }
+    fronted = {
+        **refused,
+        "rung": "foreground",
+        "requested_delivery": "foreground",
+        "reported_delivery": "foreground",
+    }
+    fronted.update(
+        {
+            "effect": "unverifiable",
+            "path": "key_events_fg",
+            "escalated": True,
+            "refusal_code": None,
+        }
+    )
+    fronted.update(
+        {
+            "recommended": None,
+            "reason": None,
+            "detail": "✅ Pressed return on pid 9 (delivery_mode:foreground).",
+            "landed": True,
+        }
+    )
+    # An SDK with as_telemetry() and an older one carrying only the bare attributes both report.
+    computer.action_outcomes.extend(
+        [
+            SimpleNamespace(**{k: v for k, v in refused.items() if k != "landed"}),
+            SimpleNamespace(
+                **{k: v for k, v in fronted.items() if k != "landed"},
+                as_telemetry=lambda: fronted,
+            ),
+        ]
+    )
+    await reporter.on_computer_call_start(item)
+    await reporter.on_computer_call_end(item, [{"output": "ok"}])
+    (event,) = (json.loads(line) for line in stream.lines)
+    assert event["deliveries"] == [refused, fronted]
+    assert (event["delivery_mode"], event["escalated"], event["refusal_code"]) == (
+        "foreground",
+        True,
+        "same_pid_keyboard_ambiguity",
     )
 
 
@@ -2954,11 +3533,19 @@ def _background_window(window_id: int = 7, **overrides: Any) -> dict[str, Any]:
 
 async def test_prepare_app_background_unhides_and_returns_the_window_without_fronting():
     computer = SimpleNamespace(
-        launch_app=AsyncMock(return_value={"pid": 42, "name": "Notes", "windows": [_background_window()]}),
+        launch_app=AsyncMock(
+            return_value={"pid": 42, "name": "Notes", "windows": [_background_window()]}
+        ),
         unhide_app=AsyncMock(return_value=True),
-        bring_to_front=AsyncMock(side_effect=AssertionError("background runs must never front the app")),
+        bring_to_front=AsyncMock(
+            side_effect=AssertionError("background runs must never front the app")
+        ),
         list_windows=AsyncMock(
-            return_value={"windows": [_background_window(is_on_screen=True, on_current_space=True)]}
+            return_value={
+                "windows": [
+                    _background_window(is_on_screen=True, on_current_space=True)
+                ]
+            }
         ),
         wait=AsyncMock(),
     )
@@ -2984,7 +3571,9 @@ async def test_prepare_app_background_refreshes_a_transient_launch_window():
         z_index=10,
     )
     computer = SimpleNamespace(
-        launch_app=AsyncMock(return_value={"pid": 42, "name": "Yutori Input Probe", "windows": [helper]}),
+        launch_app=AsyncMock(
+            return_value={"pid": 42, "name": "Yutori Input Probe", "windows": [helper]}
+        ),
         unhide_app=AsyncMock(return_value=True),
         list_windows=AsyncMock(
             return_value={
@@ -3002,7 +3591,9 @@ async def test_prepare_app_background_refreshes_a_transient_launch_window():
     assert target["window_id"] == 9
 
 
-async def test_prepare_app_background_fallback_skips_visible_host_for_offscreen_content(monkeypatch):
+async def test_prepare_app_background_fallback_skips_visible_host_for_offscreen_content(
+    monkeypatch,
+):
     from yutori_mcp.computer_use import app as app_module
 
     monkeypatch.setattr(app_module, "_WINDOW_POLL_ATTEMPTS", 2)
@@ -3040,7 +3631,11 @@ async def test_prepare_app_background_polls_for_a_window_after_a_cold_launch():
         list_windows=AsyncMock(
             side_effect=[
                 {"windows": []},
-                {"windows": [_background_window(9, is_on_screen=True, on_current_space=True)]},
+                {
+                    "windows": [
+                        _background_window(9, is_on_screen=True, on_current_space=True)
+                    ]
+                },
             ]
         ),
         wait=AsyncMock(),
@@ -3056,7 +3651,11 @@ async def test_prepare_app_background_still_resolves_a_window_when_unhide_fails(
         launch_app=AsyncMock(return_value={"pid": 42, "name": "Notes", "windows": []}),
         unhide_app=AsyncMock(side_effect=CuaDriverToolError("unhide failed")),
         list_windows=AsyncMock(
-            return_value={"windows": [_background_window(9, is_on_screen=True, on_current_space=True)]}
+            return_value={
+                "windows": [
+                    _background_window(9, is_on_screen=True, on_current_space=True)
+                ]
+            }
         ),
         wait=AsyncMock(),
     )
@@ -3068,7 +3667,9 @@ async def test_prepare_app_background_still_resolves_a_window_when_unhide_fails(
     computer.list_windows.assert_awaited_once_with(42)
 
 
-async def test_prepare_app_background_returns_valid_app_when_no_window_appears(monkeypatch):
+async def test_prepare_app_background_returns_valid_app_when_no_window_appears(
+    monkeypatch,
+):
     from yutori_mcp.computer_use import app as app_module
 
     monkeypatch.setattr(app_module, "_WINDOW_POLL_ATTEMPTS", 2)
@@ -3078,12 +3679,21 @@ async def test_prepare_app_background_returns_valid_app_when_no_window_appears(m
         list_windows=AsyncMock(return_value={"windows": []}),
         wait=AsyncMock(),
     )
-    assert await prepare_app(computer, "Notes", None, front=False) == {"name": "Notes", "pid": 42, "window_id": None}
+    assert await prepare_app(computer, "Notes", None, front=False) == {
+        "name": "Notes",
+        "pid": 42,
+        "window_id": None,
+    }
     assert computer.list_windows.await_count == 2
 
 
 def test_pick_best_window_prefers_offscreen_content_windows_over_helper_strips():
-    strip = {"window_id": 1, "bounds": {"width": 3360, "height": 30}, "is_on_screen": False, "z_index": 114}
+    strip = {
+        "window_id": 1,
+        "bounds": {"width": 3360, "height": 30},
+        "is_on_screen": False,
+        "z_index": 114,
+    }
     content = _background_window(2, bounds={"width": 230, "height": 408}, z_index=67)
     assert pick_best_window([strip, content])["window_id"] == 2
     visible = _background_window(3, is_on_screen=True, on_current_space=True, z_index=1)
@@ -3104,35 +3714,58 @@ def test_format_result_renders_background_fields():
             "background_refusals": 2,
             "window_target": {"pid": 42, "window_id": 7, "app_name": "Notes"},
             "actions": [
-                _action_event(route="accessibility", effect="confirmed", escalated=True, duration_ms=5)
+                _action_event(
+                    route="accessibility",
+                    effect="confirmed",
+                    escalated=True,
+                    duration_ms=5,
+                )
             ],
         }
     )
     assert "Delivery mode: background" in text
     assert "Window target: Notes (pid 42, window 7)" in text
     assert "Delivery: 1 foreground escalation(s), 2 background refusal(s)" in text
-    assert "mode: foreground; route: accessibility; refusal: None); effect: confirmed [fronted] took 5 ms" in text
+    assert (
+        "mode: foreground; route: accessibility; refusal: None); effect: confirmed [fronted] took 5 ms"
+        in text
+    )
     assert "Menu bar status: active; capture: jpeg; N2 request: webp" in text
     assert "Reasoning overlay" not in text
 
 
 def test_format_result_reports_skipped_retries_only_when_present():
     base = {"outcome": "completed", "delivery_mode": "background", "final_text": "done"}
-    assert "Delivery: 0 foreground escalation(s), 0 background refusal(s)" in format_result(base)
+    assert (
+        "Delivery: 0 foreground escalation(s), 0 background refusal(s)"
+        in format_result(base)
+    )
     assert "skipped" not in format_result(base)
     assert "Activity window" not in format_result(base)
-    assert "Activity window: 7 frame(s) streamed while it was open" in format_result({**base, "preview_frames": 7})
+    assert "Activity window: 7 frame(s) streamed while it was open" in format_result(
+        {**base, "preview_frames": 7}
+    )
     with_skips = format_result({**base, "fallback_skips": 2})
-    assert "Delivery: 0 foreground escalation(s), 0 background refusal(s), 2 retry(ies) skipped after the window changed" in with_skips
+    assert (
+        "Delivery: 0 foreground escalation(s), 0 background refusal(s), 2 retry(ies) skipped after the window changed"
+        in with_skips
+    )
 
 
 def test_format_result_foreground_output_has_no_background_lines():
-    text = format_result({"outcome": "completed", "delivery_mode": "foreground", "final_text": "done"})
+    text = format_result(
+        {"outcome": "completed", "delivery_mode": "foreground", "final_text": "done"}
+    )
     assert "Delivery:" not in text and "Window target" not in text
 
 
 def test_terminal_result_and_failure_carry_the_requested_mode():
-    assert terminal_result("limit", "x", delivery_mode=DELIVERY_MODE_BACKGROUND)["delivery_mode"] == "background"
+    assert (
+        terminal_result("limit", "x", delivery_mode=DELIVERY_MODE_BACKGROUND)[
+            "delivery_mode"
+        ]
+        == "background"
+    )
     assert failure("x", delivery_mode=DELIVERY_MODE_BACKGROUND) == terminal_result(
         "failed", "x", delivery_mode=DELIVERY_MODE_BACKGROUND
     )
@@ -3146,7 +3779,10 @@ def test_docs_describe_background_mode():
     assert "no background runs" not in (root / "README.md").read_text()
     skill = " ".join((root / "skills/06-computer-use/SKILL.md").read_text().split())
     assert "--mode background" in skill
-    assert "Do not ask the user to select an app" in skill and "Background mode is the default" in skill
+    assert (
+        "Do not ask the user to select an app" in skill
+        and "Background mode is the default" in skill
+    )
     assert "Claude Code, including Claude sessions hosted by Conductor" in skill
     assert "run the CLI through the Bash tool with stdout attached" in skill
     assert "does not expose MCP progress or log notifications" in skill
@@ -3185,10 +3821,14 @@ def test_iphone_mirroring_skill_uses_the_scoped_safe_route():
 # --- computer-use stop --------------------------------------------------------------------
 
 
-async def test_supervisor_advertises_the_runner_pid_only_while_it_runs(monkeypatch, tmp_path):
+async def test_supervisor_advertises_the_runner_pid_only_while_it_runs(
+    monkeypatch, tmp_path
+):
     pid_path = tmp_path / "computer-use.pid"
     monkeypatch.setattr(supervisor, "runner_pid_path", lambda: pid_path)
-    process = _Process(_stream(json.dumps(_ready_event()), json.dumps(_result_event())), _stream())
+    process = _Process(
+        _stream(json.dumps(_ready_event()), json.dumps(_result_event())), _stream()
+    )
     seen: list[str] = []
 
     async def on_event(event):
@@ -3204,7 +3844,11 @@ def test_stop_active_run_signals_the_runner_process_group(monkeypatch, tmp_path)
     pid_path = tmp_path / "computer-use.pid"
     pid_path.write_text("4242\n")
     monkeypatch.setattr(supervisor, "runner_pid_path", lambda: pid_path)
-    monkeypatch.setattr(supervisor, "_process_command", lambda pid: f"python -I -m {supervisor.RUNNER_MODULE}")
+    monkeypatch.setattr(
+        supervisor,
+        "_process_command",
+        lambda pid: f"python -I -m {supervisor.RUNNER_MODULE}",
+    )
     with patch("yutori_mcp.computer_use.supervisor.os.killpg") as killpg:
         message = supervisor.stop_active_run()
     killpg.assert_called_once_with(4242, signal.SIGTERM)
@@ -3213,7 +3857,9 @@ def test_stop_active_run_signals_the_runner_process_group(monkeypatch, tmp_path)
 
 
 @pytest.mark.parametrize("command", [None, "/bin/bash -l"])
-def test_stop_active_run_ignores_and_removes_a_stale_pid_file(monkeypatch, tmp_path, command):
+def test_stop_active_run_ignores_and_removes_a_stale_pid_file(
+    monkeypatch, tmp_path, command
+):
     pid_path = tmp_path / "computer-use.pid"
     pid_path.write_text("4242\n")
     monkeypatch.setattr(supervisor, "runner_pid_path", lambda: pid_path)
@@ -3233,7 +3879,9 @@ def test_stop_active_run_reports_no_run_without_a_pid_file(monkeypatch, tmp_path
 def test_cli_stop_prints_the_stop_outcome(monkeypatch, capsys):
     from yutori_mcp.computer_use import cli
 
-    monkeypatch.setattr(cli, "stop_active_run", lambda: "No computer-use run is active.")
+    monkeypatch.setattr(
+        cli, "stop_active_run", lambda: "No computer-use run is active."
+    )
     parser = argparse.ArgumentParser()
     cli.register_parser(parser.add_subparsers(dest="command"))
     args = parser.parse_args(["computer-use", "stop"])
@@ -3252,11 +3900,19 @@ def test_batch_action_previews_describe_each_member_of_the_batch():
             {"action": "left_click", "coordinates": [412, 318], "modifier": "ctrl"},
             {"action": "type", "text": "yutori.com/company"},
             {"action": "key_press", "key": "cmd+l"},
-            {"action": "scroll", "coordinates": [500, 500], "direction": "down", "amount": 3},
+            {
+                "action": "scroll",
+                "coordinates": [500, 500],
+                "direction": "down",
+                "amount": 3,
+            },
             {"action": "wait", "duration": 1.5},
             # The nested envelope tool sets 20260812/20260815 advertise, which
             # flatten_batch_member() folds into the flat shape before rendering.
-            {"name": "drag", "arguments": {"start_coordinates": [10, 20], "coordinates": [30, 40]}},
+            {
+                "name": "drag",
+                "arguments": {"start_coordinates": [10, 20], "coordinates": [30, 40]},
+            },
         )
     )
     assert previews == [
@@ -3271,20 +3927,35 @@ def test_batch_action_previews_describe_each_member_of_the_batch():
 
 
 def test_batch_action_previews_only_apply_to_batches_and_survive_junk_members():
-    assert batch_action_previews({"name": "bash", "arguments": {"command": "ls"}}) is None
+    assert (
+        batch_action_previews({"name": "bash", "arguments": {"command": "ls"}}) is None
+    )
     assert batch_action_previews(_batch()) is None
-    assert batch_action_previews({"name": "computer_batch", "arguments": {"actions": "nope"}}) is None
+    assert (
+        batch_action_previews(
+            {"name": "computer_batch", "arguments": {"actions": "nope"}}
+        )
+        is None
+    )
     # A malformed coordinate pair is dropped rather than rendered or raised on.
-    assert batch_action_previews(_batch({"action": "left_click", "coordinates": [1]}, "junk")) == ["left_click"]
+    assert batch_action_previews(
+        _batch({"action": "left_click", "coordinates": [1]}, "junk")
+    ) == ["left_click"]
 
 
 def test_batch_action_previews_redact_a_secret_the_model_typed(monkeypatch):
     monkeypatch.setenv("DEMO_API_KEY", "super-secret-value")
-    (preview,) = batch_action_previews(_batch({"action": "type", "text": "super-secret-value"}))
+    (preview,) = batch_action_previews(
+        _batch({"action": "type", "text": "super-secret-value"})
+    )
     assert "super-secret-value" not in preview
-    (long_preview,) = batch_action_previews(_batch({"action": "type", "text": "y" * 200}))
+    (long_preview,) = batch_action_previews(
+        _batch({"action": "type", "text": "y" * 200})
+    )
     typed = long_preview.removeprefix('type "').removesuffix('"')
-    assert len(typed) == runner_module.TYPED_TEXT_PREVIEW_CHARACTERS and typed.endswith("\u2026")
+    assert len(typed) == runner_module.TYPED_TEXT_PREVIEW_CHARACTERS and typed.endswith(
+        "\u2026"
+    )
 
 
 async def test_action_events_carry_the_batch_detail_and_no_detail_for_other_tools():
@@ -3321,7 +3992,9 @@ _PLAIN_TERMINAL = Terminal(color=False, glyphs=False)
 def test_supports_glyphs_falls_back_for_an_ascii_stream():
     assert supports_glyphs(SimpleNamespace(encoding="utf-8")) is True
     assert supports_glyphs(SimpleNamespace(encoding="ascii")) is False
-    assert _PLAIN_TERMINAL.glyph("check").isascii() and _PLAIN_TERMINAL.rule("X").isascii()
+    assert (
+        _PLAIN_TERMINAL.glyph("check").isascii() and _PLAIN_TERMINAL.rule("X").isascii()
+    )
 
 
 def test_terminal_paints_only_when_color_is_on():
@@ -3344,7 +4017,13 @@ def test_format_terminal_action_shows_the_batch_members_and_the_shell_command():
     assert lines[0] == "v #4 computer_batch  1.6s | at 14.7s"
     assert [line.strip() for line in lines[1:]] == ["> left_click (1,2)", '> type "hi"']
     refused = format_terminal_action(
-        {"index": 0, "tool": "bash", "status": "refused", "refusal_code": "driver_refused", "command": "ls"},
+        {
+            "index": 0,
+            "tool": "bash",
+            "status": "refused",
+            "refusal_code": "driver_refused",
+            "command": "ls",
+        },
         _PLAIN_TERMINAL,
     )
     assert refused[0] == "x #0 bash refused (driver_refused)"
@@ -3366,19 +4045,33 @@ def test_format_terminal_result_leads_with_a_labeled_final_output_block():
     lines = [line for line in text.split("\n") if line.strip()]
     assert FINAL_OUTPUT_HEADING in lines[0]
     assert lines[1] == "Here are the 14 employees."
-    assert lines[3].startswith("v completed") and "4m 52.1s" in lines[3] and "35 model turns" in lines[3]
-    assert lines[4].strip() == f"version   yutori-mcp {MCP_VERSION}  |  yutori {SDK_VERSION}"
-    assert lines[5].split() == ["run", "https://platform.yutori.com/navigator/chats/abc"]
+    assert (
+        lines[3].startswith("v completed")
+        and "4m 52.1s" in lines[3]
+        and "35 model turns" in lines[3]
+    )
+    assert (
+        lines[4].strip()
+        == f"version   yutori-mcp {MCP_VERSION}  |  yutori {SDK_VERSION}"
+    )
+    assert lines[5].split() == [
+        "run",
+        "https://platform.yutori.com/navigator/chats/abc",
+    ]
 
 
 def test_format_terminal_result_omits_the_action_list_unless_asked():
     result = {
         "outcome": "failed",
         "delivery_mode": "foreground",
-        "actions": [{"index": 0, "tool": "bash", "status": "executed", "command": "ls"}],
+        "actions": [
+            {"index": 0, "tool": "bash", "status": "executed", "command": "ls"}
+        ],
     }
     assert "bash" not in format_terminal_result(result, _PLAIN_TERMINAL)
-    assert "bash" in format_terminal_result(result, _PLAIN_TERMINAL, include_actions=True)
+    assert "bash" in format_terminal_result(
+        result, _PLAIN_TERMINAL, include_actions=True
+    )
 
 
 def test_format_terminal_result_reports_the_background_surfaces():
@@ -3408,7 +4101,9 @@ def test_format_terminal_result_reports_the_background_surfaces():
 def test_cli_run_header_states_the_task_target_and_limits():
     from yutori_mcp.computer_use import cli
 
-    params = ComputerUseTaskInput(task="list the team", app="Safari", start_url="https://yutori.com", minutes=5)
+    params = ComputerUseTaskInput(
+        task="list the team", app="Safari", start_url="https://yutori.com", minutes=5
+    )
     text = cli.format_run_header(params, _PLAIN_TERMINAL)
     assert "task      list the team" in text
     assert "target    Safari  https://yutori.com" in text
@@ -3421,7 +4116,9 @@ async def test_cli_startup_printer_shows_phase_and_cumulative_timers(capsys):
     from yutori_mcp.computer_use import cli
 
     clock = iter((10.25, 10.5)).__next__
-    printer = cli._event_printer("foreground", "Safari", _PLAIN_TERMINAL, started_at=10.0, clock=clock)
+    printer = cli._event_printer(
+        "foreground", "Safari", _PLAIN_TERMINAL, started_at=10.0, clock=clock
+    )
 
     await printer(_ready_event())
     await printer(_startup_event(phase="target", duration_ms=120))
@@ -3468,7 +4165,9 @@ async def test_progress_reporter_folds_the_batch_detail_into_one_message():
 # ---------------------------------------------------------------------------
 
 
-def _configure_embedded_host(monkeypatch, tmp_path, *, binary_exists: bool = True) -> tuple[Path, Path]:
+def _configure_embedded_host(
+    monkeypatch, tmp_path, *, binary_exists: bool = True
+) -> tuple[Path, Path]:
     binary = tmp_path / "cua-driver"
     if binary_exists:
         binary.write_text("")
@@ -3506,7 +4205,9 @@ def test_embedded_host_requires_both_binary_and_socket(monkeypatch, tmp_path):
     assert preflight.find_cua_driver() is None
 
 
-def test_embedded_host_binary_replaces_the_app_bundle_and_path_discovery(monkeypatch, tmp_path):
+def test_embedded_host_binary_replaces_the_app_bundle_and_path_discovery(
+    monkeypatch, tmp_path
+):
     binary, sock = _configure_embedded_host(monkeypatch, tmp_path)
     monkeypatch.setattr(preflight, "DRIVER_PATHS", (tmp_path / "stale-cua-driver",))
     (tmp_path / "stale-cua-driver").write_text("")
@@ -3524,7 +4225,9 @@ def test_embedded_host_missing_binary_blocks(monkeypatch, tmp_path):
     assert preflight.find_cua_driver() is None
 
 
-def test_embedded_daemon_identity_is_the_listening_private_socket(monkeypatch, tmp_path):
+def test_embedded_daemon_identity_is_the_listening_private_socket(
+    monkeypatch, tmp_path
+):
     import shutil
     import socket as socket_module
     import tempfile
@@ -3572,9 +4275,18 @@ def _write_fake_mcp_proxy(path: Path, structured: dict[str, Any]) -> None:
     path.chmod(0o700)
 
 
-def test_embedded_permissions_come_from_the_check_permissions_tool(monkeypatch, tmp_path):
+def test_embedded_permissions_come_from_the_check_permissions_tool(
+    monkeypatch, tmp_path
+):
     binary, sock = _configure_embedded_host(monkeypatch, tmp_path)
-    _write_fake_mcp_proxy(binary, {"accessibility": True, "screen_recording": True, "source": {"attribution": "host"}})
+    _write_fake_mcp_proxy(
+        binary,
+        {
+            "accessibility": True,
+            "screen_recording": True,
+            "source": {"attribution": "host"},
+        },
+    )
 
     payload = preflight._embedded_permissions(preflight.embedded_driver_host())
 
@@ -3582,7 +4294,9 @@ def test_embedded_permissions_come_from_the_check_permissions_tool(monkeypatch, 
     assert preflight.check_permissions().ok
 
 
-def test_embedded_permissions_missing_grant_blocks_with_host_remediation(monkeypatch, tmp_path):
+def test_embedded_permissions_missing_grant_blocks_with_host_remediation(
+    monkeypatch, tmp_path
+):
     binary, _ = _configure_embedded_host(monkeypatch, tmp_path)
     _write_fake_mcp_proxy(binary, {"accessibility": True, "screen_recording": False})
 
@@ -3593,7 +4307,9 @@ def test_embedded_permissions_missing_grant_blocks_with_host_remediation(monkeyp
     assert "host application" in result.detail
 
 
-def test_embedded_permissions_proxy_failure_blocks_instead_of_raising(monkeypatch, tmp_path):
+def test_embedded_permissions_proxy_failure_blocks_instead_of_raising(
+    monkeypatch, tmp_path
+):
     binary, _ = _configure_embedded_host(monkeypatch, tmp_path)
     binary.write_text(f"#!{sys.executable}\nraise SystemExit(3)\n")
     binary.chmod(0o700)
@@ -3618,14 +4334,23 @@ def test_safe_permissions_ok_fails_closed_on_any_load_error(error):
     assert preflight._safe_permissions_ok(load) is False
 
 
-@pytest.mark.parametrize("payload,expected", [({"accessibility": True, "screen_recording": True}, True), ({}, False)])
+@pytest.mark.parametrize(
+    "payload,expected",
+    [({"accessibility": True, "screen_recording": True}, True), ({}, False)],
+)
 def test_safe_permissions_ok_delegates_to_permissions_ok_on_success(payload, expected):
     assert preflight._safe_permissions_ok(lambda: payload) is expected
 
 
-def test_check_permissions_standalone_driver_blocks_when_driver_json_raises(monkeypatch):
+def test_check_permissions_standalone_driver_blocks_when_driver_json_raises(
+    monkeypatch,
+):
     monkeypatch.setattr(preflight, "_configured_embedded_host", lambda: None)
-    monkeypatch.setattr(preflight, "_driver_json", Mock(side_effect=subprocess.CalledProcessError(1, ["cua-driver"])))
+    monkeypatch.setattr(
+        preflight,
+        "_driver_json",
+        Mock(side_effect=subprocess.CalledProcessError(1, ["cua-driver"])),
+    )
 
     result = preflight.check_permissions()
 
@@ -3634,9 +4359,13 @@ def test_check_permissions_standalone_driver_blocks_when_driver_json_raises(monk
 
 
 @pytest.mark.parametrize("capture_result", [None, subprocess.CompletedProcess([], 0)])
-def test_embedded_capture_failure_names_the_host_application(monkeypatch, tmp_path, capture_result):
+def test_embedded_capture_failure_names_the_host_application(
+    monkeypatch, tmp_path, capture_result
+):
     _configure_embedded_host(monkeypatch, tmp_path)
-    monkeypatch.setattr(preflight, "run_safely", lambda *_args, **_kwargs: capture_result)
+    monkeypatch.setattr(
+        preflight, "run_safely", lambda *_args, **_kwargs: capture_result
+    )
 
     result = preflight.check_capture()
 
@@ -3645,7 +4374,9 @@ def test_embedded_capture_failure_names_the_host_application(monkeypatch, tmp_pa
     assert "CuaDriver" not in result.remediation
 
 
-def test_child_environment_forwards_the_embedded_host_configuration(monkeypatch, tmp_path):
+def test_child_environment_forwards_the_embedded_host_configuration(
+    monkeypatch, tmp_path
+):
     binary, sock = _configure_embedded_host(monkeypatch, tmp_path)
     monkeypatch.setenv(preflight.ENV_DRIVER_EMBEDDED, "1")
     monkeypatch.setenv("CUA_DRIVER_RS_HOME", str(tmp_path / "state"))
@@ -3689,7 +4420,10 @@ def _request_payload(**overrides):
 
 def test_parse_request_defaults_show_stop_button_and_validates_it():
     assert parse_request(_request_payload())["show_stop_button"] is True
-    assert parse_request(_request_payload(show_stop_button=False))["show_stop_button"] is False
+    assert (
+        parse_request(_request_payload(show_stop_button=False))["show_stop_button"]
+        is False
+    )
     with pytest.raises(RequestError, match="show_stop_button must be a boolean"):
         parse_request(_request_payload(show_stop_button="no"))
 
@@ -3697,7 +4431,10 @@ def test_parse_request_defaults_show_stop_button_and_validates_it():
 def test_computer_kwargs_forward_the_stop_control_choice():
     request = parse_request(_request_payload(show_stop_button=False))
     kwargs = runner_module._computer_kwargs(
-        request, deadline=time.monotonic() + 60, cancellation=runner_module.CancellationLatch(), api_key="k"
+        request,
+        deadline=time.monotonic() + 60,
+        cancellation=runner_module.CancellationLatch(),
+        api_key="k",
     )
     assert kwargs["show_stop_button"] is False
     assert kwargs["presentation"] is True
@@ -3717,7 +4454,9 @@ def test_cli_run_and_doctor_parsers_accept_json_and_hide_stop_item():
 
     parser = argparse.ArgumentParser()
     cli.register_parser(parser.add_subparsers(dest="command"))
-    args = parser.parse_args(["computer-use", "run", "add a note", "--json", "--hide-stop-item"])
+    args = parser.parse_args(
+        ["computer-use", "run", "add a note", "--json", "--hide-stop-item"]
+    )
     assert args.json is True and args.hide_stop_item is True
     default = parser.parse_args(["computer-use", "run", "add a note"])
     assert default.json is False and default.hide_stop_item is False
@@ -3732,7 +4471,14 @@ def test_cli_run_parser_accepts_paired_stdin_token_arguments():
     cli.register_parser(parser.add_subparsers(dest="command"))
     run_id = uuid.uuid4()
     args = parser.parse_args(
-        ["computer-use", "run", "add a note", "--api-key-stdin", "--vm-run-id", str(run_id)]
+        [
+            "computer-use",
+            "run",
+            "add a note",
+            "--api-key-stdin",
+            "--vm-run-id",
+            str(run_id),
+        ]
     )
     assert args.api_key_stdin is True
     assert args.vm_run_id == run_id
@@ -3756,12 +4502,20 @@ def test_cli_rejects_vm_token_with_embedded_or_surrounding_whitespace(token):
         cli._read_vm_run_token(io.StringIO(f"{token}\n"))
 
 
-async def test_cli_run_streams_vm_token_without_resolving_a_stored_key(monkeypatch, capsys):
+async def test_cli_run_streams_vm_token_without_resolving_a_stored_key(
+    monkeypatch, capsys
+):
     from yutori_mcp.computer_use import cli
 
     token = "yvm_test-token"
     run_id = uuid.uuid4()
-    run = AsyncMock(return_value={"outcome": "completed", "delivery_mode": "foreground", "final_text": "done"})
+    run = AsyncMock(
+        return_value={
+            "outcome": "completed",
+            "delivery_mode": "foreground",
+            "final_text": "done",
+        }
+    )
     blocker_calls: list[bool] = []
 
     monkeypatch.setattr(sys, "stdin", io.StringIO(f"{token}\n"))
@@ -3772,7 +4526,12 @@ async def test_cli_run_streams_vm_token_without_resolving_a_stored_key(monkeypat
         lambda **kwargs: blocker_calls.append(kwargs["api_key_provided"]) or False,
     )
 
-    assert await cli._run_custom(_run_args(api_key_stdin=True, vm_run_id=run_id, json=True)) == 0
+    assert (
+        await cli._run_custom(
+            _run_args(api_key_stdin=True, vm_run_id=run_id, json=True)
+        )
+        == 0
+    )
 
     assert blocker_calls == [True]
     assert run.await_args.kwargs["api_key_override"] == token
@@ -3784,11 +4543,15 @@ async def test_cli_run_streams_vm_token_without_resolving_a_stored_key(monkeypat
     ("api_key_stdin", "vm_run_id"),
     [(True, None), (False, uuid.uuid4())],
 )
-async def test_cli_run_requires_stdin_token_and_run_id_together(api_key_stdin, vm_run_id):
+async def test_cli_run_requires_stdin_token_and_run_id_together(
+    api_key_stdin, vm_run_id
+):
     from yutori_mcp.computer_use import cli
 
     with pytest.raises(ValueError, match="must be provided together"):
-        await cli._run_custom(_run_args(api_key_stdin=api_key_stdin, vm_run_id=vm_run_id))
+        await cli._run_custom(
+            _run_args(api_key_stdin=api_key_stdin, vm_run_id=vm_run_id)
+        )
 
 
 @pytest.mark.parametrize(
@@ -3806,7 +4569,9 @@ async def test_cli_run_requires_stdin_token_and_run_id_together(api_key_stdin, v
         ),
     ],
 )
-async def test_cli_run_reports_stdin_credential_errors_as_json(monkeypatch, capsys, overrides, stdin, message):
+async def test_cli_run_reports_stdin_credential_errors_as_json(
+    monkeypatch, capsys, overrides, stdin, message
+):
     from yutori_mcp.computer_use import cli
 
     monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
@@ -3838,7 +4603,9 @@ def _json_lines(text: str) -> list[dict[str, Any]]:
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
-async def test_cli_run_json_streams_events_and_the_result_as_json_lines(monkeypatch, capsys):
+async def test_cli_run_json_streams_events_and_the_result_as_json_lines(
+    monkeypatch, capsys
+):
     from yutori_mcp.computer_use import cli
 
     action = _action_event(tool="computer_batch", index=0)
@@ -3846,7 +4613,12 @@ async def test_cli_run_json_streams_events_and_the_result_as_json_lines(monkeypa
     async def run(**kwargs):
         await kwargs["on_event"](_ready_event())
         await kwargs["on_event"](action)
-        return {"outcome": "completed", "delivery_mode": "foreground", "final_text": "done", "actions": [action]}
+        return {
+            "outcome": "completed",
+            "delivery_mode": "foreground",
+            "final_text": "done",
+            "actions": [action],
+        }
 
     monkeypatch.setattr(cli, "_blocked", lambda **_kwargs: False)
     monkeypatch.setattr(supervisor, "run_task", run)
@@ -3855,7 +4627,12 @@ async def test_cli_run_json_streams_events_and_the_result_as_json_lines(monkeypa
     assert await cli._run_custom(_run_args(json=True, hide_stop_item=True)) == 0
 
     lines = _json_lines(capsys.readouterr().out)
-    assert [line["type"] for line in lines] == ["preflight", "ready", "action", "result"]
+    assert [line["type"] for line in lines] == [
+        "preflight",
+        "ready",
+        "action",
+        "result",
+    ]
     assert isinstance(lines[0]["duration_ms"], int)
     assert lines[-1]["outcome"] == "completed" and lines[-1]["final_text"] == "done"
 
@@ -3863,7 +4640,13 @@ async def test_cli_run_json_streams_events_and_the_result_as_json_lines(monkeypa
 async def test_cli_run_json_forwards_the_stop_item_choice(monkeypatch, capsys):
     from yutori_mcp.computer_use import cli
 
-    run = AsyncMock(return_value={"outcome": "failed", "delivery_mode": "foreground", "final_text": "no"})
+    run = AsyncMock(
+        return_value={
+            "outcome": "failed",
+            "delivery_mode": "foreground",
+            "final_text": "no",
+        }
+    )
     monkeypatch.setattr(cli, "_blocked", lambda **_kwargs: False)
     monkeypatch.setattr(supervisor, "run_task", run)
     _patch_run_credentials(monkeypatch)
@@ -3881,7 +4664,11 @@ async def test_cli_run_json_reports_a_preflight_blocker_as_json(monkeypatch, cap
     from yutori_mcp.computer_use import cli
 
     monkeypatch.setattr(
-        cli, "first_blocker", lambda: preflight.CheckResult("driver app", False, "missing", "start the daemon")
+        cli,
+        "first_blocker",
+        lambda: preflight.CheckResult(
+            "driver app", False, "missing", "start the daemon"
+        ),
     )
     assert await cli._run_custom(_run_args(json=True)) == 1
     [line] = _json_lines(capsys.readouterr().out)
@@ -3903,7 +4690,9 @@ def test_doctor_json_lists_every_check_with_an_overall_verdict(monkeypatch, caps
         "run_checks",
         lambda: [
             preflight.CheckResult("runtime", True, "yutori ok"),
-            preflight.CheckResult("overlay", False, "not prepared", "run setup", blocking=False),
+            preflight.CheckResult(
+                "overlay", False, "not prepared", "run setup", blocking=False
+            ),
         ],
     )
     assert cli._dispatch_doctor(SimpleNamespace(json=True)) == 0
@@ -3913,19 +4702,37 @@ def test_doctor_json_lists_every_check_with_an_overall_verdict(monkeypatch, caps
     assert line["checks"][1]["blocking"] is False
 
     monkeypatch.setattr(
-        cli, "run_checks", lambda: [preflight.CheckResult("driver app", False, "missing", "start the daemon")]
+        cli,
+        "run_checks",
+        lambda: [
+            preflight.CheckResult("driver app", False, "missing", "start the daemon")
+        ],
     )
     assert cli._dispatch_doctor(SimpleNamespace(json=True)) == 1
     assert _json_lines(capsys.readouterr().out)[0]["ok"] is False
 
 
-def test_setup_skips_the_standalone_installer_for_an_embedded_host(monkeypatch, tmp_path, capsys):
+def test_setup_skips_the_standalone_installer_for_an_embedded_host(
+    monkeypatch, tmp_path, capsys
+):
     from yutori_mcp.computer_use import cli
 
     binary, _ = _configure_embedded_host(monkeypatch, tmp_path)
-    monkeypatch.setattr(cli, "check_runtime", lambda: preflight.CheckResult("Python runtime", True, "ok"))
-    monkeypatch.setattr(cli, "_download_installer", lambda _url: (_ for _ in ()).throw(AssertionError("must not download")))
-    monkeypatch.setattr(cli, "run_checks", lambda: [preflight.CheckResult("driver app", True, str(binary))])
+    monkeypatch.setattr(
+        cli,
+        "check_runtime",
+        lambda: preflight.CheckResult("Python runtime", True, "ok"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_download_installer",
+        lambda _url: (_ for _ in ()).throw(AssertionError("must not download")),
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_checks",
+        lambda: [preflight.CheckResult("driver app", True, str(binary))],
+    )
 
     assert cli._setup() == 0
     out = capsys.readouterr().out
@@ -3972,7 +4779,10 @@ def _activity_reporter():
     computer = _FakeActivityComputer()
     inner = _RecordingPresentation()
     reporter = runner_module.ActivityReporter(
-        Emitter(stream), computer, inner=inner, thumbnail=_FakeActivityComputer._thumbnail_jpeg
+        Emitter(stream),
+        computer,
+        inner=inner,
+        thumbnail=_FakeActivityComputer._thumbnail_jpeg,
     )
     return reporter, computer, inner, stream
 
@@ -3995,15 +4805,37 @@ async def test_activity_reporter_tees_presentation_events_into_sdk_shaped_rows()
     reporter, _computer, inner, stream = _activity_reporter()
     await reporter.present({"type": "task", "text": "Compute 9 * 9"})
     await reporter.present({"type": "reasoning", "text": "I should open Calculator."})
-    await reporter.present({"type": "action", "name": "left_click", "arguments": {"coordinates": [100, 20]}})
+    await reporter.present(
+        {
+            "type": "action",
+            "name": "left_click",
+            "arguments": {"coordinates": [100, 20]},
+        }
+    )
     await reporter.present({"type": "request"})  # nothing to show
     await reporter.present({"type": "final", "text": "81"})
 
-    assert [event["type"] for event in inner.events] == ["task", "reasoning", "action", "request", "final"]
-    entries = [event["entry"] for event in _events(stream) if event["type"] == "activity"]
-    assert [entry["kind"] for entry in entries] == ["task", "thinking", "action", "final"]
+    assert [event["type"] for event in inner.events] == [
+        "task",
+        "reasoning",
+        "action",
+        "request",
+        "final",
+    ]
+    entries = [
+        event["entry"] for event in _events(stream) if event["type"] == "activity"
+    ]
+    assert [entry["kind"] for entry in entries] == [
+        "task",
+        "thinking",
+        "action",
+        "final",
+    ]
     assert entries[0] == {"id": "entry-0", "kind": "task", "text": "Compute 9 * 9"}
-    assert entries[2]["text"] == "left click at (100, 20)" and entries[2]["icon"] == "click"
+    assert (
+        entries[2]["text"] == "left click at (100, 20)"
+        and entries[2]["icon"] == "click"
+    )
     assert entries[3]["text"] == "81"
 
 
@@ -4013,7 +4845,9 @@ async def test_activity_reporter_forwards_even_when_the_native_controller_fails(
             raise RuntimeError("host gone")
 
     stream = io.StringIO()
-    reporter = runner_module.ActivityReporter(Emitter(stream), _FakeActivityComputer(), inner=Failing())
+    reporter = runner_module.ActivityReporter(
+        Emitter(stream), _FakeActivityComputer(), inner=Failing()
+    )
     await reporter.present({"type": "reasoning", "text": "still reported"})
     assert _events(stream)[0]["entry"]["kind"] == "thinking"
 
@@ -4027,7 +4861,9 @@ async def test_activity_reporter_streams_one_frame_per_new_observation_with_the_
     computer.target_window = _FakeTarget()
     await reporter.on_computer_call_end({}, [])
     await reporter.on_computer_call_end({}, [])  # same capture: not repeated
-    computer.current_observation = _FakeObservation(capture_id=2, encoded_bytes=b"second")
+    computer.current_observation = _FakeObservation(
+        capture_id=2, encoded_bytes=b"second"
+    )
     await reporter.on_computer_call_end({}, [])
 
     frames = [event for event in _events(stream) if event["type"] == "frame"]
@@ -4041,7 +4877,9 @@ async def test_activity_reporter_revises_shell_rows_in_place_as_commands_finish(
     reporter, computer, _inner, stream = _activity_reporter()
     computer.shell_events = (ShellPresentationEvent("t1", "ls ~", False, "running"),)
     await reporter.on_computer_call_end({}, [])
-    computer.shell_events = (ShellPresentationEvent("t1", "ls ~", False, "completed", 0),)
+    computer.shell_events = (
+        ShellPresentationEvent("t1", "ls ~", False, "completed", 0),
+    )
     await reporter.present({"type": "request"})
     await reporter.present({"type": "request"})  # unchanged shell state: not repeated
 
@@ -4062,28 +4900,44 @@ def test_parse_request_defaults_presentation_and_validates_it():
 
 def test_parse_request_defaults_and_validates_background_focus_overlay():
     assert parse_request(_valid_request())["background_focus_overlay"] is False
-    parsed = parse_request(_valid_request(mode="background", background_focus_overlay=True))
+    parsed = parse_request(
+        _valid_request(mode="background", background_focus_overlay=True)
+    )
     assert parsed["background_focus_overlay"] is True
-    with pytest.raises(RequestError, match="background_focus_overlay must be a boolean"):
+    with pytest.raises(
+        RequestError, match="background_focus_overlay must be a boolean"
+    ):
         parse_request(_valid_request(background_focus_overlay="on"))
     with pytest.raises(RequestError, match="requires mode='background'"):
         parse_request(_valid_request(background_focus_overlay=True))
     with pytest.raises(RequestError, match="requires presentation"):
-        parse_request(_valid_request(mode="background", presentation=False, background_focus_overlay=True))
+        parse_request(
+            _valid_request(
+                mode="background", presentation=False, background_focus_overlay=True
+            )
+        )
 
 
 def test_computer_kwargs_forward_the_presentation_choice():
     request = parse_request(_valid_request(presentation=False))
     kwargs = runner_module._computer_kwargs(
-        request, deadline=time.monotonic() + 60, cancellation=runner_module.CancellationLatch(), api_key="k"
+        request,
+        deadline=time.monotonic() + 60,
+        cancellation=runner_module.CancellationLatch(),
+        api_key="k",
     )
     assert kwargs["presentation"] is False
 
 
 def test_computer_kwargs_enable_only_the_hosted_background_focus_overlay():
-    request = parse_request(_valid_request(mode="background", background_focus_overlay=True))
+    request = parse_request(
+        _valid_request(mode="background", background_focus_overlay=True)
+    )
     kwargs = runner_module._computer_kwargs(
-        request, deadline=time.monotonic() + 60, cancellation=runner_module.CancellationLatch(), api_key="k"
+        request,
+        deadline=time.monotonic() + 60,
+        cancellation=runner_module.CancellationLatch(),
+        api_key="k",
     )
     assert kwargs["background_focus_overlay"] is True
     assert kwargs["show_status_item"] is False
@@ -4099,17 +4953,41 @@ def test_agent_kwargs_route_presentation_through_the_activity_sink():
         request, completions=None, computer=computer, deadline=1.0, presentation=sink
     )
     assert routed["presentation"] is sink
-    default = runner_module._agent_base_kwargs(request, completions=None, computer=computer, deadline=1.0)
+    default = runner_module._agent_base_kwargs(
+        request, completions=None, computer=computer, deadline=1.0
+    )
     assert default["presentation"] is computer.presentation
 
 
 @pytest.mark.parametrize(
     ("event", "ok"),
     [
-        ({"type": "frame", "capture_id": 1, "media_type": "image/jpeg", "data": "AAAA"}, True),
-        ({"type": "frame", "capture_id": "1", "media_type": "image/jpeg", "data": "AAAA"}, False),
+        (
+            {
+                "type": "frame",
+                "capture_id": 1,
+                "media_type": "image/jpeg",
+                "data": "AAAA",
+            },
+            True,
+        ),
+        (
+            {
+                "type": "frame",
+                "capture_id": "1",
+                "media_type": "image/jpeg",
+                "data": "AAAA",
+            },
+            False,
+        ),
         ({"type": "frame", "capture_id": 1, "media_type": "image/jpeg"}, False),
-        ({"type": "activity", "entry": {"id": "entry-0", "kind": "thinking", "text": "x"}}, True),
+        (
+            {
+                "type": "activity",
+                "entry": {"id": "entry-0", "kind": "thinking", "text": "x"},
+            },
+            True,
+        ),
         ({"type": "activity", "entry": "not a row"}, False),
     ],
 )
@@ -4128,7 +5006,11 @@ async def test_run_task_request_carries_presentation(tmp_path):
 
 async def test_run_task_request_carries_background_focus_overlay(tmp_path):
     with _patched_run_task_supervise(tmp_path) as supervise:
-        await run_task(**_run_task_kwargs(tmp_path, mode="background", background_focus_overlay=True))
+        await run_task(
+            **_run_task_kwargs(
+                tmp_path, mode="background", background_focus_overlay=True
+            )
+        )
     request = supervise.await_args.kwargs["request"]
     assert request["background_focus_overlay"] is True
 
@@ -4139,7 +5021,10 @@ async def test_run_task_request_carries_background_focus_overlay(tmp_path):
             background_focus_overlay=True,
         )
     )
-    assert result["outcome"] == "failed" and "requires mode='background'" in result["final_text"]
+    assert (
+        result["outcome"] == "failed"
+        and "requires mode='background'" in result["final_text"]
+    )
 
 
 def test_cli_run_parser_accepts_no_presentation():
@@ -4147,7 +5032,12 @@ def test_cli_run_parser_accepts_no_presentation():
 
     parser = argparse.ArgumentParser()
     cli.register_parser(parser.add_subparsers(dest="command"))
-    assert parser.parse_args(["computer-use", "run", "x", "--no-presentation"]).no_presentation is True
+    assert (
+        parser.parse_args(
+            ["computer-use", "run", "x", "--no-presentation"]
+        ).no_presentation
+        is True
+    )
     assert parser.parse_args(["computer-use", "run", "x"]).no_presentation is False
 
 
@@ -4156,36 +5046,81 @@ def test_cli_run_parser_accepts_background_focus_overlay():
 
     parser = argparse.ArgumentParser()
     cli.register_parser(parser.add_subparsers(dest="command"))
-    enabled = parser.parse_args(["computer-use", "run", "x", "--mode", "background", "--background-focus-overlay"])
+    enabled = parser.parse_args(
+        [
+            "computer-use",
+            "run",
+            "x",
+            "--mode",
+            "background",
+            "--background-focus-overlay",
+        ]
+    )
     assert enabled.background_focus_overlay is True
-    assert parser.parse_args(["computer-use", "run", "x"]).background_focus_overlay is False
+    assert (
+        parser.parse_args(["computer-use", "run", "x"]).background_focus_overlay
+        is False
+    )
 
 
-async def test_cli_background_focus_overlay_forwards_and_rejects_incompatible_modes(monkeypatch):
+async def test_cli_background_focus_overlay_forwards_and_rejects_incompatible_modes(
+    monkeypatch,
+):
     from yutori_mcp.computer_use import cli
 
-    captured = AsyncMock(return_value={"outcome": "completed", "delivery_mode": "background", "final_text": "ok"})
+    captured = AsyncMock(
+        return_value={
+            "outcome": "completed",
+            "delivery_mode": "background",
+            "final_text": "ok",
+        }
+    )
     monkeypatch.setattr(cli, "_blocked", lambda **_kwargs: False)
     monkeypatch.setattr(supervisor, "run_task", captured)
     _patch_run_credentials(monkeypatch)
 
-    assert await cli._run_custom(_run_args(mode="background", background_focus_overlay=True)) == 0
+    assert (
+        await cli._run_custom(
+            _run_args(mode="background", background_focus_overlay=True)
+        )
+        == 0
+    )
     assert captured.await_args.kwargs["background_focus_overlay"] is True
     with pytest.raises(ValueError, match="requires --mode background"):
         await cli._run_custom(_run_args(background_focus_overlay=True))
     with pytest.raises(ValueError, match="cannot be combined"):
-        await cli._run_custom(_run_args(mode="background", background_focus_overlay=True, no_presentation=True))
+        await cli._run_custom(
+            _run_args(
+                mode="background", background_focus_overlay=True, no_presentation=True
+            )
+        )
 
 
-async def test_cli_run_forwards_presentation_and_json_streams_host_only_events(monkeypatch, capsys):
+async def test_cli_run_forwards_presentation_and_json_streams_host_only_events(
+    monkeypatch, capsys
+):
     from yutori_mcp.computer_use import cli
 
-    frame = {"type": "frame", "capture_id": 1, "media_type": "image/jpeg", "data": "AAAA"}
+    frame = {
+        "type": "frame",
+        "capture_id": 1,
+        "media_type": "image/jpeg",
+        "data": "AAAA",
+    }
 
     async def run(**kwargs):
         await kwargs["on_event"](frame)
-        await kwargs["on_event"]({"type": "activity", "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"}})
-        return {"outcome": "completed", "delivery_mode": "background", "final_text": "done"}
+        await kwargs["on_event"](
+            {
+                "type": "activity",
+                "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"},
+            }
+        )
+        return {
+            "outcome": "completed",
+            "delivery_mode": "background",
+            "final_text": "done",
+        }
 
     monkeypatch.setattr(cli, "_blocked", lambda **_kwargs: False)
     monkeypatch.setattr(supervisor, "run_task", run)
@@ -4194,9 +5129,20 @@ async def test_cli_run_forwards_presentation_and_json_streams_host_only_events(m
     args = _run_args(json=True, mode="background", app="Notes", no_presentation=True)
     assert await cli._run_custom(args) == 0
     lines = _json_lines(capsys.readouterr().out)
-    assert [line["type"] for line in lines] == ["preflight", "frame", "activity", "result"]
+    assert [line["type"] for line in lines] == [
+        "preflight",
+        "frame",
+        "activity",
+        "result",
+    ]
 
-    captured = AsyncMock(return_value={"outcome": "completed", "delivery_mode": "foreground", "final_text": "ok"})
+    captured = AsyncMock(
+        return_value={
+            "outcome": "completed",
+            "delivery_mode": "foreground",
+            "final_text": "ok",
+        }
+    )
     monkeypatch.setattr(supervisor, "run_task", captured)
     assert await cli._run_custom(_run_args(no_presentation=True)) == 0
     assert captured.await_args.kwargs["presentation"] is False
@@ -4206,9 +5152,18 @@ async def test_cli_run_forwards_presentation_and_json_streams_host_only_events(m
 async def test_cli_text_printer_ignores_host_only_events(capsys):
     from yutori_mcp.computer_use import cli
 
-    printer = cli._event_printer("foreground", None, _PLAIN_TERMINAL, started_at=0.0, clock=lambda: 1.0)
-    await printer({"type": "frame", "capture_id": 1, "media_type": "image/jpeg", "data": "AAAA"})
-    await printer({"type": "activity", "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"}})
+    printer = cli._event_printer(
+        "foreground", None, _PLAIN_TERMINAL, started_at=0.0, clock=lambda: 1.0
+    )
+    await printer(
+        {"type": "frame", "capture_id": 1, "media_type": "image/jpeg", "data": "AAAA"}
+    )
+    await printer(
+        {
+            "type": "activity",
+            "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"},
+        }
+    )
     assert capsys.readouterr().out == ""
 
 
@@ -4217,38 +5172,69 @@ async def test_progress_reporter_ignores_host_only_events():
 
     ctx = SimpleNamespace(report_progress=AsyncMock(), info=AsyncMock())
     on_event = server._progress_reporter(ctx, 10)
-    await on_event({"type": "frame", "capture_id": 1, "media_type": "image/jpeg", "data": "AAAA"})
-    await on_event({"type": "activity", "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"}})
+    await on_event(
+        {"type": "frame", "capture_id": 1, "media_type": "image/jpeg", "data": "AAAA"}
+    )
+    await on_event(
+        {
+            "type": "activity",
+            "entry": {"id": "entry-0", "kind": "thinking", "text": "hm"},
+        }
+    )
     ctx.report_progress.assert_not_awaited()
     ctx.info.assert_not_awaited()
 
 
 def test_parse_request_validates_host_window_ids():
     assert parse_request(_valid_request())["exclude_capture_window_ids"] == []
-    assert parse_request(_valid_request(exclude_capture_window_ids=[101, 202]))["exclude_capture_window_ids"] == [101, 202]
+    assert parse_request(_valid_request(exclude_capture_window_ids=[101, 202]))[
+        "exclude_capture_window_ids"
+    ] == [101, 202]
     for invalid in ("101", [0], [True], [1.5]):
-        with pytest.raises(RequestError, match="exclude_capture_window_ids must be a list of positive integer window ids"):
+        with pytest.raises(
+            RequestError,
+            match="exclude_capture_window_ids must be a list of positive integer window ids",
+        ):
             parse_request(_valid_request(exclude_capture_window_ids=invalid))
 
 
-def test_computer_kwargs_pass_host_window_ids_only_to_an_sdk_that_knows_them(monkeypatch):
+def test_computer_kwargs_pass_host_window_ids_only_to_an_sdk_that_knows_them(
+    monkeypatch,
+):
     request = parse_request(_valid_request(exclude_capture_window_ids=[101, 202]))
-    common = {"deadline": time.monotonic() + 60, "cancellation": runner_module.CancellationLatch(), "api_key": "k"}
+    common = {
+        "deadline": time.monotonic() + 60,
+        "cancellation": runner_module.CancellationLatch(),
+        "api_key": "k",
+    }
     monkeypatch.setattr(runner_module, "_computer_accepts", lambda parameter: True)
-    assert runner_module._computer_kwargs(request, **common)["exclude_capture_window_ids"] == (101, 202)
-    monkeypatch.setattr(runner_module, "_computer_accepts", lambda parameter: parameter == "scope")
-    assert "exclude_capture_window_ids" not in runner_module._computer_kwargs(request, **common)
-    background = parse_request(_valid_request(app="Notes", mode="background", exclude_capture_window_ids=[101]))
-    monkeypatch.setattr(runner_module, "_computer_accepts", lambda parameter: True)
-    assert "exclude_capture_window_ids" not in runner_module._computer_kwargs(background, **common), (
-        "window scope captures only the driven window; nothing to exclude"
+    assert runner_module._computer_kwargs(request, **common)[
+        "exclude_capture_window_ids"
+    ] == (101, 202)
+    monkeypatch.setattr(
+        runner_module, "_computer_accepts", lambda parameter: parameter == "scope"
     )
+    assert "exclude_capture_window_ids" not in runner_module._computer_kwargs(
+        request, **common
+    )
+    background = parse_request(
+        _valid_request(app="Notes", mode="background", exclude_capture_window_ids=[101])
+    )
+    monkeypatch.setattr(runner_module, "_computer_accepts", lambda parameter: True)
+    assert "exclude_capture_window_ids" not in runner_module._computer_kwargs(
+        background, **common
+    ), "window scope captures only the driven window; nothing to exclude"
 
 
 async def test_run_task_and_cli_carry_host_window_ids(monkeypatch, tmp_path, capsys):
     with _patched_run_task_supervise(tmp_path) as supervise:
-        await run_task(**_run_task_kwargs(tmp_path, exclude_capture_window_ids=(101, 202)))
-    assert supervise.await_args.kwargs["request"]["exclude_capture_window_ids"] == [101, 202]
+        await run_task(
+            **_run_task_kwargs(tmp_path, exclude_capture_window_ids=(101, 202))
+        )
+    assert supervise.await_args.kwargs["request"]["exclude_capture_window_ids"] == [
+        101,
+        202,
+    ]
     with _patched_run_task_supervise(tmp_path) as supervise:
         await run_task(**_run_task_kwargs(tmp_path))
     assert supervise.await_args.kwargs["request"]["exclude_capture_window_ids"] == []
@@ -4258,16 +5244,35 @@ async def test_run_task_and_cli_carry_host_window_ids(monkeypatch, tmp_path, cap
     parser = argparse.ArgumentParser()
     cli.register_parser(parser.add_subparsers(dest="command"))
     parsed = parser.parse_args(
-        ["computer-use", "run", "x", "--exclude-capture-window", "101", "--exclude-capture-window", "202"]
+        [
+            "computer-use",
+            "run",
+            "x",
+            "--exclude-capture-window",
+            "101",
+            "--exclude-capture-window",
+            "202",
+        ]
     )
     assert parsed.exclude_capture_windows == [101, 202]
-    assert parser.parse_args(["computer-use", "run", "x"]).exclude_capture_windows is None
+    assert (
+        parser.parse_args(["computer-use", "run", "x"]).exclude_capture_windows is None
+    )
 
-    captured = AsyncMock(return_value={"outcome": "completed", "delivery_mode": "foreground", "final_text": "ok"})
+    captured = AsyncMock(
+        return_value={
+            "outcome": "completed",
+            "delivery_mode": "foreground",
+            "final_text": "ok",
+        }
+    )
     monkeypatch.setattr(cli, "_blocked", lambda **_kwargs: False)
     monkeypatch.setattr(supervisor, "run_task", captured)
     _patch_run_credentials(monkeypatch)
-    assert await cli._run_custom(_run_args(json=True, exclude_capture_windows=[101, 202])) == 0
+    assert (
+        await cli._run_custom(_run_args(json=True, exclude_capture_windows=[101, 202]))
+        == 0
+    )
     assert captured.await_args.kwargs["exclude_capture_window_ids"] == (101, 202)
     capsys.readouterr()
 
@@ -4278,23 +5283,26 @@ async def test_run_request_without_app_starts_background_with_inventory_and_sele
     _FakeComputer.instances.clear()
     _FakeAgent.instances.clear()
     _patch_runner_sdk(monkeypatch)
-    monkeypatch.setattr(runner_module, '_supports_background_mode', lambda: True)
+    monkeypatch.setattr(runner_module, "_supports_background_mode", lambda: True)
     prepared = AsyncMock()
-    monkeypatch.setattr(runner_module, 'prepare_app', prepared)
+    monkeypatch.setattr(runner_module, "prepare_app", prepared)
     stream = _CollectStream()
     request = parse_request(_background_request(app=None))
 
-    assert await runner_module.run_request(request, Emitter(stream), 'yt-secret') == 'completed'
+    assert (
+        await runner_module.run_request(request, Emitter(stream), "yt-secret")
+        == "completed"
+    )
     prepared.assert_not_awaited()
     computer = _FakeComputer.instances[-1]
     agent = _FakeAgent.instances[-1]
-    assert computer.kwargs['scope'] == 'window'
+    assert computer.kwargs["scope"] == "window"
     assert computer.screenshots == 0
-    assert agent.kwargs['tools'][0]['function']['name'] == 'select_app'
-    assert 'Available apps' in agent.kwargs['system_prompt']
-    assert 'Initial application: none' in agent.kwargs['system_prompt']
-    assert computer in agent.kwargs['callbacks']
-    assert json.loads(stream.lines[-1])['delivery_mode'] == 'background'
+    assert agent.kwargs["tools"][0]["function"]["name"] == "select_app"
+    assert "Available apps" in agent.kwargs["system_prompt"]
+    assert "Initial application: none" in agent.kwargs["system_prompt"]
+    assert computer in agent.kwargs["callbacks"]
+    assert json.loads(stream.lines[-1])["delivery_mode"] == "background"
 
 
 # --- Prewarmed (standby) runners -------------------------------------------------------------
@@ -4305,8 +5313,12 @@ def _prewarmed(process=None, **ready_overrides) -> supervisor.PrewarmedRunner:
     return supervisor.PrewarmedRunner(process, _ready_event(**ready_overrides))
 
 
-async def test_supervisor_takes_over_a_prewarmed_runner_and_replays_its_ready(monkeypatch):
-    process = _Process(_stream(json.dumps(_action_event()), json.dumps(_result_event())), _stream(""))
+async def test_supervisor_takes_over_a_prewarmed_runner_and_replays_its_ready(
+    monkeypatch,
+):
+    process = _Process(
+        _stream(json.dumps(_action_event()), json.dumps(_result_event())), _stream("")
+    )
     runner = _prewarmed(process, reasoning_overlay_requested=True)
     recorded: list[int] = []
     monkeypatch.setattr(supervisor, "_record_runner_pid", recorded.append)
@@ -4328,24 +5340,35 @@ async def test_supervisor_takes_over_a_prewarmed_runner_and_replays_its_ready(mo
     create.assert_not_awaited()
     assert result["outcome"] == "completed"
     assert process.stdin.data.splitlines() == [b"yt-key", b'{"type":"run"}']
-    assert recorded == [process.pid], "only a runner that has its request is advertised to `stop`"
+    assert recorded == [process.pid], (
+        "only a runner that has its request is advertised to `stop`"
+    )
     assert [event["type"] for event in seen] == ["ready", "action"]
     assert seen[0]["reasoning_overlay_requested"] is True
 
 
 async def test_prewarm_waits_for_a_valid_ready():
     process = _Process(_stream(json.dumps(_ready_event())), _stream(""))
-    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)) as create:
+    with patch(
+        "asyncio.create_subprocess_exec", AsyncMock(return_value=process)
+    ) as create:
         runner = await supervisor.prewarm_runner(prefetch_catalog=False)
     assert runner.process is process and runner.alive
     assert runner.ready_event["type"] == "ready"
     assert create.await_args.kwargs["start_new_session"] is True
-    assert process.stdin.data == b"", "no credential or request is sent while on standby"
+    assert process.stdin.data == b"", (
+        "no credential or request is sent while on standby"
+    )
 
 
 @pytest.mark.parametrize(
     "line",
-    [json.dumps(_ready_event(sdk_version="0.0.1")), json.dumps({"type": "action"}), "not json", ""],
+    [
+        json.dumps(_ready_event(sdk_version="0.0.1")),
+        json.dumps({"type": "action"}),
+        "not json",
+        "",
+    ],
 )
 async def test_prewarm_rejects_a_runner_that_does_not_report_a_valid_ready(line):
     process = _Process(_stream(line) if line else _stream(), _stream(""))
@@ -4356,7 +5379,9 @@ async def test_prewarm_rejects_a_runner_that_does_not_report_a_valid_ready(line)
 
 
 async def test_stopping_a_prewarmed_runner_closes_its_stdin_first():
-    process = SimpleNamespace(pid=123, returncode=None, stdin=_Writer(), wait=AsyncMock(return_value=0))
+    process = SimpleNamespace(
+        pid=123, returncode=None, stdin=_Writer(), wait=AsyncMock(return_value=0)
+    )
     with patch("yutori_mcp.computer_use.supervisor.os.killpg"):
         await _stop_process_group(process)
     assert process.stdin.closed, "a runner blocked reading its request only notices EOF"
@@ -4372,7 +5397,9 @@ async def test_run_task_discards_an_unused_prewarmed_runner(tmp_path):
     discard.assert_awaited_once_with(runner)
 
 
-async def test_run_task_passes_a_live_prewarmed_runner_and_replaces_a_dead_one(tmp_path):
+async def test_run_task_passes_a_live_prewarmed_runner_and_replaces_a_dead_one(
+    tmp_path,
+):
     live = _prewarmed()
     with _patched_run_task_supervise(tmp_path) as supervise:
         await run_task(**_run_task_kwargs(tmp_path), prewarmed=live)
@@ -4389,9 +5416,22 @@ def test_standby_request_parses_with_the_run_parser():
     from yutori_mcp.computer_use import cli
 
     args = cli.parse_standby_request(
-        json.dumps(["--mode", "background", "--app", "Safari", "--exclude-capture-window", "7", "--", "-dash task"])
+        json.dumps(
+            [
+                "--mode",
+                "background",
+                "--app",
+                "Safari",
+                "--exclude-capture-window",
+                "7",
+                "--",
+                "-dash task",
+            ]
+        )
     )
-    assert args.task == "-dash task" and args.app == "Safari" and args.mode == "background"
+    assert (
+        args.task == "-dash task" and args.app == "Safari" and args.mode == "background"
+    )
     assert args.exclude_capture_windows == [7]
     assert args.json is True
 
@@ -4412,12 +5452,16 @@ def test_standby_request_rejects_malformed_or_credential_bearing_requests(line):
         cli.parse_standby_request(line)
 
 
-async def test_standby_announces_itself_then_runs_the_request_on_the_prewarmed_runner(monkeypatch, capsys):
+async def test_standby_announces_itself_then_runs_the_request_on_the_prewarmed_runner(
+    monkeypatch, capsys
+):
     from yutori_mcp.computer_use import cli
 
     runner = _prewarmed()
     monkeypatch.setattr(cli, "prewarm_runner", AsyncMock(return_value=runner))
-    monkeypatch.setattr(cli, "_read_standby_request", AsyncMock(return_value=json.dumps(["open notes"])))
+    monkeypatch.setattr(
+        cli, "_read_standby_request", AsyncMock(return_value=json.dumps(["open notes"]))
+    )
     run_custom = AsyncMock(return_value=0)
     monkeypatch.setattr(cli, "_run_custom", run_custom)
     discard = AsyncMock()
@@ -4438,13 +5482,17 @@ async def test_standby_announces_itself_then_runs_the_request_on_the_prewarmed_r
         (AsyncMock(return_value="not json"), "INVALID_REQUEST", 1),
     ],
 )
-async def test_standby_that_never_runs_releases_its_runner(monkeypatch, capsys, read, code, exit_code):
+async def test_standby_that_never_runs_releases_its_runner(
+    monkeypatch, capsys, read, code, exit_code
+):
     from yutori_mcp.computer_use import cli
 
     runner = _prewarmed()
     monkeypatch.setattr(cli, "prewarm_runner", AsyncMock(return_value=runner))
     monkeypatch.setattr(cli, "_read_standby_request", read)
-    monkeypatch.setattr(cli, "_run_custom", AsyncMock(side_effect=AssertionError("must not run")))
+    monkeypatch.setattr(
+        cli, "_run_custom", AsyncMock(side_effect=AssertionError("must not run"))
+    )
     discard = AsyncMock()
     monkeypatch.setattr(cli, "discard_prewarmed_runner", discard)
 
@@ -4458,7 +5506,9 @@ async def test_standby_that_never_runs_releases_its_runner(monkeypatch, capsys, 
 async def test_standby_reports_a_runner_that_cannot_be_prewarmed(monkeypatch, capsys):
     from yutori_mcp.computer_use import cli
 
-    monkeypatch.setattr(cli, "prewarm_runner", AsyncMock(side_effect=RuntimeError("not ready")))
+    monkeypatch.setattr(
+        cli, "prewarm_runner", AsyncMock(side_effect=RuntimeError("not ready"))
+    )
     assert await cli._standby() == 1
     assert _json_lines(capsys.readouterr().out) == [
         {"type": "error", "code": "STANDBY_FAILED", "message": "not ready"}
@@ -4470,7 +5520,9 @@ async def test_standby_reports_a_runner_that_cannot_be_prewarmed(monkeypatch, ca
 
 async def test_catalog_prefetch_returns_the_catalog_and_closes_its_connection():
     transport = SimpleNamespace(
-        call_tool=AsyncMock(return_value={"structuredContent": {"apps": [{"name": "Notes"}]}}),
+        call_tool=AsyncMock(
+            return_value={"structuredContent": {"apps": [{"name": "Notes"}]}}
+        ),
         close=AsyncMock(),
     )
     prefetch = runner_module.CatalogPrefetch(lambda: transport)
@@ -4481,7 +5533,9 @@ async def test_catalog_prefetch_returns_the_catalog_and_closes_its_connection():
 
 
 async def test_a_failed_catalog_prefetch_falls_back_to_the_session(capsys):
-    transport = SimpleNamespace(call_tool=AsyncMock(side_effect=OSError("no driver")), close=AsyncMock())
+    transport = SimpleNamespace(
+        call_tool=AsyncMock(side_effect=OSError("no driver")), close=AsyncMock()
+    )
     prefetch = runner_module.CatalogPrefetch(lambda: transport)
     assert await prefetch.result() is None
     await prefetch.aclose()
@@ -4489,7 +5543,9 @@ async def test_a_failed_catalog_prefetch_falls_back_to_the_session(capsys):
     assert "prefetch failed" in capsys.readouterr().err
 
 
-async def test_background_run_launches_a_preselected_app_before_awaiting_the_catalog(monkeypatch):
+async def test_background_run_launches_a_preselected_app_before_awaiting_the_catalog(
+    monkeypatch,
+):
     _FakeComputer.instances.clear()
     _FakeAgent.instances.clear()
     _patch_runner_sdk(monkeypatch)
@@ -4509,7 +5565,10 @@ async def test_background_run_launches_a_preselected_app_before_awaiting_the_cat
     monkeypatch.setattr(runner_module, "prepare_app", prepare)
     request = parse_request(_background_request(app="Notes"))
 
-    assert await runner_module.run_request(request, Emitter(_CollectStream()), "yt-secret") == "completed"
+    assert (
+        await runner_module.run_request(request, Emitter(_CollectStream()), "yt-secret")
+        == "completed"
+    )
     assert order == ["launch Notes", "catalog"]
     assert _FakeComputer.instances[-1].inventory_catalog == _FakeCatalogPrefetch.catalog
 
@@ -4517,7 +5576,9 @@ async def test_background_run_launches_a_preselected_app_before_awaiting_the_cat
 class _DoneCatalog:
     def __init__(self, catalog, *, age_seconds: float = 0.0):
         self._catalog = catalog
-        self.fetched_at = time.monotonic() - age_seconds if catalog is not None else None
+        self.fetched_at = (
+            time.monotonic() - age_seconds if catalog is not None else None
+        )
 
     async def result(self):
         return self._catalog
@@ -4528,23 +5589,44 @@ class _DoneCatalog:
 
 @pytest.mark.parametrize(
     ("mode", "age", "attached"),
-    [("background", 5.0, True), ("background", 10_000.0, False), ("foreground", 5.0, False)],
+    [
+        ("background", 5.0, True),
+        ("background", 10_000.0, False),
+        ("foreground", 5.0, False),
+    ],
 )
-async def test_run_task_hands_a_fresh_standby_catalog_to_background_runs(tmp_path, mode, age, attached):
-    catalog = {"apps": [{"name": "Notes", "pid": 5, "running": True, "windows": ["private title"]}]}
-    runner = supervisor.PrewarmedRunner(_Process(_stream(), _stream()), _ready_event(), _DoneCatalog(catalog, age_seconds=age))
+async def test_run_task_hands_a_fresh_standby_catalog_to_background_runs(
+    tmp_path, mode, age, attached
+):
+    catalog = {
+        "apps": [
+            {"name": "Notes", "pid": 5, "running": True, "windows": ["private title"]}
+        ]
+    }
+    runner = supervisor.PrewarmedRunner(
+        _Process(_stream(), _stream()),
+        _ready_event(),
+        _DoneCatalog(catalog, age_seconds=age),
+    )
     with _patched_run_task_supervise(tmp_path) as supervise:
         await run_task(**_run_task_kwargs(tmp_path, mode=mode), prewarmed=runner)
     request = supervise.await_args.kwargs["request"]
     if attached:
-        assert request["app_catalog"] == {"apps": [{"name": "Notes", "pid": 5, "running": True}]}
+        assert request["app_catalog"] == {
+            "apps": [{"name": "Notes", "pid": 5, "running": True}]
+        }
     else:
         assert "app_catalog" not in request
 
 
 def test_runner_request_accepts_an_app_catalog_and_trims_it():
-    payload = {**_background_request(), "app_catalog": {"apps": [{"name": "Notes", "pid": 5, "windows": ["t"]}, 3]}}
-    assert parse_request(payload)["app_catalog"] == {"apps": [{"name": "Notes", "pid": 5}]}
+    payload = {
+        **_background_request(),
+        "app_catalog": {"apps": [{"name": "Notes", "pid": 5, "windows": ["t"]}, 3]},
+    }
+    assert parse_request(payload)["app_catalog"] == {
+        "apps": [{"name": "Notes", "pid": 5}]
+    }
     with pytest.raises(RequestError):
         parse_request({**_background_request(), "app_catalog": {"apps": "nope"}})
 
@@ -4553,10 +5635,17 @@ async def test_a_supplied_catalog_replaces_the_runner_prefetch(monkeypatch):
     _FakeComputer.instances.clear()
     _patch_runner_sdk(monkeypatch)
     monkeypatch.setattr(runner_module, "_supports_background_mode", lambda: True)
-    monkeypatch.setattr(runner_module, "CatalogPrefetch", Mock(side_effect=AssertionError("no prefetch")))
+    monkeypatch.setattr(
+        runner_module,
+        "CatalogPrefetch",
+        Mock(side_effect=AssertionError("no prefetch")),
+    )
     supplied = {"apps": [{"name": "Notes", "pid": 9}]}
     request = parse_request({**_background_request(app=None), "app_catalog": supplied})
-    assert await runner_module.run_request(request, Emitter(_CollectStream()), "yt-secret") == "completed"
+    assert (
+        await runner_module.run_request(request, Emitter(_CollectStream()), "yt-secret")
+        == "completed"
+    )
     assert _FakeComputer.instances[-1].inventory_catalog == supplied
 
 
@@ -4572,6 +5661,13 @@ async def test_a_supplied_catalog_is_available_to_a_preselected_app(monkeypatch)
 
     monkeypatch.setattr(runner_module, "prepare_app", prepare)
     supplied = {"apps": [{"name": "Notes", "pid": 9}]}
-    request = parse_request({**_background_request(app="Notes"), "app_catalog": supplied})
-    assert await runner_module.run_request(request, Emitter(_CollectStream()), "yt-secret") == "completed"
-    assert seen == [supplied], "select_app must see the standby's catalog to attach instead of launching"
+    request = parse_request(
+        {**_background_request(app="Notes"), "app_catalog": supplied}
+    )
+    assert (
+        await runner_module.run_request(request, Emitter(_CollectStream()), "yt-secret")
+        == "completed"
+    )
+    assert seen == [supplied], (
+        "select_app must see the standby's catalog to attach instead of launching"
+    )
