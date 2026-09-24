@@ -18,7 +18,6 @@ from .constants import (
     DELIVERY_MODES,
     DELIVERY_MODE_BACKGROUND,
     DELIVERY_MODE_FOREGROUND,
-    DRIVER_VERSION,
     ENV_RECORDABLE_OVERLAY,
     MAX_CREDENTIAL_CHARACTERS,
     MCP_VERSION,
@@ -37,7 +36,7 @@ from .preflight import (
 from .result import compact_json_line, failure, is_clean_credential_line, redact
 from .result import remaining_seconds as _remaining_seconds
 from .result import terminal_result
-from .sdk_pin import sdk_pin
+from .sdk_pin import pin_ready_fields, sdk_pin
 from ..schemas import background_focus_overlay_constraint_error
 
 logger = logging.getLogger(__name__)
@@ -245,14 +244,10 @@ async def _drain_stderr(stream: asyncio.StreamReader, secret: str) -> list[str]:
 
 
 def _ready_error(event: dict[str, Any]) -> str | None:
-    pin = sdk_pin()
     expected = {
         "protocol_version": PROTOCOL_VERSION,
         "package_version": MCP_VERSION,
-        "sdk_version": pin.version,
-        "sdk_artifact_sha256": pin.artifact_sha256,
-        "sdk_provenance_sha256": pin.provenance_sha256,
-        "driver_version_pinned": DRIVER_VERSION,
+        **pin_ready_fields(sdk_pin()),
     }
     mismatches = [
         f"{name}={event.get(name)!r} (expected {value!r})"
