@@ -542,6 +542,11 @@ yutori-mcp          # run the server (or: python -m yutori_mcp.server)
 SDK contributors testing an editable checkout can override that with
 `YUTORI_MCP_ALLOW_EDITABLE_SDK=1`.
 
+Applications that assemble their own runtime from git commits (e.g. Yutori Local) instead write a
+host pin via `python -m yutori_mcp.computer_use.host_pin`; when a `yutori-runtime-pin.json` is
+present, `check_runtime` verifies against that pin's digests instead of the published-wheel
+constants. uvx/pip installs are unaffected.
+
 ### Debugging with MCP Inspector
 
 ```bash
