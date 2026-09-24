@@ -382,21 +382,22 @@ async def prewarm_runner(
             await catalog.aclose()
         raise
     assert process.stdout
+    # Every way this can fail needs the same discard, so map errors to their final shape in an
+    # inner try and let one outer `except` run that cleanup exactly once.
     try:
-        line = await asyncio.wait_for(process.stdout.readline(), timeout)
-        event = json.loads(line.decode()) if line else None
-        if not isinstance(event, dict) or event.get("type") != "ready":
-            raise RuntimeError("Computer-use runner did not report ready.")
-        if mismatch := _ready_error(event):
-            raise RuntimeError(f"Computer-use runner provenance mismatch: {mismatch}")
-    except asyncio.TimeoutError:
-        await discard_prewarmed_runner(PrewarmedRunner(process, {}, catalog))
-        raise RuntimeError(f"Computer-use runner was not ready within {timeout:g}s.") from None
-    except (RuntimeError, ValueError, UnicodeDecodeError) as error:
-        await discard_prewarmed_runner(PrewarmedRunner(process, {}, catalog))
-        if isinstance(error, RuntimeError):
-            raise
-        raise RuntimeError("Computer-use runner emitted invalid JSON before ready.") from error
+        try:
+            line = await asyncio.wait_for(process.stdout.readline(), timeout)
+            event = json.loads(line.decode()) if line else None
+            if not isinstance(event, dict) or event.get("type") != "ready":
+                raise RuntimeError("Computer-use runner did not report ready.")
+            if mismatch := _ready_error(event):
+                raise RuntimeError(f"Computer-use runner provenance mismatch: {mismatch}")
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"Computer-use runner was not ready within {timeout:g}s.") from None
+        except (RuntimeError, ValueError, UnicodeDecodeError) as error:
+            if isinstance(error, RuntimeError):
+                raise
+            raise RuntimeError("Computer-use runner emitted invalid JSON before ready.") from error
     except BaseException:
         await discard_prewarmed_runner(PrewarmedRunner(process, {}, catalog))
         raise
