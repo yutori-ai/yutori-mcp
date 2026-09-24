@@ -192,6 +192,11 @@ class AppSelectingComputer(TargetGuardedMacOSComputer):
 
 
 class AppSelectingAgent(N2ComputerAgent):
+    async def _guidance_observation(self) -> list[dict[str, Any]]:
+        if self.computer.window_target_info is None:
+            return [{"type": "input_text", "text": "No window is selected. Select an app before acting on the screen."}]
+        return await super()._guidance_observation()
+
     async def _resolve_native_size(self) -> tuple[int, int]:
         if not self.computer.selection_frame_delivered:
             # The SDK parses every response with dimensions, even a text-only tool call.
