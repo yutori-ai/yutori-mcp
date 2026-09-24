@@ -45,6 +45,11 @@ def _area(window: dict[str, Any]) -> float:
     return float(window["bounds"]["width"]) * float(window["bounds"]["height"])
 
 
+def _is_titled(window: dict[str, Any]) -> bool:
+    """Whether a window's title is a real, non-empty string worth trusting."""
+    return isinstance(window.get("title"), str) and bool(window["title"].strip())
+
+
 def _best_content_window(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     """Pick the frontmost content window without mistaking a tiny UI host for the app.
 
@@ -55,11 +60,9 @@ def _best_content_window(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     retain the normal z-order behavior.
     """
     frontmost = max(candidates, key=lambda window: (window.get("z_index") or 0, _area(window)))
-    if isinstance(frontmost.get("title"), str) and frontmost["title"].strip():
+    if _is_titled(frontmost):
         return frontmost
-    titled = [
-        window for window in candidates if isinstance(window.get("title"), str) and window["title"].strip()
-    ]
+    titled = [window for window in candidates if _is_titled(window)]
     if not titled:
         return frontmost
     largest_titled = max(titled, key=_area)
@@ -117,7 +120,7 @@ def is_ready_window(window: dict[str, Any]) -> bool:
     A cold launch can briefly expose a stale offscreen UI-host record before the application's
     real window reaches WindowServer, so an untitled window must also be substantial.
     """
-    titled = isinstance(window.get("title"), str) and bool(window["title"].strip())
+    titled = _is_titled(window)
     substantial = _area(window) >= _MIN_IMMEDIATE_UNTITLED_WINDOW_AREA
     return window.get("is_on_screen") is not False and (titled or substantial)
 
