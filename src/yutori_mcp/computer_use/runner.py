@@ -1149,7 +1149,7 @@ def _delivery_record(outcome: Any) -> dict[str, Any]:
     record = {field: getattr(outcome, field, None) for field in _DELIVERY_FIELDS}
     record["escalated"] = bool(record["escalated"])
     record["element_addressed"] = bool(record["element_addressed"])
-    record["landed"] = record["effect"] not in {"suspected_noop", "refused"}
+    record["landed"] = record["effect"] not in {"suspected_noop", "refused", "skipped"}
     return record
 
 
