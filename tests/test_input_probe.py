@@ -249,6 +249,42 @@ def test_modified_click_requires_the_modifier_and_active_delivery():
     assert probe.has_modified_click(events, "cmd") is False
 
 
+async def test_background_input_routes_returns_none_without_a_bound_target():
+    computer = type("FakeComputer", (), {"_target_window": None})()
+
+    assert await probe.background_input_routes(computer) is None
+
+
+async def test_background_input_routes_tolerates_either_key_casing():
+    target = type("FakeTarget", (), {"pid": 9, "window_id": 3})()
+    for key in ("structuredContent", "structured_content"):
+        computer = type(
+            "FakeComputer",
+            (),
+            {
+                "_target_window": target,
+                "session": "s",
+                "_call_tool": AsyncMock(return_value={key: {"background_input": {"pixel": "refused"}}}),
+            },
+        )()
+
+        assert await probe.background_input_routes(computer) == {"pixel": "refused"}
+
+
+async def test_background_input_routes_swallows_call_failures():
+    computer = type(
+        "FakeComputer",
+        (),
+        {
+            "_target_window": type("FakeTarget", (), {"pid": 9, "window_id": 3})(),
+            "session": "s",
+            "_call_tool": AsyncMock(side_effect=RuntimeError("boom")),
+        },
+    )()
+
+    assert await probe.background_input_routes(computer) is None
+
+
 async def test_dispatch_n2_paces_a_multi_key_sequence():
     computer = type(
         "FakeComputer",
