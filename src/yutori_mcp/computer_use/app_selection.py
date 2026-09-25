@@ -90,8 +90,31 @@ APP_MENU_TOOL = {
         },
     },
 }
-APP_TOOLS = [SELECT_APP_TOOL, APP_STATE_TOOL, APP_MENU_TOOL]
+PASTE_TEXT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "paste_text",
+        "description": (
+            "Paste text into the selected window at its text cursor, then restore the user's clipboard. "
+            "Click the field first; select existing text first to replace it. Apps accept pasted text as "
+            "typed input, so prefer this over typing for URLs or searches you will submit, multi-line "
+            "text, and long text. It never presses Enter. Requires a window. Call alone and check the "
+            "screenshot."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "minLength": 1, "maxLength": 20000},
+            },
+            "required": ["text"],
+            "additionalProperties": False,
+        },
+    },
+}
+APP_TOOLS = [SELECT_APP_TOOL, APP_STATE_TOOL, APP_MENU_TOOL, PASTE_TEXT_TOOL]
 APP_TOOL_NAMES = {tool["function"]["name"] for tool in APP_TOOLS}
+# Tools that act on the selected window, not just the selected app.
+WINDOW_TOOL_NAMES = {"invoke_app_menu", "paste_text"}
 
 
 class AppSelectingComputer(TargetGuardedMacOSComputer):
@@ -188,6 +211,13 @@ class AppSelectingComputer(TargetGuardedMacOSComputer):
                 f"Menu item pressed via {outcome.route or 'accessibility'} (effect: {outcome.effect or 'unknown'}). "
                 f"Fresh app state follows; verify the effect before continuing.\n{state.text}"
             )
+        if name == "paste_text":
+            await self.paste_text(**arguments)
+            outcome = self.action_outcomes[-1]
+            return (
+                f"Pasted {len(arguments['text'])} characters via {outcome.route or 'keyboard'} "
+                f"(effect: {outcome.effect or 'unknown'}). Check the screenshot before continuing."
+            )
         raise ValueError(f"Unknown app tool: {name}")
 
 
@@ -209,7 +239,7 @@ class AppSelectingAgent(N2ComputerAgent):
         has_app = getattr(self.computer, "target_pid", None) is not None or has_target
         for item in calls:
             if item is selection and (item.get("name") == "select_app" or has_app) and (
-                item.get("name") != "invoke_app_menu" or has_target
+                item.get("name") not in WINDOW_TOOL_NAMES or has_target
             ):
                 continue
             actions = item.get("_computer_actions") or []
@@ -222,7 +252,8 @@ class AppSelectingAgent(N2ComputerAgent):
                         "type": "function_call_output",
                         "call_id": item["call_id"],
                         "output": "[ERROR] Select an app in a separate turn. App-state reads work without a window, "
-                        "but menu actions require a window and coordinate actions require a fresh screenshot. "
+                        "but menu and paste actions require a window and coordinate actions require a fresh "
+                        "screenshot. "
                         "Call app tools alone. If the capture failed, request a screenshot-only batch.",
                         "_n2_turn_id": item.get("_n2_turn_id"),
                     }

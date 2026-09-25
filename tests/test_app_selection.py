@@ -183,7 +183,7 @@ async def test_selecting_an_app_without_windows_is_valid(monkeypatch):
 
 @pytest.mark.parametrize(
     "name,allowed",
-    [("get_app_state", True), ("invoke_app_menu", False), ("computer_batch", False)],
+    [("get_app_state", True), ("invoke_app_menu", False), ("paste_text", False), ("computer_batch", False)],
 )
 async def test_windowless_app_allows_state_reads_but_not_menus_or_coordinates(monkeypatch, name, allowed):
     output = [call(name, "a")]
@@ -191,6 +191,42 @@ async def test_windowless_app_allows_state_reads_but_not_menus_or_coordinates(mo
     agent = bootstrap_agent(SimpleNamespace(target_pid=42, window_target_info=None, selection_frame_delivered=False))
     result = await agent._predict_step([])
     assert (len(result["output"]) == 1) is allowed
+
+
+async def test_paste_is_allowed_alone_once_a_window_is_selected(monkeypatch):
+    output = [call("paste_text", "a")]
+    monkeypatch.setattr(N2ComputerAgent, "_predict_step", AsyncMock(return_value={"output": output}))
+    agent = bootstrap_agent(
+        SimpleNamespace(target_pid=42, window_target_info={"window_id": 7}, selection_frame_delivered=True)
+    )
+    result = await agent._predict_step([])
+    assert result["output"] == output
+
+
+async def test_paste_is_refused_alongside_other_calls(monkeypatch):
+    output = [call("paste_text", "a"), call("computer_batch", "b")]
+    monkeypatch.setattr(N2ComputerAgent, "_predict_step", AsyncMock(return_value={"output": output}))
+    agent = bootstrap_agent(
+        SimpleNamespace(target_pid=42, window_target_info={"window_id": 7}, selection_frame_delivered=True)
+    )
+    result = await agent._predict_step([])
+    answered = [item["call_id"] for item in result["output"] if item["type"] == "function_call_output"]
+    assert answered == ["b"]
+
+
+async def test_paste_text_dispatches_to_the_computer_and_reports_delivery():
+    instance = computer()
+    instance.paste_text = AsyncMock()
+    instance._action_outcomes = [SimpleNamespace(route="synthetic_events", effect="unverifiable")]
+    result = await instance.run_custom_tool("paste_text", {"text": "https://yutori.com/"})
+    instance.paste_text.assert_awaited_once_with(text="https://yutori.com/")
+    assert result.startswith("Pasted 19 characters via synthetic_events (effect: unverifiable).")
+
+
+def test_paste_tool_is_offered_with_the_other_app_tools():
+    assert "paste_text" in app_selection.APP_TOOL_NAMES
+    schema = app_selection.PASTE_TEXT_TOOL["function"]["parameters"]
+    assert schema["required"] == ["text"] and schema["additionalProperties"] is False
 
 
 async def test_windowless_app_can_wait_for_a_window(monkeypatch):

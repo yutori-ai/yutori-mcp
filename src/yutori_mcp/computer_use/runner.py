@@ -105,6 +105,8 @@ def _background_opening(app: str) -> str:
         "Each screenshot shows only the selected window, and coordinates are relative to it. "
         "Screenshots never include menus: call get_app_state to read the menu items, including "
         "submenu items, then invoke_app_menu with the exact full path to one item. "
+        "To enter a URL, a search, multi-line text, or long text, click the field and call paste_text "
+        "instead of typing it; then press Enter yourself if the text should be submitted. "
         "A running app with no windows is valid, but menus and coordinates are unavailable until it has a "
         "window: wait for one, select another app, or ask the user to open one. "
         "Call each app tool alone and inspect its result before acting. "
