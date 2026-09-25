@@ -24,6 +24,7 @@ from yutori.navigator.n2_actions import translate_n2_action  # noqa: E402
 
 from yutori_mcp.computer_use.app import prepare_app  # noqa: E402
 from yutori_mcp.computer_use.preflight import child_search_path  # noqa: E402
+from yutori_mcp.computer_use.result import structured_content  # noqa: E402
 from yutori_mcp.computer_use.targeting import (  # noqa: E402
     TargetGuardedMacOSComputer as MacOSComputer,
     require_frontmost_target,
@@ -372,10 +373,7 @@ async def background_input_routes(computer: MacOSComputer) -> dict[str, Any] | N
         )
     except Exception:  # diagnostics must never fail the matrix
         return None
-    structured = result.get("structuredContent") or result.get("structured_content")
-    if not isinstance(structured, dict):
-        return None
-    background_input = structured.get("background_input")
+    background_input = structured_content(result).get("background_input")
     return background_input if isinstance(background_input, dict) else None
 
 
