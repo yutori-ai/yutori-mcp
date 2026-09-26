@@ -598,6 +598,17 @@ async def _handle_edit_scout(
     return {"old": old_scout, "new": new_scout}, {}
 
 
+async def _notify(ctx: Context, progress: int, message: str) -> None:
+    """Emit ``message`` as an MCP progress update and a log line, concurrently.
+
+    Single source of truth for the ``asyncio.gather(ctx.report_progress(...), ctx.info(...))``
+    pair every branch of ``_progress_reporter``'s ``on_event`` below sends, so the two
+    notifications can't drift out of sync (e.g. one branch forgetting the log line) as
+    branches are added.
+    """
+    await asyncio.gather(ctx.report_progress(progress=progress, message=message), ctx.info(message))
+
+
 def _progress_reporter(
     ctx: Context,
     max_steps: int,
@@ -622,11 +633,11 @@ def _progress_reporter(
         if event.get("type") == "ready":
             surface = describe_delivery_surface(mode, app)
             message = f"Computer-use runner ready; driving {surface} (up to {max_steps} model turns)."
-            await asyncio.gather(ctx.report_progress(progress=0, message=message), ctx.info(message))
+            await _notify(ctx, 0, message)
             return
         if event.get("type") == "startup":
             message = "Computer-use startup: " + format_startup_line(event, app=app)
-            await asyncio.gather(ctx.report_progress(progress=0, message=message), ctx.info(message))
+            await _notify(ctx, 0, message)
             return
         index = event.get("index", 0)
         message = format_action_line(event, index_default=0)
@@ -638,7 +649,7 @@ def _progress_reporter(
             message += " " + "; ".join(str(detail) for detail in event["details"])
         if event.get("command"):
             message += f" $ {event['command']}"
-        await asyncio.gather(ctx.report_progress(progress=index, message=message), ctx.info(message))
+        await _notify(ctx, index, message)
 
     return on_event
 
