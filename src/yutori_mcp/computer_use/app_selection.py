@@ -9,7 +9,7 @@ from yutori.navigator import N2ComputerAgent
 from yutori.navigator.macos import MacOSWindowTarget
 from yutori.navigator.macos.transport import CuaDriverError
 
-from .app import find_running_app, prepare_app, ready_window
+from .app import filtered_apps, find_running_app, prepare_app, ready_window
 from .result import is_positive_int, structured_content
 from .targeting import TargetGuardedMacOSComputer
 
@@ -92,6 +92,7 @@ APP_MENU_TOOL = {
 }
 APP_TOOLS = [SELECT_APP_TOOL, APP_STATE_TOOL, APP_MENU_TOOL]
 APP_TOOL_NAMES = {tool["function"]["name"] for tool in APP_TOOLS}
+_INVENTORY_APP_KEYS = ("name", "bundle_id", "running")
 
 
 class AppSelectingComputer(TargetGuardedMacOSComputer):
@@ -115,11 +116,7 @@ class AppSelectingComputer(TargetGuardedMacOSComputer):
         if catalog is None:
             catalog = structured_content(await self._call_tool("list_apps", {}, read_only=True))
         self.app_catalog = catalog
-        apps = [
-            {key: app[key] for key in ("name", "bundle_id", "running") if key in app}
-            for app in catalog.get("apps") or []
-            if isinstance(app, dict) and isinstance(app.get("name"), str)
-        ]
+        apps = filtered_apps(catalog, _INVENTORY_APP_KEYS)
         return json.dumps(apps, ensure_ascii=False)
 
     async def select_app(self, app: str, *, window_id: int | None = None, url: str | None = None) -> dict[str, Any]:

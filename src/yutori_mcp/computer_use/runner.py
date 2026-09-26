@@ -34,7 +34,7 @@ from yutori.navigator.macos import (
 from yutori.navigator.macos.presentation import _transcript_entry as transcript_entry
 from yutori.navigator.macos.transport import CuaDriverTransport
 
-from .app import prepare_app
+from .app import filtered_apps, prepare_app
 from .app_selection import APP_TOOLS, AppSelectingAgent, AppSelectingComputer
 from .constants import (
     DELIVERY_MODES,
@@ -240,13 +240,7 @@ _CATALOG_APP_KEYS = ("name", "bundle_id", "running", "pid")
 
 def catalog_for_request(catalog: dict[str, Any]) -> dict[str, Any]:
     """The part of a driver app catalog a run uses: identities, running state, and pids."""
-    return {
-        "apps": [
-            {key: app[key] for key in _CATALOG_APP_KEYS if key in app}
-            for app in catalog.get("apps") or []
-            if isinstance(app, dict) and isinstance(app.get("name"), str)
-        ]
-    }
+    return {"apps": filtered_apps(catalog, _CATALOG_APP_KEYS)}
 
 
 def _require_app_catalog(payload: dict[str, Any], field: str) -> dict[str, Any]:
