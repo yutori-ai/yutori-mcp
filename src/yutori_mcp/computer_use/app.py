@@ -131,6 +131,21 @@ async def ready_window(computer: MacOSComputer, pid: int) -> dict[str, Any] | No
     return window if window is not None and is_ready_window(window) else None
 
 
+def filtered_apps(catalog: dict[str, Any], keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Catalog entries with a real name, projected down to ``keys``.
+
+    Shared by ``runner.py``'s ``catalog_for_request`` (trims a supplied catalog for the
+    protocol payload) and ``app_selection.py``'s ``app_inventory`` (the model-facing app
+    list), which otherwise independently re-derive the same "keep a named entry, project
+    selected keys" filter over the driver's ``list_apps`` shape -- each with its own key set.
+    """
+    return [
+        {key: app[key] for key in keys if key in app}
+        for app in catalog.get("apps") or []
+        if isinstance(app, dict) and isinstance(app.get("name"), str)
+    ]
+
+
 def _is_missing_app(error: CuaDriverToolError) -> bool:
     return "APP_NOT_INSTALLED" in str(error).upper()
 
