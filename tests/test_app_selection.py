@@ -52,6 +52,16 @@ def bootstrap_agent(computer: Any = None) -> AppSelectingAgent:
     return agent
 
 
+def _patch_predict_step(monkeypatch: pytest.MonkeyPatch, output: list[Any]) -> None:
+    """Stub the SDK's `_predict_step` to hand back a fixed batch of model output items.
+
+    Every filtering test below drives `AppSelectingAgent._predict_step` against a scripted
+    call list, differing only in `output`; this names the shared one-shot `AsyncMock` shape
+    instead of each test rebuilding it.
+    """
+    monkeypatch.setattr(N2ComputerAgent, "_predict_step", AsyncMock(return_value={"output": output}))
+
+
 @pytest.mark.parametrize("selected", [False, True])
 @pytest.mark.parametrize(
     "names",
@@ -66,7 +76,7 @@ async def test_selection_is_a_model_turn_boundary(
     monkeypatch: pytest.MonkeyPatch, selected: bool, names: list[str]
 ) -> None:
     output = [call(name, str(i)) for i, name in enumerate(names)]
-    monkeypatch.setattr(N2ComputerAgent, "_predict_step", AsyncMock(return_value={"output": output}))
+    _patch_predict_step(monkeypatch, output)
     agent = bootstrap_agent(
         SimpleNamespace(
             window_target_info={"pid": 1} if selected else None,
@@ -89,7 +99,7 @@ async def test_no_duplicate_results_for_malformed_calls(
         call("select_app", "a"),
         {"type": "function_call_output", "call_id": "a", "output": "invalid"},
     ]
-    monkeypatch.setattr(N2ComputerAgent, "_predict_step", AsyncMock(return_value={"output": output}))
+    _patch_predict_step(monkeypatch, output)
     agent = bootstrap_agent()
     assert len((await agent._predict_step([]))["output"]) == 2
 
@@ -187,7 +197,7 @@ async def test_selecting_an_app_without_windows_is_valid(monkeypatch):
 )
 async def test_windowless_app_allows_state_reads_but_not_menus_or_coordinates(monkeypatch, name, allowed):
     output = [call(name, "a")]
-    monkeypatch.setattr(N2ComputerAgent, "_predict_step", AsyncMock(return_value={"output": output}))
+    _patch_predict_step(monkeypatch, output)
     agent = bootstrap_agent(SimpleNamespace(target_pid=42, window_target_info=None, selection_frame_delivered=False))
     result = await agent._predict_step([])
     assert (len(result["output"]) == 1) is allowed
@@ -196,7 +206,7 @@ async def test_windowless_app_allows_state_reads_but_not_menus_or_coordinates(mo
 async def test_windowless_app_can_wait_for_a_window(monkeypatch):
     item = call("computer_batch", "a")
     item["_computer_actions"] = [{"type": "wait", "ms": 1000}, {"type": "screenshot"}]
-    monkeypatch.setattr(N2ComputerAgent, "_predict_step", AsyncMock(return_value={"output": [item]}))
+    _patch_predict_step(monkeypatch, [item])
     agent = bootstrap_agent(SimpleNamespace(target_pid=42, window_target_info=None, selection_frame_delivered=False))
     assert (await agent._predict_step([]))["output"] == [item]
 
