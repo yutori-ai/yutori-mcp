@@ -395,6 +395,7 @@ async def _run_custom(args: argparse.Namespace, *, prewarmed: PrewarmedRunner | 
         presentation=not getattr(args, "no_presentation", False),
         background_focus_overlay=background_focus_overlay,
         exclude_capture_window_ids=tuple(getattr(args, "exclude_capture_windows", None) or ()),
+        steering_socket=getattr(args, "steering_socket", None),
         api_key_override=api_key_override,
         vm_run_id=str(vm_run_id) if vm_run_id is not None else None,
         prewarmed=prewarmed,
@@ -570,6 +571,7 @@ def register_parser(
 
 def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     """Every `run` option except --json; shared with the standby request parser."""
+    parser.add_argument("--steering-socket", help=argparse.SUPPRESS)
     parser.add_argument(
         "--hide-stop-item",
         dest="hide_stop_item",
