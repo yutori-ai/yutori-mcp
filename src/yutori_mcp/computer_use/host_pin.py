@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.metadata
-import re
 import sys
 
 from .preflight import (
@@ -24,11 +23,11 @@ from .preflight import (
     _stable_distribution_digest,
     check_runtime,
 )
-from .sdk_pin import SdkPin, host_pin_path, host_pin_payload
+from .sdk_pin import SdkPin, host_pin_path, host_pin_payload, is_sha256_hex
 
 
 def build_host_pin(source: str, artifact_sha256: str) -> SdkPin:
-    if not re.fullmatch(r"[0-9a-f]{64}", artifact_sha256):
+    if not is_sha256_hex(artifact_sha256):
         raise ValueError(f"--sdk-artifact-sha256 must be a lowercase sha256 digest, got {artifact_sha256!r}")
     distribution = importlib.metadata.distribution("yutori")
     if _editable_distribution(distribution):
