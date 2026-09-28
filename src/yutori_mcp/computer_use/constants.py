@@ -55,5 +55,5 @@ SDK_PROVENANCE_SHA256 = "e7182ddf09d4cdc9a999acf605a13672bbc70aba7dec533dfe252c9
 
 # The cua-driver release that implements this tool contract, and the checksum
 # of its installer script. Both are hard gates.
-DRIVER_VERSION = "0.28.0"
+DRIVER_VERSION = "0.30.4"
 DRIVER_INSTALLER_SHA256 = "317ba3a49fdba10f2a7f1b9f392c1bc1b7657f3aae85e1e2e43684cf17a1bf3b"
