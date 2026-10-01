@@ -62,7 +62,7 @@ class TargetGuardedMacOSComputer(MacOSComputer):
 
     async def read_file(
         self, file_path: str, offset: int = 1, limit: int = 2_000
-    ) -> "str | dict[str, str]":
+    ) -> str | dict[str, str]:
         self._require_local_shell()
         if offset < 1:
             raise ValueError("read.offset must be a positive 1-based line number")
