@@ -15,7 +15,7 @@ from .sdk_pin import SdkPinError, sdk_pin
 REDACTED = "[REDACTED]"
 
 
-def format_runtime_version(paint: "Terminal") -> str:
+def format_runtime_version(paint: Terminal) -> str:
     """The exact MCP and SDK packages executing a computer-use run."""
     try:
         sdk_version = sdk_pin().version
@@ -308,7 +308,7 @@ class Terminal:
         self.glyphs = glyphs
 
     @classmethod
-    def detect(cls, stream: TextIO | None = None) -> "Terminal":
+    def detect(cls, stream: TextIO | None = None) -> Terminal:
         """The capabilities of ``stream`` (stdout by default)."""
         return cls(color=supports_color(stream), glyphs=supports_glyphs(stream))
 

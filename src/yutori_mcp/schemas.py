@@ -289,7 +289,7 @@ class EditScoutInput(ToolInput):
     is_public: bool | None = _is_public_field()
 
     @model_validator(mode="after")
-    def validate_has_changes(self) -> "EditScoutInput":
+    def validate_has_changes(self) -> EditScoutInput:
         """Ensure at least one field besides scout_id is provided."""
         if not self.model_dump(exclude={"scout_id"}, exclude_none=True):
             raise ValueError("edit_scout requires at least one field to update")
