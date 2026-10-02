@@ -1058,7 +1058,7 @@ def _computer_kwargs(
             scope="window",
             allow_foreground_fallback=request["allow_foreground_fallback"],
         )
-        if request.get("background_focus_overlay", False):
+        if request.get("background_focus_overlay"):
             kwargs.update(
                 background_focus_overlay=True,
                 show_status_item=False,
@@ -1300,7 +1300,7 @@ async def run_request(
         )
         return "failed"
     if (
-        request.get("background_focus_overlay", False)
+        request.get("background_focus_overlay")
         and not _supports_background_focus_overlay()
     ):
         emitter.emit(
