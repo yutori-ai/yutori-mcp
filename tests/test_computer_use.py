@@ -1053,7 +1053,6 @@ async def test_server_holds_desktop_lock_across_preflight_and_runner(
 
     def first_blocker() -> None:
         assert lock._file is not None
-        return None
 
     async def run_with_lock(**kwargs: Any) -> dict[str, str]:
         assert kwargs["lock"] is lock
