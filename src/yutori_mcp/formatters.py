@@ -109,7 +109,7 @@ def _format_interval(seconds: int | None) -> str:
     return f"every {days} days"
 
 
-def _timestamp_to_utc(timestamp: int | float) -> datetime:
+def _timestamp_to_utc(timestamp: float) -> datetime:
     """Convert a Unix timestamp in seconds or milliseconds to a UTC datetime.
 
     Values >= 1e12 are treated as milliseconds (1e12 seconds is the year
@@ -121,7 +121,7 @@ def _timestamp_to_utc(timestamp: int | float) -> datetime:
 
 
 def _format_temporal(
-    value: str | int | float | None,
+    value: str | float | None,
     *,
     numeric_format: str,
     format_iso_string: Callable[[str], str],
@@ -140,7 +140,7 @@ def _format_temporal(
     return format_iso_string(value)
 
 
-def _format_date(value: str | int | float | None) -> str:
+def _format_date(value: str | float | None) -> str:
     """Format an ISO date string or Unix timestamp (s or ms) as YYYY-MM-DD."""
     return _format_temporal(
         value,
@@ -150,7 +150,7 @@ def _format_date(value: str | int | float | None) -> str:
     )
 
 
-def _format_datetime(timestamp: str | int | float | None) -> str:
+def _format_datetime(timestamp: str | float | None) -> str:
     """Format an ISO datetime string or Unix timestamp (s or ms) as readable UTC."""
     return _format_temporal(
         timestamp,
